@@ -1,0 +1,20 @@
+{
+  "name": "@commonplace/docs",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.js",
+    "./editor": "./src/editor.js"
+  },
+  "dependencies": {
+    "@tiptap/core": "^3.32.0",
+    "@tiptap/extension-collaboration": "^3.32.0",
+    "@tiptap/extension-collaboration-caret": "^3.32.0",
+    "@tiptap/pm": "^3.32.0",
+    "@tiptap/starter-kit": "^3.32.0",
+    "@tiptap/y-tiptap": "^3.0.7",
+    "y-protocols": "^1.0.7",
+    "yjs": "^13.6.33"
+  },
+  "license": "MIT"
+}

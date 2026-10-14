@@ -1,0 +1,103 @@
+{
+  "name": "@commonplace/desktop",
+  "productName": "Commonplace",
+  "version": "0.1.0",
+  "description": "CommonDrive and CommonDocs — peer-to-peer, no servers.",
+  "author": "Harviel Arcilla",
+  "license": "MIT",
+  "type": "module",
+  "main": "src/main.js",
+  "scripts": {
+    "build": "node build.mjs",
+    "dev": "node build.mjs && electron .",
+    "dist": "node build.mjs && electron-builder",
+    "dist:mac": "node build.mjs && electron-builder --mac",
+    "dist:win": "node build.mjs && electron-builder --win"
+  },
+  "dependencies": {
+    "@commonplace/core": "0.1.0",
+    "@commonplace/docs": "0.1.0",
+    "@commonplace/drive": "0.1.0",
+    "yjs": "^13.6.33",
+    "y-protocols": "^1.0.7"
+  },
+  "devDependencies": {
+    "electron": "44.7.2",
+    "electron-builder": "^26.15.3",
+    "esbuild": "^0.28.2"
+  },
+  "build": {
+    "appId": "org.commonplace.desktop",
+    "productName": "Commonplace",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "src/**",
+      "renderer/index.html",
+      "renderer/styles.css",
+      "renderer/dist/app.js",
+      "package.json"
+    ],
+    "asarUnpack": [
+      "**/*.node",
+      "**/prebuilds/**"
+    ],
+    "npmRebuild": false,
+    "protocols": [
+      {
+        "name": "Commonplace invite",
+        "schemes": [
+          "commonplace"
+        ]
+      }
+    ],
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
+      ],
+      "category": "public.app-category.productivity",
+      "identity": null
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "category": "Office",
+      "executableName": "commonplace"
+    }
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/HarvielArcilla/commonplace.git"
+  }
+}

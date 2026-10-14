@@ -1,0 +1,5 @@
+node_modules/
+apps/desktop/renderer/dist/
+apps/desktop/release/
+.DS_Store
+*.log

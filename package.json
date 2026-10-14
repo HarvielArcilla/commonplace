@@ -1,0 +1,25 @@
+{
+  "name": "commonplace",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Free, peer-to-peer collaborative documents. No servers.",
+  "license": "MIT",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w @commonplace/desktop",
+    "build": "npm run build -w @commonplace/desktop",
+    "dist": "npm run dist -w @commonplace/desktop",
+    "test": "node --test --test-concurrency=1 test/*.test.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/HarvielArcilla/commonplace.git"
+  }
+}
