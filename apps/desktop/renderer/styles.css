@@ -190,6 +190,7 @@ button.crumb:hover { color: var(--ink); text-decoration: underline; text-underli
 }
 .row-owner, .row-time { color: var(--ink-soft); font-size: 13px; padding-top: 17px; }
 .row-time { text-align: right; }
+.row-by { display: block; font: italic 12px var(--serif); color: var(--ink-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .row-menu { padding-top: 10px; }
 
 .ledger-head { color: var(--ink-faint); font-size: 12px; border-bottom: 1px solid var(--rule); }

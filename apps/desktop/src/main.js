@@ -198,6 +198,7 @@ function registerIpc () {
     if (!doc) throw new Error('This file is no longer in your Drive.')
     openDocs.add(docId)
     drive.engine.registerLocalClient(docId, clientId)
+    drive.touchPerson(docId)
     drive.markOpened(docId)
     const states = [...doc.awareness.getStates().keys()]
     return {

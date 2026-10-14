@@ -65,8 +65,14 @@ export async function openDocument (docId, { focusTitle = false, initialContent 
     cp.onDocAwareness((id, update) => { if (id === docId) awarenessProtocol.applyAwarenessUpdate(awareness, update, 'main') })
   ]
 
-  // Record that this editing session belongs to me (for "written by").
-  ydoc.getMap('authors').set(String(ydoc.clientID), { userId: state.me.userId, name: state.me.name })
+  // Record that this editing session belongs to me (for "written by"), but
+  // only once I actually change something: opening a document is not an edit.
+  let authored = ydoc.getMap('authors').has(String(ydoc.clientID))
+  ydoc.on('update', (_u, origin) => {
+    if (authored || origin === 'main') return
+    authored = true
+    queueMicrotask(() => { if (!ydoc.isDestroyed) ydoc.getMap('authors').set(String(ydoc.clientID), { userId: state.me.userId }) })
+  })
   awareness.setLocalStateField('user', { name: state.me.name, color: state.me.color, userId: state.me.userId })
 
   // Build the writing surface for this kind of document.
@@ -91,12 +97,12 @@ export async function openDocument (docId, { focusTitle = false, initialContent 
     ydoc,
     awareness,
     user: state.me,
-    onUpdate: () => syncToolbar(),
-    onEditMath: (m) => mathDialog(m),
+    onUpdate: () => { if (state.open === o) syncToolbar() },
+    onEditMath: (m) => { if (state.open === o) mathDialog(m) },
     onOpenLink: (href) => cp.openLink(href),
     getPageSetup: () => readPage(ydoc),
     getZoom: () => o.zoom || 1,
-    onLayout: ({ pages, geometry }) => { o.pages = pages; drawSheets(pages, geometry); renderDocMargin() }
+    onLayout: ({ pages, geometry }) => { if (state.open !== o) return; o.pages = pages; drawSheets(pages, geometry); renderDocMargin() }
   })
 
   if (kind === 'paged') {
@@ -205,7 +211,7 @@ function toolButton (id, label, icon, run, { key } = {}) {
     'aria-label': label,
     'aria-pressed': 'false',
     onmousedown: (e) => e.preventDefault(),
-    onclick: (e) => { if (state.open) run(state.open.editor, e.currentTarget) }
+    onclick: (e) => { if (state.open?.editor) run(state.open.editor, e.currentTarget) }
   }, typeof icon === 'string' && icon.startsWith('<svg') ? svg(icon) : icon)
 }
 
@@ -273,7 +279,7 @@ function renderToolbar () {
 
 function syncToolbar () {
   const o = state.open
-  if (!o) return
+  if (!o?.editor || o.editor.isDestroyed) return
   const f = activeFormats(o.editor)
   const press = (id, on) => { const b = $(`.tool[data-cmd="${id}"]`); if (b) b.setAttribute('aria-pressed', String(Boolean(on))) }
   for (const k of ['bold', 'italic', 'underline', 'strike', 'code', 'link', 'bulletList', 'orderedList', 'blockquote', 'table']) press(k, f[k])

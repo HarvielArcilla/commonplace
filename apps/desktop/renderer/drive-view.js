@@ -194,7 +194,8 @@ function renderList (list, files, folders, searching) {
       el('p', { class: 'row-title' }, svg(f.kind === 'paged' ? icons.paged : icons.markdown), el('span', {}, f.title || 'Untitled')),
       el('p', { class: 'row-preview' }, where || f.preview || (f.appName ? `Empty ${f.appName.toLowerCase()}` : ''))),
     el('div', { class: 'row-owner' }, ownerName),
-    el('div', { class: 'row-time' }, ago(f.lastEditedAt || f.sync.lastSyncedAt || f.addedAt)),
+    el('div', { class: 'row-time', title: f.lastChangedBy ? `Changed by ${f.lastChangedBy}` : null },
+      ago(f.lastChangeAt || f.addedAt), f.lastChangedBy ? el('span', { class: 'row-by' }, f.lastChangedBy) : null),
     el('div', { class: 'row-menu' },
       el('button', { type: 'button', class: 'btn btn-quiet btn-icon', 'aria-label': `Options for ${f.title}`, onclick: (e) => fileMenu(e.currentTarget, f) }, svg(icons.more))))
     draggable(row, { kind: 'file', id: f.docId })
@@ -398,7 +399,7 @@ function detailsDialog (f) {
     ['Owner', f.role === 'owner' ? 'You' : (f.owner?.name || 'Unknown')],
     ['Written by', f.contributors.length ? listNames(f.contributors) : 'Nobody yet'],
     ['Folder', f.folderId ? folderPath(f.folderId).map((p) => p.name).join(' / ') : 'CommonDrive'],
-    ['Last change', ago(f.lastEditedAt || f.sync.lastSyncedAt || f.addedAt) || '—'],
+    ['Last change', [ago(f.lastChangeAt || f.addedAt), f.lastChangedBy ? `by ${f.lastChangedBy}` : null].filter(Boolean).join(' ') || '—'],
     ['Sync', statusNotes(f).map((n) => n.text).join('. ')]
   ]
   dialog({ title: f.title || 'Untitled', body: el('dl', { class: 'details' }, rows.flatMap(([k, v]) => [el('dt', {}, k), el('dd', {}, v)])), confirm: 'Done', cancel: null })

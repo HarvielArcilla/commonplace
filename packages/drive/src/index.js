@@ -11,7 +11,7 @@ import { randomBytes } from 'node:crypto'
 import * as Y from 'yjs'
 import {
   FileStore, SyncEngine, SwarmTransport, loadOrCreateIdentity,
-  newDocSecret, deriveDocKeys, encodeInvite, parseInvite, initContainer, readMeta
+  newDocSecret, deriveDocKeys, encodeInvite, parseInvite, initContainer, readMeta, updatePerson
 } from '@commonplace/core'
 
 const INDEX_ID = 'drive-index'
@@ -45,8 +45,11 @@ export class Drive extends EventEmitter {
     this.folders = this.index.getMap('folders')
 
     this.engine.on('status', () => this._changed())
-    this.engine.on('update', (docId, _u, origin) => {
-      if (origin === 'renderer' || origin === 'local') this._patch(docId, { contributed: true, lastEditedAt: Date.now() })
+    this._recent = new Map() // docId -> { at, by } for changes made by others
+    this._persistTimers = new Map()
+    this.engine.on('update', (docId, update, origin) => {
+      if (origin === 'renderer') this._patch(docId, { contributed: true, lastEditedAt: Date.now() })
+      else if (origin !== 'disk' && origin !== 'local' && origin !== 'local-meta') this._remoteChange(docId, update)
     })
   }
 
@@ -56,6 +59,12 @@ export class Drive extends EventEmitter {
   }
 
   async stop () {
+    for (const [docId, t] of this._persistTimers) {
+      clearTimeout(t)
+      const r = this._recent.get(docId)
+      if (r) this._patch(docId, { lastChangedAt: r.at, lastChangedBy: r.by })
+    }
+    this._persistTimers.clear()
     this.engine.destroy()
     if (this.transport) await this.transport.destroy()
   }
@@ -92,6 +101,10 @@ export class Drive extends EventEmitter {
     const isOwner = entry.owner?.userId === this.identity.userId
     const ownerOnline = isOwner || status.peers.some((p) => p.userId === entry.owner?.userId)
     const doc = this.engine.getDoc(docId)
+    const recent = this._recent.get(docId)
+    const remoteAt = Math.max(recent?.at || 0, entry.lastChangedAt || 0)
+    const changeBy = (recent?.at || 0) >= (entry.lastChangedAt || 0) ? (recent?.by || entry.lastChangedBy) : entry.lastChangedBy
+    const changeAt = Math.max(remoteAt, entry.lastEditedAt || 0)
     return {
       docId,
       type: entry.type,
@@ -103,7 +116,10 @@ export class Drive extends EventEmitter {
       addedAt: entry.addedAt,
       lastOpenedAt: entry.lastOpenedAt || null,
       lastEditedAt: entry.lastEditedAt || null,
-      lastActivityAt: Math.max(entry.lastEditedAt || 0, entry.lastOpenedAt || 0, entry.addedAt || 0, status.lastSyncedAt || 0),
+      // Most recent change by anyone, and who made it if it wasn't me.
+      lastChangeAt: changeAt || null,
+      lastChangedBy: changeAt > (entry.lastEditedAt || 0) ? changeBy : null,
+      lastActivityAt: Math.max(changeAt || 0, entry.lastOpenedAt || 0, entry.addedAt || 0),
       waitingForPeer: !entry.type, // joined by invite, nothing received yet
       supported: !entry.type || (app && (entry.schemaVersion || 1) <= app.schemaVersion),
       appName: app?.name || null,
@@ -112,7 +128,8 @@ export class Drive extends EventEmitter {
       folderId: this.folders.has(entry.folderId) ? entry.folderId : null,
       preview: app && doc ? safePreview(app, doc.ydoc) : '',
       sync: {
-        peers: status.peers,
+        // Show peers by the name they currently use in this document.
+        peers: status.peers.map((p) => ({ ...p, name: doc?.ydoc.getMap('people').get(p.userId)?.name || p.name })),
         live: status.peers.length > 0,
         ownerOnline,
         lastSyncedAt: status.lastSyncedAt || null,
@@ -228,9 +245,46 @@ export class Drive extends EventEmitter {
     return this.engine.getDoc(docId)
   }
 
+  // Updates my name and color, and carries the change into every document I
+  // own or have taken part in, so collaborators see the new name.
   setProfile (patch) {
     this.identity.update(patch)
+    for (const entry of this.files.values()) {
+      const doc = this.engine.getDoc(entry.docId)
+      if (!doc || !entry.type) continue
+      const known = doc.ydoc.getMap('people').has(this.identity.userId)
+      if (known || entry.contributed || entry.owner?.userId === this.identity.userId) this.touchPerson(entry.docId)
+    }
     this._changed()
+  }
+
+  // Writes my current name into a document's people map if it's out of date.
+  touchPerson (docId) {
+    const doc = this.engine.getDoc(docId)
+    if (!doc) return
+    const me = { userId: this.identity.userId, name: this.identity.name, color: this.identity.color }
+    doc.ydoc.transact(() => updatePerson(doc.ydoc, me), 'local-meta')
+  }
+
+  _remoteChange (docId, update) {
+    const doc = this.engine.getDoc(docId)
+    let by = null
+    try {
+      const client = Y.decodeUpdate(update).structs[0]?.id.client
+      const userId = doc?.ydoc.getMap('authors').get(String(client))?.userId
+      if (userId && userId !== this.identity.userId) by = doc.ydoc.getMap('people').get(userId)?.name || null
+    } catch {}
+    const prev = this._recent.get(docId)
+    this._recent.set(docId, { at: Date.now(), by: by || prev?.by || null })
+    this._changed()
+    // Persist at most every 10 seconds per file, not on every keystroke.
+    if (!this._persistTimers.has(docId)) {
+      this._persistTimers.set(docId, setTimeout(() => {
+        this._persistTimers.delete(docId)
+        const r = this._recent.get(docId)
+        if (r) this._patch(docId, { lastChangedAt: r.at, lastChangedBy: r.by })
+      }, 10000))
+    }
   }
 
   // ---- internals -----------------------------------------------------------
@@ -250,6 +304,7 @@ export class Drive extends EventEmitter {
     }
     doc.meta.observe(refresh)
     doc.ydoc.getMap('authors').observe(refresh)
+    doc.ydoc.getMap('people').observe(refresh)
     refresh()
     this._topicToDoc.set(doc.topic.toString('hex'), entry.docId)
     if (this.transport) this.transport.join(doc.topic).catch((err) => this.emit('error', err))

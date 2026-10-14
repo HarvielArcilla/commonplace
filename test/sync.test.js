@@ -127,3 +127,35 @@ test('a peer without the secret learns nothing and cannot inject edits', async (
   sealed[20] ^= 1
   assert.equal(open(k1.encKey, sealed), null)
 })
+
+test('renames reach collaborators, and remote edits update Drive without opening the file', async (t) => {
+  const testnet = await createTestnet(3)
+  const alice = new Drive({ dataDir: tmp(), apps: [docsApp], swarm: swarmOpts(testnet) })
+  const bob = new Drive({ dataDir: tmp(), apps: [docsApp], swarm: swarmOpts(testnet) })
+  t.after(async () => { await alice.stop(); await bob.stop(); await testnet.destroy() })
+  alice.setProfile({ name: 'Alice' })
+  bob.setProfile({ name: 'Bob' })
+  await alice.start(); await bob.start()
+
+  const docId = await alice.create('docs', 'Plan')
+  await bob.join(alice.invite(docId))
+  await until(() => bob.describe(docId).owner?.name === 'Alice' && bob.describe(docId).sync.live)
+
+  // Bob only opens the file (writes his name, no edits): nothing counts as unsynced.
+  bob.engine.registerLocalClient(docId, 424242)
+  bob.touchPerson(docId)
+  await sleep(400)
+  assert.equal(bob.describe(docId).sync.pending, 0)
+
+  // Alice renames herself; Bob's Drive shows the new owner name.
+  alice.setProfile({ name: 'Alice Wong' })
+  await until(() => bob.describe(docId).owner?.name === 'Alice Wong')
+  await until(() => bob.describe(docId).sync.peers.some((p) => p.name === 'Alice Wong'))
+
+  // Alice edits; Bob's Drive sees when and by whom, without opening it.
+  const before = bob.describe(docId).lastChangeAt || 0
+  await sleep(20)
+  editorFor(alice, docId).type('New paragraph from Alice.')
+  await until(() => (bob.describe(docId).lastChangeAt || 0) > before && bob.describe(docId).lastChangedBy === 'Alice Wong')
+  assert.equal(bob.describe(docId).preview, 'New paragraph from Alice.')
+})
