@@ -4,15 +4,29 @@
   "type": "module",
   "exports": {
     ".": "./src/index.js",
-    "./editor": "./src/editor.js"
+    "./editor": "./src/editor.js",
+    "./page": "./src/page.js",
+    "./convert": "./src/convert/index.js",
+    "./pagination": "./src/pagination.js"
   },
   "dependencies": {
     "@tiptap/core": "^3.32.0",
     "@tiptap/extension-collaboration": "^3.32.0",
     "@tiptap/extension-collaboration-caret": "^3.32.0",
+    "@tiptap/extension-highlight": "^3.32.0",
+    "@tiptap/extension-image": "^3.32.0",
+    "@tiptap/extension-mathematics": "^3.32.0",
+    "@tiptap/extension-table": "^3.32.0",
+    "@tiptap/extension-text-align": "^3.32.0",
+    "@tiptap/extension-text-style": "^3.32.0",
+    "@tiptap/markdown": "^3.32.0",
     "@tiptap/pm": "^3.32.0",
     "@tiptap/starter-kit": "^3.32.0",
     "@tiptap/y-tiptap": "^3.0.7",
+    "docx": "^9.11.0",
+    "jszip": "^3.10.2",
+    "katex": "^0.18.10",
+    "mammoth": "^1.13.0",
     "y-protocols": "^1.0.7",
     "yjs": "^13.6.33"
   },

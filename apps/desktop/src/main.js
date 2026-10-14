@@ -2,13 +2,19 @@
 // hosts the window. The window never touches the network or the disk; it
 // talks to this process over a narrow IPC surface defined in preload.cjs.
 
-import { app, BrowserWindow, ipcMain, clipboard, shell } from 'electron'
+import { app, BrowserWindow, ipcMain, clipboard, shell, dialog } from 'electron'
+import fs from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import * as Y from 'yjs'
 import * as awarenessProtocol from 'y-protocols/awareness'
 import { Drive } from '@commonplace/drive'
-import { docsApp } from '@commonplace/docs'
+import { docsApps } from '@commonplace/docs'
+import { readPage, PAGE_SIZES, DEFAULT_PAGE } from '@commonplace/docs/page'
+import { exportDocx, importDocx } from '@commonplace/docs/convert'
+
+const MAX_IMAGE_BYTES = 8 * 1024 * 1024
+const IMAGE_TYPES = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp' }
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 
@@ -77,19 +83,107 @@ function createWindow () {
   })
   // Links inside documents open in the system browser, never in the app.
   win.webContents.setWindowOpenHandler(({ url }) => {
-    if (/^https?:\/\//.test(url)) shell.openExternal(url)
+    openExternal(url)
     return { action: 'deny' }
   })
   win.webContents.on('will-navigate', (e) => e.preventDefault())
   win.on('closed', () => { win = null; openDocs.clear() })
 }
 
+function openExternal (url) {
+  if (/^(https?:|mailto:)/i.test(String(url))) shell.openExternal(url)
+}
+
+function safeName (title, ext) {
+  const base = String(title || 'Untitled').replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120) || 'Untitled'
+  return `${base}.${ext}`
+}
+
+async function saveAs (title, ext, data, filterName) {
+  const { canceled, filePath } = await dialog.showSaveDialog(win, {
+    defaultPath: path.join(app.getPath('documents'), safeName(title, ext)),
+    filters: [{ name: filterName, extensions: [ext] }]
+  })
+  if (canceled || !filePath) return null
+  await fs.writeFile(filePath, data)
+  return path.basename(filePath)
+}
+
 function registerIpc () {
   ipcMain.handle('me', () => drive.me())
+  ipcMain.handle('drive:apps', () => drive.apps())
+  ipcMain.handle('drive:folders', () => drive.listFolders())
+  ipcMain.handle('folder:create', (_e, name, parentId) => drive.createFolder(name, parentId))
+  ipcMain.handle('folder:rename', (_e, id, name) => drive.renameFolder(id, name))
+  ipcMain.handle('folder:delete', (_e, id) => drive.deleteFolder(id))
+  ipcMain.handle('folder:move', (_e, id, parentId) => drive.moveFolder(id, parentId))
+  ipcMain.handle('file:move', (_e, docId, folderId) => drive.moveFile(docId, folderId))
+  ipcMain.handle('link:open', (_e, url) => openExternal(url))
+
+  // Import a .md or .docx file as a new document. The window fills in the
+  // content right after opening it (the editor owns the content schema).
+  ipcMain.handle('file:import', async (_e, folderId) => {
+    const { canceled, filePaths } = await dialog.showOpenDialog(win, {
+      properties: ['openFile'],
+      filters: [{ name: 'Documents', extensions: ['docx', 'md', 'markdown', 'txt'] }]
+    })
+    if (canceled || !filePaths[0]) return null
+    const file = filePaths[0]
+    const ext = path.extname(file).toLowerCase()
+    const title = path.basename(file, path.extname(file))
+    const bytes = await fs.readFile(file)
+    if (ext === '.docx') {
+      const { html, page, warnings } = await importDocx(bytes)
+      const docId = await drive.create('paged', title, { folderId })
+      drive.getDoc(docId).ydoc.transact(() => drive.getDoc(docId).ydoc.getMap('page').set('setup', page), 'local')
+      return { docId, content: { type: 'html', value: html }, warnings }
+    }
+    const docId = await drive.create('markdown', title, { folderId })
+    return { docId, content: { type: 'markdown', value: bytes.toString('utf8') }, warnings: 0 }
+  })
+
+  ipcMain.handle('file:export', async (_e, docId, format, payload) => {
+    const file = drive.describe(docId)
+    const doc = drive.getDoc(docId)
+    if (!file || !doc) throw new Error('This file is no longer in your Drive.')
+    if (format === 'md') return saveAs(file.title, 'md', String(payload.markdown || ''), 'Markdown')
+    if (format === 'docx') {
+      const setup = file.kind === 'paged' ? readPage(doc.ydoc) : { ...DEFAULT_PAGE, pageNumbers: false }
+      return saveAs(file.title, 'docx', await exportDocx(payload.json, setup, { title: file.title }), 'Word document')
+    }
+    if (format === 'pdf') {
+      const setup = readPage(doc.ydoc)
+      const pdf = await win.webContents.printToPDF({
+        pageSize: PAGE_SIZES[setup.size].pdf,
+        landscape: setup.orientation === 'landscape',
+        margins: setup.margins,
+        printBackground: true,
+        displayHeaderFooter: setup.pageNumbers,
+        headerTemplate: '<span></span>',
+        footerTemplate: '<div style="width:100%;text-align:center;font-size:9px;color:#8a8f9b;font-family:Georgia,serif"><span class="pageNumber"></span></div>'
+      })
+      return saveAs(file.title, 'pdf', pdf, 'PDF')
+    }
+    throw new Error(`Can't export as ${format}.`)
+  })
+
+  ipcMain.handle('file:pickImage', async () => {
+    const { canceled, filePaths } = await dialog.showOpenDialog(win, {
+      properties: ['openFile'],
+      filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp'] }]
+    })
+    if (canceled || !filePaths[0]) return null
+    const type = IMAGE_TYPES[path.extname(filePaths[0]).toLowerCase()]
+    const bytes = await fs.readFile(filePaths[0])
+    if (!type) throw new Error('That file type isn\u2019t supported. Use PNG, JPEG, GIF or WebP.')
+    if (bytes.length > MAX_IMAGE_BYTES) throw new Error('That image is over 8 MB. Images are stored inside the document, so use a smaller one.')
+    return { src: `data:${type};base64,${bytes.toString('base64')}`, alt: path.basename(filePaths[0], path.extname(filePaths[0])) }
+  })
+
   ipcMain.handle('profile:set', (_e, patch) => { drive.setProfile(patch); return drive.me() })
   ipcMain.handle('drive:list', () => drive.list())
-  ipcMain.handle('drive:create', (_e, type, title) => drive.create(type, title))
-  ipcMain.handle('drive:join', (_e, invite) => drive.join(invite))
+  ipcMain.handle('drive:create', (_e, type, title, folderId) => drive.create(type, title, { folderId }))
+  ipcMain.handle('drive:join', (_e, invite, folderId) => drive.join(invite, { folderId }))
   ipcMain.handle('drive:remove', (_e, docId) => { openDocs.delete(docId); return drive.remove(docId) })
   ipcMain.handle('drive:copyInvite', (_e, docId) => {
     const invite = drive.invite(docId)
@@ -118,9 +212,9 @@ function registerIpc () {
 }
 
 app.whenReady().then(async () => {
-  drive = new Drive({ dataDir: app.getPath('userData'), apps: [docsApp] })
+  drive = new Drive({ dataDir: app.getPath('userData'), apps: docsApps })
   drive.on('error', (err) => console.error('[commonplace]', err))
-  drive.on('changed', () => send('drive:changed', drive.list(), drive.me()))
+  drive.on('changed', () => send('drive:changed', drive.list(), drive.me(), drive.listFolders()))
   drive.engine.on('update', (docId, update, origin) => {
     if (origin !== 'renderer' && origin !== 'disk' && openDocs.has(docId)) send('doc:update', docId, update)
   })

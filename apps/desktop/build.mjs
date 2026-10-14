@@ -2,13 +2,15 @@
 import { build } from 'esbuild'
 
 await build({
-  entryPoints: ['renderer/app.js'],
-  outfile: 'renderer/dist/app.js',
+  entryPoints: { app: 'renderer/app.js', vendor: 'renderer/vendor.css' },
+  outdir: 'renderer/dist',
   bundle: true,
   format: 'iife',
   platform: 'browser',
   target: ['chrome130'],
   sourcemap: true,
   minify: process.env.NODE_ENV === 'production',
+  loader: { '.woff2': 'file', '.woff': 'file', '.ttf': 'file' },
+  assetNames: 'fonts/[name]-[hash]',
   logLevel: 'info'
 })

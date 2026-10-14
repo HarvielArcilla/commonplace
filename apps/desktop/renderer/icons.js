@@ -1,0 +1,35 @@
+// 16px line icons, drawn to match the thin rules of the interface.
+const i = (body) => `<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">${body}</svg>`
+
+export const icons = {
+  folder: i('<path d="M1.75 4.25a1 1 0 0 1 1-1h3.1l1.5 1.5h5.9a1 1 0 0 1 1 1v6.5a1 1 0 0 1-1 1H2.75a1 1 0 0 1-1-1z"/>'),
+  markdown: i('<rect x="2.25" y="1.75" width="11.5" height="12.5" rx="1"/><path d="M4.75 4.25v7.5"/><path d="M7 6.5h4.5M7 9h4.5M7 11.5h2.5"/>'),
+  paged: i('<path d="M3.25 1.75h6.5l3 3v9.5h-9.5z"/><path d="M9.75 1.75v3h3"/><path d="M5.5 8h5M5.5 10.25h5M5.5 12.5h3"/>'),
+  list: i('<path d="M5.5 4h8.5M5.5 8h8.5M5.5 12h8.5"/><path d="M2 4h.5M2 8h.5M2 12h.5"/>'),
+  grid: i('<rect x="2" y="2" width="5" height="5" rx=".75"/><rect x="9" y="2" width="5" height="5" rx=".75"/><rect x="2" y="9" width="5" height="5" rx=".75"/><rect x="9" y="9" width="5" height="5" rx=".75"/>'),
+  more: i('<circle cx="3.5" cy="8" r=".6" fill="currentColor"/><circle cx="8" cy="8" r=".6" fill="currentColor"/><circle cx="12.5" cy="8" r=".6" fill="currentColor"/>'),
+  search: i('<circle cx="7" cy="7" r="4.25"/><path d="m10.25 10.25 3.5 3.5"/>'),
+  link: i('<path d="M6.75 9.25a2.75 2.75 0 0 0 3.9 0l2-2a2.75 2.75 0 0 0-3.9-3.9l-.75.75"/><path d="M9.25 6.75a2.75 2.75 0 0 0-3.9 0l-2 2a2.75 2.75 0 0 0 3.9 3.9l.75-.75"/>'),
+  math: i('<path d="M12 3H4.5l4 5-4 5H12"/>'),
+  image: i('<rect x="1.75" y="2.75" width="12.5" height="10.5" rx="1"/><circle cx="5.5" cy="6.25" r="1.1"/><path d="m2 12 3.75-3.75 2.75 2.75 2-2L14 12.5"/>'),
+  table: i('<rect x="1.75" y="2.75" width="12.5" height="10.5" rx="1"/><path d="M1.75 6.25h12.5M1.75 9.75h12.5M6 6.25v7M10 6.25v7"/>'),
+  bullets: i('<path d="M6 4h8M6 8h8M6 12h8"/><circle cx="2.75" cy="4" r=".9" fill="currentColor" stroke="none"/><circle cx="2.75" cy="8" r=".9" fill="currentColor" stroke="none"/><circle cx="2.75" cy="12" r=".9" fill="currentColor" stroke="none"/>'),
+  numbers: i('<path d="M6.5 4h7.5M6.5 8h7.5M6.5 12h7.5"/><path d="M2 2.75h1v3M1.75 5.75h1.75M1.75 9.5a1 1 0 1 1 1.6.8L1.75 11.75h1.9"/>'),
+  quote: i('<path d="M3 3.5v9"/><path d="M6 5h7M6 8h7M6 11h4.5"/>'),
+  alignLeft: i('<path d="M2 3.5h12M2 6.5h8M2 9.5h12M2 12.5h8"/>'),
+  alignCenter: i('<path d="M2 3.5h12M4 6.5h8M2 9.5h12M4 12.5h8"/>'),
+  alignRight: i('<path d="M2 3.5h12M6 6.5h8M2 9.5h12M6 12.5h8"/>'),
+  alignJustify: i('<path d="M2 3.5h12M2 6.5h12M2 9.5h12M2 12.5h12"/>'),
+  undo: i('<path d="M5.5 3.5 2.5 6.5l3 3"/><path d="M2.75 6.5h6.5a4 4 0 0 1 0 8H7"/>'),
+  redo: i('<path d="m10.5 3.5 3 3-3 3"/><path d="M13.25 6.5h-6.5a4 4 0 0 0 0 8H9"/>'),
+  pageBreak: i('<path d="M3.25 1.75v3.5h9.5v-3.5"/><path d="M3.25 14.25v-3.5h9.5v3.5"/><path d="M1.5 8h1.5M5 8h1.5M9.5 8H11M13 8h1.5"/>'),
+  rule: i('<path d="M2 8h12"/>'),
+  color: i('<path d="M4.5 11 8 2.5 11.5 11M5.75 8h4.5"/>'),
+  highlight: i('<path d="m9.5 2.5 4 4-6 6H3.5v-4z"/><path d="M2 14.5h12"/>'),
+  pageSetup: i('<path d="M3.25 1.75h9.5v12.5h-9.5z"/><path d="M5.5 1.75v12.5M3.25 4h9.5M3.25 12h9.5"/>'),
+  download: i('<path d="M8 2.25v8M4.75 7 8 10.25 11.25 7M2.5 13.75h11"/>'),
+  share: i('<path d="M10.5 4.5 8 2 5.5 4.5M8 2v8.5"/><path d="M4.5 7.25H3.25v6.5h9.5v-6.5H11.5"/>'),
+  plus: i('<path d="M8 3v10M3 8h10"/>'),
+  import: i('<path d="M8 10.25v-8M4.75 5.5 8 2.25 11.25 5.5M2.5 13.75h11"/>'),
+  invite: i('<path d="M2 4.25h12v8.5H2z"/><path d="m2.25 4.5 5.75 4.5 5.75-4.5"/>')
+}

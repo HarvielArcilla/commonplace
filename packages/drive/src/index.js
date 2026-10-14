@@ -7,6 +7,7 @@
 
 import { EventEmitter } from 'node:events'
 import path from 'node:path'
+import { randomBytes } from 'node:crypto'
 import * as Y from 'yjs'
 import {
   FileStore, SyncEngine, SwarmTransport, loadOrCreateIdentity,
@@ -19,7 +20,7 @@ export class Drive extends EventEmitter {
   constructor ({ dataDir, apps = [], swarm = {}, transport = true }) {
     super()
     this.dataDir = dataDir
-    this.apps = new Map(apps.map((a) => [a.type, a]))
+    this.appsByType = new Map(apps.map((a) => [a.type, a]))
     this.identity = loadOrCreateIdentity(dataDir)
     this.store = new FileStore(path.join(dataDir, 'files'))
     this.engine = new SyncEngine({ identity: this.identity, store: this.store })
@@ -40,6 +41,8 @@ export class Drive extends EventEmitter {
     this.store.load(INDEX_ID, this.index)
     this.index.on('update', (u, origin) => { if (origin !== 'disk') this.store.append(INDEX_ID, u) })
     this.files = this.index.getMap('files')
+    // Personal folders: they organize your Drive only and are never shared.
+    this.folders = this.index.getMap('folders')
 
     this.engine.on('status', () => this._changed())
     this.engine.on('update', (docId, _u, origin) => {
@@ -69,11 +72,23 @@ export class Drive extends EventEmitter {
       .sort((a, b) => (b.lastActivityAt || 0) - (a.lastActivityAt || 0))
   }
 
+  listFolders () {
+    return [...this.folders.values()]
+      .map((f) => ({ ...f, parentId: this.folders.has(f.parentId) ? f.parentId : null }))
+      .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base', numeric: true }))
+  }
+
+  apps () {
+    return [...this.appsByType.values()]
+      .filter((a) => !a.hidden)
+      .map((a) => ({ type: a.type, kind: a.kind, name: a.name, description: a.description, exports: a.exports || [] }))
+  }
+
   describe (docId) {
     const entry = this.files.get(docId)
     if (!entry) return null
     const status = this.engine.status(docId) || { peers: [], pending: 0 }
-    const app = this.apps.get(entry.type)
+    const app = this.appsByType.get(entry.type)
     const isOwner = entry.owner?.userId === this.identity.userId
     const ownerOnline = isOwner || status.peers.some((p) => p.userId === entry.owner?.userId)
     const doc = this.engine.getDoc(docId)
@@ -92,6 +107,9 @@ export class Drive extends EventEmitter {
       waitingForPeer: !entry.type, // joined by invite, nothing received yet
       supported: !entry.type || (app && (entry.schemaVersion || 1) <= app.schemaVersion),
       appName: app?.name || null,
+      kind: app?.kind || null,
+      exports: app?.exports || [],
+      folderId: this.folders.has(entry.folderId) ? entry.folderId : null,
       preview: app && doc ? safePreview(app, doc.ydoc) : '',
       sync: {
         peers: status.peers,
@@ -106,8 +124,8 @@ export class Drive extends EventEmitter {
 
   // ---- commands ------------------------------------------------------------
 
-  async create (type, title = 'Untitled') {
-    const app = this.apps.get(type)
+  async create (type, title = 'Untitled', { folderId = null } = {}) {
+    const app = this.appsByType.get(type)
     if (!app) throw new Error(`no app installed for type "${type}"`)
     const secret = newDocSecret()
     const { docId } = deriveDocKeys(secret)
@@ -121,6 +139,7 @@ export class Drive extends EventEmitter {
       title,
       owner: { userId: this.identity.userId, name: this.identity.name },
       schemaVersion: app.schemaVersion,
+      folderId: this.folders.has(folderId) ? folderId : null,
       addedAt: Date.now()
     })
     this._attach(this.files.get(docId))
@@ -128,12 +147,12 @@ export class Drive extends EventEmitter {
     return docId
   }
 
-  async join (inviteText) {
+  async join (inviteText, { folderId = null } = {}) {
     const secret = parseInvite(inviteText)
     if (!secret) throw new Error('That invite code is not valid.')
     const { docId } = deriveDocKeys(secret)
     if (!this.files.has(docId)) {
-      this.files.set(docId, { docId, secret: secret.toString('base64'), type: null, title: 'Waiting for a peer…', owner: null, addedAt: Date.now() })
+      this.files.set(docId, { docId, secret: secret.toString('base64'), type: null, title: 'Waiting for a peer…', owner: null, folderId: this.folders.has(folderId) ? folderId : null, addedAt: Date.now() })
       this._attach(this.files.get(docId))
       this._changed()
     }
@@ -161,6 +180,48 @@ export class Drive extends EventEmitter {
     this.engine.closeDoc(docId, { deleteLocalData: true })
     this.files.delete(docId)
     this._changed()
+  }
+
+  // ---- folders -------------------------------------------------------------
+
+  createFolder (name, parentId = null) {
+    const id = randomBytes(8).toString('hex')
+    this.folders.set(id, { id, name: cleanName(name) || 'Untitled folder', parentId: this.folders.has(parentId) ? parentId : null, createdAt: Date.now() })
+    this._changed()
+    return id
+  }
+
+  renameFolder (id, name) {
+    const f = this.folders.get(id)
+    if (f && cleanName(name)) { this.folders.set(id, { ...f, name: cleanName(name) }); this._changed() }
+  }
+
+  // Deleting a folder never deletes files: its contents move up one level.
+  deleteFolder (id) {
+    const f = this.folders.get(id)
+    if (!f) return
+    const parent = this.folders.has(f.parentId) ? f.parentId : null
+    this.index.transact(() => {
+      for (const entry of this.files.values()) if (entry.folderId === id) this.files.set(entry.docId, { ...entry, folderId: parent })
+      for (const sub of this.folders.values()) if (sub.parentId === id) this.folders.set(sub.id, { ...sub, parentId: parent })
+      this.folders.delete(id)
+    })
+    this._changed()
+  }
+
+  moveFile (docId, folderId) {
+    this._patch(docId, { folderId: this.folders.has(folderId) ? folderId : null })
+  }
+
+  moveFolder (id, parentId) {
+    const f = this.folders.get(id)
+    if (!f) return false
+    const target = this.folders.has(parentId) ? parentId : null
+    // Refuse to move a folder into itself or one of its own subfolders.
+    for (let p = target; p; p = this.folders.get(p)?.parentId) if (p === id) return false
+    this.folders.set(id, { ...f, parentId: target })
+    this._changed()
+    return true
   }
 
   getDoc (docId) {
@@ -219,4 +280,8 @@ function safePreview (app, ydoc) {
   } catch {
     return ''
   }
+}
+
+function cleanName (name) {
+  return String(name ?? '').replace(/\s+/g, ' ').trim().slice(0, 120)
 }

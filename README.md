@@ -2,6 +2,13 @@
 
 Free, collaborative documents that run entirely on the computers of the people using them. There are no accounts and no servers. CommonDrive keeps your files; CommonDocs edits them; CommonSheets and CommonSlides come later on the same foundation.
 
+CommonDocs has two kinds of document:
+
+- **Markdown documents** for notes and writing that flows, with markdown shortcuts. Import and export `.md`.
+- **Paged documents** for work that needs real pages: paper size, margins, fonts, colors and alignment. Import and export `.docx`, export PDF.
+
+Both support links, LaTeX math, tables and images. CommonDrive shows files as a list or as icons, with personal folders, filters, sorting and search.
+
 ## How it works
 
 - Every file is a CRDT (Yjs). Copies that have seen the same edits are identical, in any order, so nobody has to be online to "own" consistency.
@@ -33,6 +40,8 @@ $env:COMMONPLACE_PROFILE="bob"; npm run dev
 ```
 
 Create a document in one window, click **Copy invite link**, and paste it into **Join with invite** in the other.
+
+On Windows, the first run asks whether to let the app use the network. Allow it, or other computers can't reach yours.
 
 ## Build installers
 

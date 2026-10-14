@@ -2,22 +2,44 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'none'">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Commonplace</title>
+  <link rel="stylesheet" href="dist/vendor.css">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
   <!-- CommonDrive -->
-  <section id="drive-view" class="view" aria-labelledby="drive-title">
+  <section id="drive-view" class="view view-drive" aria-label="CommonDrive">
     <header class="bar">
-      <h1 id="drive-title" class="bar-title">CommonDrive</h1>
+      <nav id="crumbs" class="crumbs" aria-label="Folder"></nav>
       <div class="bar-actions">
         <button type="button" class="btn" data-action="join">Join with invite</button>
-        <button type="button" class="btn btn-primary" data-action="new-doc">New document</button>
+        <button type="button" class="btn btn-primary" data-action="new" aria-haspopup="menu" aria-expanded="false">New</button>
       </div>
     </header>
-    <main class="ledger" id="file-list" aria-live="polite"></main>
+    <div class="toolbar drive-tools" role="toolbar" aria-label="View options">
+      <div class="seg" role="group" aria-label="Show">
+        <button type="button" data-filter="all">All files</button>
+        <button type="button" data-filter="mine">Owned by me</button>
+        <button type="button" data-filter="shared">Shared with me</button>
+      </div>
+      <select id="type-filter" class="tool-select" aria-label="File type"></select>
+      <select id="sort" class="tool-select" aria-label="Sort by">
+        <option value="recent">Last change</option>
+        <option value="name">Name</option>
+        <option value="owner">Owner</option>
+      </select>
+      <label class="search">
+        <span class="sr-only">Search titles and text</span>
+        <input id="search" type="search" placeholder="Search" autocomplete="off" spellcheck="false">
+      </label>
+      <div class="seg seg-icons" role="group" aria-label="Layout">
+        <button type="button" data-view="list" aria-label="List view" title="List view"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" aria-hidden="true"><path d="M5.5 4h8.5M5.5 8h8.5M5.5 12h8.5M2 4h.5M2 8h.5M2 12h.5"/></svg></button>
+        <button type="button" data-view="grid" aria-label="Icon view" title="Icon view"><svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><rect x="2" y="2" width="5" height="5" rx=".75"/><rect x="9" y="2" width="5" height="5" rx=".75"/><rect x="2" y="9" width="5" height="5" rx=".75"/><rect x="9" y="9" width="5" height="5" rx=".75"/></svg></button>
+      </div>
+    </div>
+    <main id="file-list" class="ledger" aria-live="polite"></main>
     <footer class="me">
       <button type="button" class="me-button" data-action="profile" aria-label="Change your name and color">
         <span class="swatch" id="me-swatch"></span><span id="me-name"></span>
@@ -27,19 +49,21 @@
   </section>
 
   <!-- CommonDocs -->
-  <section id="doc-view" class="view" hidden>
+  <section id="doc-view" class="view view-doc" hidden>
     <header class="bar">
       <button type="button" class="btn btn-quiet" data-action="back">Drive</button>
       <input id="doc-title" class="title-input" aria-label="Document title" maxlength="200" spellcheck="false">
       <div class="bar-actions">
         <div id="presence" class="presence" aria-label="People in this document"></div>
+        <button type="button" class="btn btn-quiet" data-action="page-setup" hidden>Page setup</button>
         <button type="button" class="btn" data-action="share">Copy invite link</button>
+        <button type="button" class="btn" data-action="export" aria-haspopup="menu" aria-expanded="false">Export</button>
       </div>
     </header>
     <div id="toolbar" class="toolbar" role="toolbar" aria-label="Formatting"></div>
     <div class="sheet">
       <aside class="margin" id="doc-margin" aria-live="polite"></aside>
-      <div id="editor" class="editor"></div>
+      <div id="desk" class="desk"></div>
     </div>
   </section>
 
@@ -57,12 +81,13 @@
   </dialog>
 
   <dialog id="profile-dialog" class="dialog">
-    <form method="dialog" id="profile-form">
+    <form method="dialog" id="profile-form" novalidate>
       <h2>What should collaborators call you?</h2>
       <p>Your name and color appear next to your cursor. You can change them any time.</p>
       <label class="field">Name<input id="profile-name" maxlength="40" required autocomplete="name"></label>
       <fieldset class="colors" id="profile-colors"><legend>Cursor color</legend></fieldset>
       <p class="fineprint" id="profile-id"></p>
+      <p class="error" id="profile-error" role="alert"></p>
       <div class="dialog-actions">
         <button type="submit" class="btn btn-primary">Save</button>
       </div>

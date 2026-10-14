@@ -36,7 +36,8 @@
       "src/**",
       "renderer/index.html",
       "renderer/styles.css",
-      "renderer/dist/app.js",
+      "renderer/dist/**",
+      "!renderer/dist/*.map",
       "package.json"
     ],
     "asarUnpack": [
