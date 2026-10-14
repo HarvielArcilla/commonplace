@@ -81,6 +81,40 @@ export class FileStore {
     fs.renameSync(tmp, path.join(dir, 'state.json'))
   }
 
+  readJSON (id, name) {
+    try {
+      return JSON.parse(fs.readFileSync(path.join(this._docDir(id), `${name}.json`), 'utf8'))
+    } catch {
+      return null
+    }
+  }
+
+  writeJSON (id, name, value) {
+    const dir = this._docDir(id)
+    fs.mkdirSync(dir, { recursive: true })
+    const tmp = path.join(dir, `${name}.json.tmp`)
+    fs.writeFileSync(tmp, JSON.stringify(value), { mode: 0o600 })
+    fs.renameSync(tmp, path.join(dir, `${name}.json`))
+  }
+
+  // Every file belonging to one document, for moving it to another computer.
+  exportDoc (id) {
+    const dir = this._docDir(id)
+    const out = {}
+    if (!fs.existsSync(dir)) return out
+    for (const f of fs.readdirSync(dir)) if (!f.endsWith('.tmp')) out[f] = fs.readFileSync(path.join(dir, f)).toString('base64')
+    return out
+  }
+
+  importDoc (id, files) {
+    const dir = this._docDir(id)
+    fs.mkdirSync(dir, { recursive: true })
+    for (const [f, b64] of Object.entries(files)) {
+      if (!/^[a-z0-9._-]+$/i.test(f)) continue
+      fs.writeFileSync(path.join(dir, f), Buffer.from(b64, 'base64'))
+    }
+  }
+
   remove (id) {
     fs.rmSync(this._docDir(id), { recursive: true, force: true })
   }

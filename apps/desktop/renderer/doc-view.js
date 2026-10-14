@@ -8,6 +8,7 @@ import { createDocsEditor, activeFormats, setBlock, pageGeometry, readPage, norm
 import { $, el, svg, toast, openMenu, closeMenu, dialog, selectField, cleanError } from './ui.js'
 import { icons } from './icons.js'
 import { state, cp, statusNotes, renderNotes } from './state.js'
+import { shareDialog } from './share.js'
 
 const FONTS = [
   { label: 'Default', value: '' },
@@ -33,11 +34,7 @@ let onClosed = () => {}
 export function initDocView ({ onBack }) {
   onClosed = onBack
   $('[data-action="back"]').addEventListener('click', async () => { await closeDocument(); onClosed() })
-  $('[data-action="share"]').addEventListener('click', async () => {
-    if (!state.open) return
-    await cp.copyInvite(state.open.docId)
-    toast('Invite link copied. Anyone with it can read and edit.')
-  })
+  $('[data-action="share"]').addEventListener('click', () => { if (state.open) shareDialog(state.open.docId) })
   $('[data-action="export"]').addEventListener('click', (e) => exportMenu(e.currentTarget))
   $('[data-action="page-setup"]').addEventListener('click', () => pageSetupDialog())
 }
@@ -520,9 +517,22 @@ function renderPresence () {
   }
 }
 
+// Viewers (and people who were removed) get a read-only document.
+function applyAccess () {
+  const o = state.open
+  if (!o?.editor) return
+  const file = state.files.find((f) => f.docId === o.docId)
+  const writable = Boolean(file) && (file.role === 'owner' || file.role === 'editor') && !file.access?.removed
+  if (o.editor.isEditable !== writable) o.editor.setEditable(writable)
+  $('#doc-title').readOnly = !writable
+  $('#toolbar').hidden = !writable
+  $('#doc-view').classList.toggle('read-only', !writable)
+}
+
 export function renderDocMargin () {
   const o = state.open
   if (!o) return
+  applyAccess()
   const file = state.files.find((f) => f.docId === o.docId)
   const notes = file ? statusNotes(file, { detailed: true }) : []
   if (o.kind === 'paged') notes.unshift({ text: o.pages === 1 ? '1 page' : `${o.pages} pages` })

@@ -5,6 +5,7 @@ import { $, el, toast, cleanError } from './ui.js'
 import { state, cp } from './state.js'
 import { initDrive, renderDrive } from './drive-view.js'
 import { initDocView, openDocument, renderDocMargin } from './doc-view.js'
+import { moveOutDialog } from './share.js'
 
 const COLORS = ['#b4532a', '#2f6f5e', '#4a5aa8', '#8a4f8c', '#a2741b', '#2d6f8f', '#9b3d4f', '#55703a']
 
@@ -64,6 +65,7 @@ function openProfileDialog () {
       el('span', { class: 'swatch', style: `--swatch:${c}` })))
   }
   $('#profile-id').textContent = `Your ID: ${state.me.userId}`
+  $('#move-out').hidden = !state.me.hasChosenName // not during first-run setup
   d.showModal()
 }
 
@@ -79,6 +81,10 @@ $('#profile-form').addEventListener('submit', async (e) => {
 $('#profile-name').addEventListener('input', () => { $('#profile-error').textContent = '' })
 $('#profile-dialog').addEventListener('cancel', (e) => { if (!state.me?.hasChosenName) e.preventDefault() })
 $('[data-action="profile"]').addEventListener('click', openProfileDialog)
+$('#move-out').addEventListener('click', () => {
+  $('#profile-dialog').close()
+  moveOutDialog()
+})
 
 // ---- boot ----------------------------------------------------------------------
 

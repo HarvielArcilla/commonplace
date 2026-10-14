@@ -3,6 +3,7 @@
 import { $, el, svg, ago, listNames, plural, toast, openMenu, dialog, promptText, confirmAction, cleanError } from './ui.js'
 import { icons } from './icons.js'
 import { state, cp, statusNotes, renderNotes, savePrefs } from './state.js'
+import { shareDialog, setSyncMode, moveInDialog } from './share.js'
 
 let handlers = { openDocument: async () => {}, openJoinDialog: () => {} }
 export function initDrive (h) {
@@ -144,7 +145,9 @@ function emptyState () {
     el('div', { class: 'bar-actions' },
       ...state.apps.map((a) => el('button', { class: a.kind === 'paged' ? 'btn' : 'btn btn-primary', onclick: () => newDocument(a.type) }, `New ${a.name.toLowerCase()}`)),
       el('button', { class: 'btn', onclick: importFile }, 'Import a file'),
-      el('button', { class: 'btn btn-quiet', onclick: () => handlers.openJoinDialog() }, 'Join with invite')))
+      el('button', { class: 'btn btn-quiet', onclick: () => handlers.openJoinDialog() }, 'Join with invite')),
+    el('p', { class: 'empty-move' }, 'Moving from another computer? ',
+      el('button', { type: 'button', class: 'link-button', onclick: moveInDialog }, 'Bring your Drive here')))
 }
 
 // ---- list view ----------------------------------------------------------------
@@ -206,12 +209,12 @@ function renderList (list, files, folders, searching) {
 // ---- icon view ------------------------------------------------------------------
 
 function renderGrid (list, files, folders, searching) {
-  const live = files.filter((f) => f.sync.live).length
+  const live = files.filter((f) => (f.sync.here || []).length).length
   const waiting = files.filter((f) => f.waitingForPeer).length
   const unsynced = files.filter((f) => f.sync.pending > 0 && f.sync.lastSyncedAt).length
   const summary = [
     { text: [folders.length ? plural(folders.length, 'folder') : null, plural(files.length, 'file')].filter(Boolean).join(', ') },
-    live ? { text: `${live} live now`, cls: 'live', dot: true } : null,
+    live ? { text: `Someone is in ${live === 1 ? '1 file' : `${live} files`} now`, cls: 'live', dot: true } : null,
     waiting ? { text: `${waiting} waiting for a peer`, cls: 'warn' } : null,
     unsynced ? { text: `${plural(unsynced, 'file')} with edits only on this computer`, cls: 'warn' } : null
   ].filter(Boolean)
@@ -373,7 +376,8 @@ function fileMenu (anchor, f) {
   const openable = f.supported && !f.waitingForPeer
   openMenu(anchor, [
     { label: 'Open', disabled: !openable, onSelect: () => handlers.openDocument(f.docId) },
-    { label: 'Copy invite link', icon: icons.invite, onSelect: async () => { await cp.copyInvite(f.docId); toast('Invite link copied. Anyone with it can read and edit.') } },
+    { label: 'Share\u2026', icon: icons.invite, disabled: f.waitingForPeer, onSelect: () => shareDialog(f.docId) },
+    { label: 'Sync in the background', hint: f.syncMode === 'open' ? 'Off: syncs only while the file is open' : 'On: syncs whenever Commonplace is running', checked: f.syncMode !== 'open', onSelect: () => setSyncMode(f.docId, f.syncMode === 'open' ? 'always' : 'open') },
     { label: 'Move to…', icon: icons.folder, onSelect: () => moveDialog({ kind: 'file', id: f.docId, name: f.title, current: f.folderId }) },
     { label: 'Details', onSelect: () => detailsDialog(f) },
     { sep: true },
@@ -397,6 +401,7 @@ function detailsDialog (f) {
   const rows = [
     ['Type', f.appName || 'Unknown'],
     ['Owner', f.role === 'owner' ? 'You' : (f.owner?.name || 'Unknown')],
+    ['Your access', { owner: 'Owner', editor: 'Can edit', viewer: 'Can view' }[f.role] || (f.access.removed ? 'Removed' : 'Not yet confirmed')],
     ['Written by', f.contributors.length ? listNames(f.contributors) : 'Nobody yet'],
     ['Folder', f.folderId ? folderPath(f.folderId).map((p) => p.name).join(' / ') : 'CommonDrive'],
     ['Last change', [ago(f.lastChangeAt || f.addedAt), f.lastChangedBy ? `by ${f.lastChangedBy}` : null].filter(Boolean).join(' ') || '—'],

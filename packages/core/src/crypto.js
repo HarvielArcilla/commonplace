@@ -30,6 +30,12 @@ export function deriveDocKeys (secret) {
   }
 }
 
+// Keys for one epoch of a document. Epoch 0 uses the document's root secret;
+// later epochs (after someone is removed) use a fresh random secret.
+export function epochKeys (secret) {
+  return { topic: derive('topic', secret, 32), encKey: derive('enc', secret, 32) }
+}
+
 export function seal (encKey, plaintext) {
   const nonce = crypto.randomBytes(NONCE_BYTES)
   const cipher = crypto.createCipheriv('aes-256-gcm', encKey, nonce)

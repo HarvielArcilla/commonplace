@@ -10,21 +10,26 @@ import path from 'node:path'
 import { randomBytes } from 'node:crypto'
 import * as Y from 'yjs'
 import {
-  FileStore, SyncEngine, SwarmTransport, loadOrCreateIdentity,
+  FileStore, SyncEngine, SwarmTransport, loadOrCreateIdentity, canEdit,
   newDocSecret, deriveDocKeys, encodeInvite, parseInvite, initContainer, readMeta, updatePerson
 } from '@commonplace/core'
 
-const INDEX_ID = 'drive-index'
+export { sendDrive, receiveDrive, newMoveCode, parseMoveCode } from './move.js'
+
+export const INDEX_ID = 'drive-index'
 
 export class Drive extends EventEmitter {
   constructor ({ dataDir, apps = [], swarm = {}, transport = true }) {
     super()
     this.dataDir = dataDir
+    this.swarmOpts = swarm
     this.appsByType = new Map(apps.map((a) => [a.type, a]))
     this.identity = loadOrCreateIdentity(dataDir)
     this.store = new FileStore(path.join(dataDir, 'files'))
     this.engine = new SyncEngine({ identity: this.identity, store: this.store })
     this._topicToDoc = new Map()
+    this._joined = new Map() // docId -> Set(topicHex)
+    this._open = new Set() // files open in a window right now
     this.transport = transport
       ? new SwarmTransport(this.engine, {
         ...swarm,
@@ -44,7 +49,9 @@ export class Drive extends EventEmitter {
     // Personal folders: they organize your Drive only and are never shared.
     this.folders = this.index.getMap('folders')
 
-    this.engine.on('status', () => this._changed())
+    this.engine.on('status', (status) => { this._rememberNames(status); this._changed() })
+    this.engine.on('members', () => this._changed())
+    this.engine.on('topics', (docId) => this._syncTopics(docId))
     this._recent = new Map() // docId -> { at, by } for changes made by others
     this._persistTimers = new Map()
     this.engine.on('update', (docId, update, origin) => {
@@ -67,6 +74,10 @@ export class Drive extends EventEmitter {
     this._persistTimers.clear()
     this.engine.destroy()
     if (this.transport) await this.transport.destroy()
+  }
+
+  get isEmpty () {
+    return this.files.size === 0 && this.folders.size === 0
   }
 
   // ---- queries -------------------------------------------------------------
@@ -96,21 +107,41 @@ export class Drive extends EventEmitter {
   describe (docId) {
     const entry = this.files.get(docId)
     if (!entry) return null
-    const status = this.engine.status(docId) || { peers: [], pending: 0 }
+    const status = this.engine.status(docId) || { peers: [], here: [], pending: 0, active: false }
     const app = this.appsByType.get(entry.type)
-    const isOwner = entry.owner?.userId === this.identity.userId
-    const ownerOnline = isOwner || status.peers.some((p) => p.userId === entry.owner?.userId)
     const doc = this.engine.getDoc(docId)
+    const people = doc?.ydoc.getMap('people')
+    // Names: what people wrote in the file, else what they told us when they
+    // connected (remembered for when they're offline), else a placeholder.
+    const nameOf = (userId, fallback) => people?.get(userId)?.name || fallback || entry.names?.[userId] || 'Someone'
+    const access = this.engine.access(docId) || {}
+    const ownerId = access.owner || entry.owner?.userId || null
+    const owner = ownerId ? { userId: ownerId, name: ownerId === this.identity.userId ? this.identity.name : nameOf(ownerId, entry.owner?.name) } : null
+    const isOwner = ownerId === this.identity.userId
+    const ownerOnline = isOwner || status.peers.some((p) => p.userId === ownerId)
     const recent = this._recent.get(docId)
     const remoteAt = Math.max(recent?.at || 0, entry.lastChangedAt || 0)
     const changeBy = (recent?.at || 0) >= (entry.lastChangedAt || 0) ? (recent?.by || entry.lastChangedBy) : entry.lastChangedBy
     const changeAt = Math.max(remoteAt, entry.lastEditedAt || 0)
+    const members = doc?.members.exists
+      ? doc.members.list().map((m) => ({ ...m, name: m.userId === this.identity.userId ? this.identity.name : nameOf(m.userId), online: m.userId === this.identity.userId || status.peers.some((p) => p.userId === m.userId) }))
+      : []
+    // People connected with a valid invite whom the owner hasn't added yet.
+    const waiting = status.peers.filter((p) => p.pending && !members.some((m) => m.userId === p.userId)).map((p) => ({ userId: p.userId, role: p.role, name: nameOf(p.userId, p.name), online: true, pending: true }))
     return {
       docId,
       type: entry.type,
       title: entry.title,
-      owner: entry.owner,
-      role: isOwner ? 'owner' : 'editor',
+      owner,
+      role: access.role || (isOwner ? 'owner' : null),
+      access: {
+        role: access.role || null,
+        pending: Boolean(access.pending),
+        removed: Boolean(access.removed),
+        waitingForKey: Boolean(access.waitingForKey),
+        managed: Boolean(access.hasMembership)
+      },
+      members: [...members, ...waiting],
       contributed: Boolean(entry.contributed),
       contributors: entry.contributors || [],
       addedAt: entry.addedAt,
@@ -127,9 +158,12 @@ export class Drive extends EventEmitter {
       exports: app?.exports || [],
       folderId: this.folders.has(entry.folderId) ? entry.folderId : null,
       preview: app && doc ? safePreview(app, doc.ydoc) : '',
+      syncMode: entry.syncMode === 'open' ? 'open' : 'always',
       sync: {
+        active: Boolean(status.active),
         // Show peers by the name they currently use in this document.
-        peers: status.peers.map((p) => ({ ...p, name: doc?.ydoc.getMap('people').get(p.userId)?.name || p.name })),
+        peers: status.peers.map((p) => ({ ...p, name: nameOf(p.userId, p.name) })),
+        here: (status.here || []).map((p) => ({ ...p, name: nameOf(p.userId, p.name) })),
         live: status.peers.length > 0,
         ownerOnline,
         lastSyncedAt: status.lastSyncedAt || null,
@@ -149,6 +183,7 @@ export class Drive extends EventEmitter {
     const doc = this.engine.openDoc(secret)
     initContainer(doc.ydoc, { type, title, owner: this.identity, schemaVersion: app.schemaVersion })
     app.initContent?.(doc.ydoc)
+    this.engine.ensureMembership(docId)
     this.files.set(docId, {
       docId,
       secret: secret.toString('base64'),
@@ -165,20 +200,62 @@ export class Drive extends EventEmitter {
   }
 
   async join (inviteText, { folderId = null } = {}) {
-    const secret = parseInvite(inviteText)
-    if (!secret) throw new Error('That invite code is not valid.')
-    const { docId } = deriveDocKeys(secret)
-    if (!this.files.has(docId)) {
-      this.files.set(docId, { docId, secret: secret.toString('base64'), type: null, title: 'Waiting for a peer…', owner: null, folderId: this.folders.has(folderId) ? folderId : null, addedAt: Date.now() })
-      this._attach(this.files.get(docId))
-      this._changed()
+    const parsed = parseInvite(inviteText)
+    if (!parsed) throw new Error('That invite code is not valid.')
+    const { docId } = deriveDocKeys(parsed.secret)
+    const existing = this.files.get(docId)
+    if (existing) {
+      // A newer invite (say, with edit rights) replaces the one I had.
+      if (parsed.token) {
+        this._patch(docId, { invite: parsed.token })
+        const doc = this.engine.getDoc(docId)
+        if (doc) { doc.invite = parsed.token; this.engine.setActive(docId, false); this._applyActive(docId) }
+      }
+      return docId
     }
+    this.files.set(docId, {
+      docId,
+      secret: parsed.secret.toString('base64'),
+      invite: parsed.token,
+      type: null,
+      title: 'Waiting for a peer…',
+      owner: parsed.token ? { userId: parsed.token.by, name: null } : null,
+      folderId: this.folders.has(folderId) ? folderId : null,
+      addedAt: Date.now()
+    })
+    this._attach(this.files.get(docId))
+    this._changed()
     return docId
   }
 
-  invite (docId) {
+  // An invite link for a role. Once a file has an owner-signed membership,
+  // only the owner can make links (the link carries their signature).
+  invite (docId, role = 'editor') {
     const entry = this.files.get(docId)
-    return entry ? encodeInvite(Buffer.from(entry.secret, 'base64')) : null
+    const doc = this.engine.getDoc(docId)
+    if (!entry || !doc) return null
+    const secret = Buffer.from(entry.secret, 'base64')
+    if (!doc.members.exists) return encodeInvite(secret)
+    if (doc.members.owner !== this.identity.userId) throw new Error('Only the owner can invite people to this file.')
+    return encodeInvite(secret, this.engine.createInvite(docId, role))
+  }
+
+  setMemberRole (docId, userId, role) { this.engine.setRole(docId, userId, role) }
+  removeMember (docId, userId) { this.engine.removeMember(docId, userId) }
+  transferOwnership (docId, userId) { this.engine.transferOwnership(docId, userId) }
+  resetInvites (docId) { this.engine.resetInvites(docId) }
+
+  // 'always': sync whenever Commonplace is running (default).
+  // 'open': sync only while the file is open in a window.
+  setSyncMode (docId, mode) {
+    this._patch(docId, { syncMode: mode === 'open' ? 'open' : 'always' })
+    this._applyActive(docId)
+  }
+
+  setOpen (docId, open) {
+    if (open) this._open.add(docId)
+    else this._open.delete(docId)
+    this._applyActive(docId)
   }
 
   rename (docId, title) {
@@ -192,10 +269,10 @@ export class Drive extends EventEmitter {
 
   // Removes the file from this device only. Other collaborators keep theirs.
   async remove (docId) {
-    const doc = this.engine.getDoc(docId)
-    if (doc && this.transport) await this.transport.leave(doc.topic)
+    await this._leaveTopics(docId)
     this.engine.closeDoc(docId, { deleteLocalData: true })
     this.files.delete(docId)
+    this._open.delete(docId)
     this._changed()
   }
 
@@ -253,17 +330,38 @@ export class Drive extends EventEmitter {
       const doc = this.engine.getDoc(entry.docId)
       if (!doc || !entry.type) continue
       const known = doc.ydoc.getMap('people').has(this.identity.userId)
-      if (known || entry.contributed || entry.owner?.userId === this.identity.userId) this.touchPerson(entry.docId)
+      if (known || entry.contributed || doc.members.owner === this.identity.userId) this.touchPerson(entry.docId)
     }
     this._changed()
   }
 
   // Writes my current name into a document's people map if it's out of date.
+  // Viewers can't write to documents, so their names travel in their HELLO.
   touchPerson (docId) {
     const doc = this.engine.getDoc(docId)
-    if (!doc) return
+    if (!doc || !canEdit(this.engine.access(docId)?.role)) return
     const me = { userId: this.identity.userId, name: this.identity.name, color: this.identity.color }
     doc.ydoc.transact(() => updatePerson(doc.ydoc, me), 'local-meta')
+  }
+
+  // Everything needed to recreate this Drive on another computer.
+  exportForMove () {
+    return {
+      identity: this.identity.exportBundle(),
+      index: Buffer.from(Y.encodeStateAsUpdate(this.index)).toString('base64'),
+      docs: [...this.files.keys()].map((docId) => ({ docId, files: this.store.exportDoc(docId) }))
+    }
+  }
+
+  // ---- internals -----------------------------------------------------------
+
+  _rememberNames (status) {
+    const entry = status && this.files.get(status.docId)
+    if (!entry) return
+    const names = { ...(entry.names || {}) }
+    let changed = false
+    for (const p of status.peers) if (p.name && names[p.userId] !== p.name) { names[p.userId] = p.name; changed = true }
+    if (changed) this._patch(status.docId, { names })
   }
 
   _remoteChange (docId, update) {
@@ -287,10 +385,8 @@ export class Drive extends EventEmitter {
     }
   }
 
-  // ---- internals -----------------------------------------------------------
-
   _attach (entry) {
-    const doc = this.engine.openDoc(Buffer.from(entry.secret, 'base64'))
+    const doc = this.engine.openDoc(Buffer.from(entry.secret, 'base64'), { invite: entry.invite || null, active: this._shouldSync(entry) })
     const refresh = () => {
       const meta = readMeta(doc.ydoc)
       if (!meta) return
@@ -301,13 +397,56 @@ export class Drive extends EventEmitter {
         schemaVersion: meta.schemaVersion,
         contributors: meta.contributors
       })
+      // Files I created before membership existed get one now, keeping
+      // everyone who has already worked on them as editors.
+      if (meta.owner?.userId === this.identity.userId && !doc.members.exists) {
+        const members = [...doc.ydoc.getMap('people').keys()]
+          .filter((id) => id !== this.identity.userId && /^[0-9a-f]{64}$/.test(id))
+          .map((userId) => ({ userId, role: 'editor' }))
+        this.engine.ensureMembership(entry.docId, { members })
+      }
     }
     doc.meta.observe(refresh)
     doc.ydoc.getMap('authors').observe(refresh)
     doc.ydoc.getMap('people').observe(refresh)
     refresh()
-    this._topicToDoc.set(doc.topic.toString('hex'), entry.docId)
-    if (this.transport) this.transport.join(doc.topic).catch((err) => this.emit('error', err))
+    this._syncTopics(entry.docId)
+  }
+
+  _shouldSync (entry) {
+    return entry.syncMode !== 'open' || this._open.has(entry.docId)
+  }
+
+  _applyActive (docId) {
+    const entry = this.files.get(docId)
+    if (!entry) return
+    const active = this._shouldSync(entry)
+    this.engine.setActive(docId, active)
+    if (active) this._syncTopics(docId)
+    else this._leaveTopics(docId)
+    this._changed()
+  }
+
+  // Joins the network topic for every key epoch of a file I'm syncing.
+  _syncTopics (docId) {
+    const entry = this.files.get(docId)
+    if (!entry || !this._shouldSync(entry)) return
+    const joined = this._joined.get(docId) || new Set()
+    this._joined.set(docId, joined)
+    for (const topic of this.engine.topicsFor(docId)) {
+      const hex = topic.toString('hex')
+      this._topicToDoc.set(hex, docId)
+      if (joined.has(hex)) continue
+      joined.add(hex)
+      if (this.transport) this.transport.join(topic).catch((err) => this.emit('error', err))
+    }
+  }
+
+  async _leaveTopics (docId) {
+    const joined = this._joined.get(docId)
+    this._joined.delete(docId)
+    if (!joined || !this.transport) return
+    for (const hex of joined) await this.transport.leave(Buffer.from(hex, 'hex')).catch(() => {})
   }
 
   _patch (docId, patch) {

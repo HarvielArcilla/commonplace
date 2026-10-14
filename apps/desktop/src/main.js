@@ -8,7 +8,8 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import * as Y from 'yjs'
 import * as awarenessProtocol from 'y-protocols/awareness'
-import { Drive } from '@commonplace/drive'
+import DHT from 'hyperdht'
+import { Drive, sendDrive, receiveDrive, newMoveCode } from '@commonplace/drive'
 import { docsApps } from '@commonplace/docs'
 import { readPage, PAGE_SIZES, DEFAULT_PAGE } from '@commonplace/docs/page'
 import { exportDocx, importDocx } from '@commonplace/docs/convert'
@@ -119,6 +120,7 @@ function registerIpc () {
   ipcMain.handle('folder:move', (_e, id, parentId) => drive.moveFolder(id, parentId))
   ipcMain.handle('file:move', (_e, docId, folderId) => drive.moveFile(docId, folderId))
   ipcMain.handle('link:open', (_e, url) => openExternal(url))
+  ipcMain.handle('clipboard:write', (_e, text) => clipboard.writeText(String(text)))
 
   // Import a .md or .docx file as a new document. The window fills in the
   // content right after opening it (the editor owns the content schema).
@@ -185,8 +187,8 @@ function registerIpc () {
   ipcMain.handle('drive:create', (_e, type, title, folderId) => drive.create(type, title, { folderId }))
   ipcMain.handle('drive:join', (_e, invite, folderId) => drive.join(invite, { folderId }))
   ipcMain.handle('drive:remove', (_e, docId) => { openDocs.delete(docId); return drive.remove(docId) })
-  ipcMain.handle('drive:copyInvite', (_e, docId) => {
-    const invite = drive.invite(docId)
+  ipcMain.handle('drive:copyInvite', (_e, docId, role) => {
+    const invite = drive.invite(docId, role)
     if (invite) clipboard.writeText(invite)
     return invite
   })
@@ -197,6 +199,7 @@ function registerIpc () {
     const doc = drive.getDoc(docId)
     if (!doc) throw new Error('This file is no longer in your Drive.')
     openDocs.add(docId)
+    drive.setOpen(docId, true)
     drive.engine.registerLocalClient(docId, clientId)
     drive.touchPerson(docId)
     drive.markOpened(docId)
@@ -207,13 +210,65 @@ function registerIpc () {
       file: drive.describe(docId)
     }
   })
-  ipcMain.handle('doc:close', (_e, docId) => { openDocs.delete(docId) })
+  ipcMain.handle('doc:close', (_e, docId) => { openDocs.delete(docId); drive.setOpen(docId, false) })
+
+  // Sharing and access (owner actions are checked again in the engine).
+  ipcMain.handle('member:role', (_e, docId, userId, role) => drive.setMemberRole(docId, userId, role))
+  ipcMain.handle('member:remove', (_e, docId, userId) => drive.removeMember(docId, userId))
+  ipcMain.handle('member:transfer', (_e, docId, userId) => drive.transferOwnership(docId, userId))
+  ipcMain.handle('invites:reset', (_e, docId) => drive.resetInvites(docId))
+  ipcMain.handle('file:syncMode', (_e, docId, mode) => drive.setSyncMode(docId, mode))
+
+  // Moving the whole Drive to another computer.
+  ipcMain.handle('move:start', () => {
+    if (move) move.abort()
+    const code = newMoveCode()
+    const controller = new AbortController()
+    move = controller
+    sendDrive({ code, drive, swarm: swarmOptions(), signal: controller.signal, onStatus: (s) => send('move:status', s) })
+      .then(async ({ count }) => {
+        // The new computer has everything: sign out here and delete it all.
+        move = null
+        await signOutAndWipe()
+        send('move:status', { phase: 'signed-out', count })
+      })
+      .catch((err) => { if (move === controller) move = null; send('move:status', { phase: 'error', message: err.message }) })
+    return code
+  })
+  ipcMain.handle('move:cancel', () => { move?.abort(); move = null })
+  ipcMain.handle('move:receive', async (_e, code) => {
+    if (!drive.isEmpty) throw new Error('This computer already has files. A Drive can only be moved to a computer with an empty Drive.')
+    const result = await receiveDrive({
+      code,
+      dataDir: app.getPath('userData'),
+      isEmpty: () => drive.isEmpty,
+      swarm: swarmOptions(),
+      onStatus: (s) => send('move:status', s),
+      beforeInstall: () => drive.stop()
+    })
+    await startDrive()
+    win?.webContents.reload()
+    return result
+  })
   ipcMain.on('doc:update', (_e, docId, update) => drive.engine.applyLocalUpdate(docId, update, 'renderer'))
   ipcMain.on('doc:awareness', (_e, docId, update) => drive.engine.applyLocalAwareness(docId, update, 'renderer'))
 }
 
-app.whenReady().then(async () => {
-  drive = new Drive({ dataDir: app.getPath('userData'), apps: docsApps })
+let move = null
+
+// COMMONPLACE_BOOTSTRAP=host:port[,host:port] joins a private DHT instead of
+// the public one (for testing, or a group running its own bootstrap node).
+function swarmOptions () {
+  const list = (process.env.COMMONPLACE_BOOTSTRAP || '').split(',').map((s) => s.trim()).filter(Boolean)
+  if (!list.length) return {}
+  const bootstrap = list.map((hp) => { const [host, port] = hp.split(':'); return { host, port: Number(port) } })
+  // COMMONPLACE_DHT_HOST binds this computer's DHT node to one address (e.g. 127.0.0.1).
+  if (process.env.COMMONPLACE_DHT_HOST) return { dht: new DHT({ bootstrap, host: process.env.COMMONPLACE_DHT_HOST }) }
+  return { bootstrap }
+}
+
+async function startDrive () {
+  drive = new Drive({ dataDir: app.getPath('userData'), apps: docsApps, swarm: swarmOptions() })
   drive.on('error', (err) => console.error('[commonplace]', err))
   drive.on('changed', () => send('drive:changed', drive.list(), drive.me(), drive.listFolders()))
   drive.engine.on('update', (docId, update, origin) => {
@@ -222,8 +277,23 @@ app.whenReady().then(async () => {
   drive.engine.on('awareness', (docId, update, origin) => {
     if (origin !== 'renderer' && openDocs.has(docId)) send('doc:awareness', docId, update)
   })
-  registerIpc()
   await drive.start()
+}
+
+// After a move: this computer no longer holds the identity or any files.
+async function signOutAndWipe () {
+  const dir = app.getPath('userData')
+  openDocs.clear()
+  await drive.stop()
+  await fs.rm(path.join(dir, 'files'), { recursive: true, force: true })
+  await fs.rm(path.join(dir, 'identity.json'), { force: true })
+  await startDrive() // a fresh, empty Drive with a new identity
+  win?.webContents.reload()
+}
+
+app.whenReady().then(async () => {
+  registerIpc()
+  await startDrive()
   createWindow()
 
   app.on('activate', () => { if (!win) createWindow() })

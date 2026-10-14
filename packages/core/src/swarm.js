@@ -20,7 +20,7 @@ export class SwarmTransport {
     this._timer.unref?.()
     this.swarm.on('connection', (socket) => {
       socket.on('error', () => {})
-      engine.addConnection(socket, { remoteId: socket.remotePublicKey?.toString('hex') })
+      engine.addConnection(socket, { remoteId: socket.remotePublicKey?.toString('hex'), localId: socket.publicKey?.toString('hex') })
     })
   }
 

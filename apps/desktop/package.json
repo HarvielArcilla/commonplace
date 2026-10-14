@@ -19,7 +19,8 @@
     "@commonplace/docs": "0.1.0",
     "@commonplace/drive": "0.1.0",
     "yjs": "^13.6.33",
-    "y-protocols": "^1.0.7"
+    "y-protocols": "^1.0.7",
+    "hyperdht": "^6.34.1"
   },
   "devDependencies": {
     "electron": "44.7.2",

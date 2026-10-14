@@ -9,12 +9,14 @@ CommonDocs has two kinds of document:
 
 Both support links, LaTeX math, tables and images. CommonDrive shows files as a list or as icons, with personal folders, filters, sorting and search.
 
+Sharing works with roles: invite people to edit or only view, change their role, remove them, or hand ownership to someone else. Removing someone stops sending them anything new; what they already have stays with them. You can move your whole Drive to another computer while both are online.
+
 ## How it works
 
 - Every file is a CRDT (Yjs). Copies that have seen the same edits are identical, in any order, so nobody has to be online to "own" consistency.
 - Your edits are saved on your computer first. When anyone else with the file is online at the same time as you, your computers find each other on a peer-to-peer network (Hyperswarm), connect directly, and exchange what each is missing.
-- Every byte that leaves your computer is encrypted with the file's key. The key travels only inside the invite link.
-- Your identity is a keypair created on first launch. Your name and cursor color are yours to pick.
+- Every byte that leaves your computer is encrypted with the file's key. The key travels only inside the invite link, or sealed to each member after someone is removed.
+- Your identity is a keypair created on first launch. Your name and cursor color are yours to pick. Each file's owner signs who may read or edit it, and every computer checks those signatures.
 
 The tradeoff, chosen on purpose: a file can only sync while at least one other person who has it is online. Nothing waits on a server.
 
@@ -42,6 +44,8 @@ $env:COMMONPLACE_PROFILE="bob"; npm run dev
 Create a document in one window, click **Copy invite link**, and paste it into **Join with invite** in the other.
 
 On Windows, the first run asks whether to let the app use the network. Allow it, or other computers can't reach yours.
+
+To run on a private network instead of the public DHT, set `COMMONPLACE_BOOTSTRAP=host:port` (and optionally `COMMONPLACE_DHT_HOST`).
 
 ## Build installers
 

@@ -15,7 +15,10 @@
 | Transport (optional, later) | A "dumb relay" that stores and forwards encrypted updates | Improves availability for people who want it. The sync engine already accepts any byte stream. |
 | Encryption | AES-256-GCM per file, key derived from the file secret in the invite | A peer without the invite cannot read or inject anything. |
 | Identity | Ed25519 keypair on first launch. Public key = user ID | No accounts. Names are self-chosen and not unique. |
-| Ownership | Creator is the owner (recorded in container metadata) | Ownership governs membership, not edits. Edits never wait for the owner. |
+| Ownership | An owner-signed membership log per file | Ownership governs who may take part, not edits. Edits never wait for the owner. |
+| Roles | Owner, editor, viewer; enforced by every peer | Each connection proves its identity; peers accept edits only from editors. |
+| Revoking | Remove + rotate to a new key epoch | Removed people get nothing new. What they already have stays with them. |
+| Devices | One computer per identity; moving is explicit | Membership is signed by one key, so it must not be in two places at once. |
 | Rendering | Webview (Electron) + ProseMirror via TipTap | Text shaping, IME, accessibility and spellcheck come from the browser engine. |
 | Shell | Electron | Hyperswarm is JavaScript; identical rendering on macOS and Windows. |
 
@@ -47,12 +50,26 @@ Both have links (Ctrl/Cmd+click opens them in the browser), LaTeX math rendered 
 
 **Drive folders.** Folders are personal: they live in your Drive index (a local CRDT), never in the shared files. Deleting a folder moves its contents up a level; it never deletes files.
 
+**Membership (`core/src/members.js`).** Each file carries an append-only log signed by its current owner: `create`, `add` (with role), `role`, `remove`, `rotate`, `owner` (transfer) and `revoke-invites`. Every peer replays and checks the whole log; forged or out-of-order entries are ignored. Files made before membership get a log the next time their owner runs the app, with everyone already in the file kept as editors.
+
+- **Identity proof.** Each `HELLO` is signed by the person's key over the file, the key epoch, and the Noise public key of that very connection, so it can't be replayed on another connection.
+- **Roles.** Peers accept `UPDATE` frames only from connections whose signed identity has the editor or owner role. A viewer's client is read-only, and even a modified one can't change anyone else's copy.
+- **Invite links** carry the file's root secret plus a token signed by the owner naming a role. Someone holding a valid token can start immediately (while the file is on its first key); the owner's app adds them to the log the next time both are online.
+- **Removing someone** appends `remove` and `rotate`: a fresh random key is sealed (X25519 + HKDF + AES-GCM) to each remaining member's encryption key, and every invite link issued before it stops working. Members move to the new key's network topic; they keep listening on older topics only to hand out the log, so people who were offline during the change can catch up. The removed person keeps everything they already had; they get nothing new. If they were offline at the moment of removal and reconnect to a member who also missed the change, those two can still exchange edits until either reaches someone who has the log. That window closes as soon as the log reaches them.
+- **Joining after a key change** needs the owner online, since only the owner can seal the current key to a newcomer.
+- **Transferring ownership** is one signed `owner` entry. The previous owner becomes an editor.
+
+**Presence and background sync.** Files sync whenever the app is running, so edits move as often as possible. Presence ("Maya is here") comes from the editor's awareness state, which exists only while someone has the file open. Per file, background sync can be turned off ("syncs only while open"); the app then leaves the file's topics and tells connected peers it has stopped (`LEAVE`).
+
+**Moving to another computer (`drive/src/move.js`).** An identity, its Drive index and every file move together, directly, while both computers are online. The old computer shows a one-time code; both sides derive a private meeting topic and an encryption key from it. The new computer must have an empty Drive. It writes everything to a staging folder, swaps it into place, and confirms; only then does the old computer delete its identity and files and start fresh. Collaborators see the same person, so nothing needs re-sharing.
+
 **Window boundary.** The window is sandboxed, with no Node and no network. It keeps its own Y.Doc mirror and exchanges binary updates with the background process through `preload.cjs`.
 
 ## Known limits
 
-- Anyone with the invite link can read and edit. There are no read-only roles and no removing people yet.
-- Removing a file deletes only your copy.
+- Only the owner can invite people, and new people can join after a key change only while the owner is online.
+- An identity lives on one computer. Using one identity on two computers at once isn't supported; losing the computer means losing the identity (a backup phrase is on the roadmap).
+- Removing a file from your Drive deletes only your copy.
 - Files are stored unencrypted on your own disk, which is protected only by your OS account.
 - A peer you share one file with learns the public IDs of other files you're syncing (not their contents or keys).
 - The first launch needs Hyperswarm's public bootstrap nodes to join the DHT. You can supply your own list.
@@ -63,8 +80,8 @@ Both have links (Ctrl/Cmd+click opens them in the browser), LaTeX math rendered 
 
 ## Roadmap
 
-1. **Membership.** The owner signs a member list (user ID to role). Peers reject edits from non-members. Read-only roles. Removing someone rotates the file key.
-2. **Your devices.** Sync the Drive index between your own computers, linked by QR code, plus a recovery phrase for your identity.
+1. **Identity backup.** A recovery phrase or key file, so losing a computer doesn't lose ownership.
+2. **Several computers at once.** Device keys certified by your identity, with one computer at a time holding the owner role for membership changes.
 3. **LAN sync.** Find peers on the same network with mDNS, with no internet needed.
 4. **Optional relay mode.** A tiny open-source relay anyone can run, set by URL in settings.
 5. **Opt-in seeding.** Let an always-on machine hold encrypted copies for availability.
