@@ -51,6 +51,8 @@ powershell -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.c
 
 Then double-click **Commonplace** on your Desktop (or in the app menu on Linux). When your computer asks whether Commonplace may use the network, allow it (on Windows, for private networks too, for same-network sync), or other people's computers can't reach yours.
 
+When a new version is on GitHub, the Drive shows **A new version of Commonplace is available**; choose **Update and restart** to update in place (or run the install command again). The check asks GitHub's public API about this project's commits, and sends nothing about you or your files; set `COMMONPLACE_NO_UPDATE_CHECK=1` to turn it off. Closing the window quits Commonplace, and files stop syncing until you open it again.
+
 The scripts are short and commented: read [install.sh](scripts/install.sh) or [install.ps1](scripts/install.ps1) before running them if you like. Settings: `COMMONPLACE_DIR` (install location), `COMMONPLACE_NO_SHORTCUT=1`.
 
 ### By hand

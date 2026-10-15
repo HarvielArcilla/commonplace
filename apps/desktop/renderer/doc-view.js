@@ -20,6 +20,7 @@ import { conflictsDialog } from './conflicts.js'
 import { toggleHistory, closePanel } from './history-view.js'
 import { toggleComments, newComment } from './comments-view.js'
 import { mountDocs, pageSetupDialog } from './docs-view.js'
+import { setToolbar, fitToolbar } from './toolbar.js'
 import { mountSheet } from './sheet-view.js'
 import { mountSlides } from './slides-view.js'
 
@@ -74,7 +75,7 @@ export async function openDocument (docId, { focusTitle = false, initialContent 
 
   const desk = $('#desk')
   desk.className = `desk desk-${kind}`
-  $('#toolbar').replaceChildren()
+  setToolbar([])
   const o = { docId, kind, ydoc, awareness, editor: null, paper: null, pages: 1, zoom: 1, cleanup, view: null }
   o.refreshMargin = () => { if (state.open === o) renderDocMargin() }
   state.open = o
@@ -138,7 +139,7 @@ export async function closeDocument () {
   o.ydoc.destroy()
   await cp.closeDoc(o.docId)
   $('#desk').replaceChildren()
-  $('#toolbar').replaceChildren()
+  setToolbar([])
 }
 
 // ---- export ----------------------------------------------------------------------
@@ -189,7 +190,7 @@ function applyAccess () {
   const writable = Boolean(file) && (file.role === 'owner' || file.role === 'editor') && !file.access?.removed
   o.view.setEditable(writable)
   $('#doc-title').readOnly = !writable || Boolean(o.closePreview)
-  $('#toolbar').hidden = !writable
+  if ($('#toolbar').hidden === writable) { $('#toolbar').hidden = !writable; if (writable) fitToolbar() }
   $('#doc-view').classList.toggle('read-only', !writable)
 }
 

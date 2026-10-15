@@ -88,6 +88,7 @@ if ($env:COMMONPLACE_NO_SHORTCUT -ne '1') {
   $link.WorkingDirectory = $Dir
   $link.WindowStyle = 7 # start minimized; the app opens its own window
   $link.Description = 'Commonplace: peer-to-peer documents'
+  $link.IconLocation = Join-Path $Dir 'apps\desktop\build\icon.ico'
   $link.Save()
   Say 'Added Commonplace to your Desktop. Double-click it to start.'
 }

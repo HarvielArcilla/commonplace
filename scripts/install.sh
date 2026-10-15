@@ -86,10 +86,29 @@ chmod +x "$DIR/scripts/start.sh"
 # --- 5. Launcher ---------------------------------------------------------------------
 if [ "${COMMONPLACE_NO_SHORTCUT:-}" != "1" ]; then
   if [ "$OS" = "Darwin" ]; then
-    LAUNCHER="$HOME/Desktop/Commonplace.command"
-    printf '#!/bin/bash\nexec "%s/scripts/start.sh"\n' "$DIR" > "$LAUNCHER"
-    chmod +x "$LAUNCHER"
-    say "Added Commonplace to your Desktop. Double-click it to start."
+    # A small app in ~/Applications that starts Commonplace without opening
+    # a Terminal window (it has no Dock icon of its own), plus a Desktop alias.
+    APP="$HOME/Applications/Commonplace.app"
+    rm -rf "$APP"
+    mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+    printf '#!/bin/bash\nexec "%s/scripts/start.sh" >"$HOME/Library/Logs/Commonplace.log" 2>&1\n' "$DIR" > "$APP/Contents/MacOS/Commonplace"
+    chmod +x "$APP/Contents/MacOS/Commonplace"
+    cp "$DIR/node_modules/electron/dist/Electron.app/Contents/Resources/electron.icns" "$APP/Contents/Resources/Commonplace.icns" 2>/dev/null || true
+    cat > "$APP/Contents/Info.plist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>CFBundleName</key><string>Commonplace</string>
+  <key>CFBundleIdentifier</key><string>org.commonplace.launcher</string>
+  <key>CFBundleExecutable</key><string>Commonplace</string>
+  <key>CFBundleIconFile</key><string>Commonplace</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>LSUIElement</key><true/>
+</dict></plist>
+PLIST
+    rm -f "$HOME/Desktop/Commonplace.command"
+    ln -sfn "$APP" "$HOME/Desktop/Commonplace"
+    say "Added Commonplace to your Applications folder and Desktop. Double-click it to start."
   else
     APPS="$HOME/.local/share/applications"
     mkdir -p "$APPS"
@@ -99,6 +118,7 @@ Type=Application
 Name=Commonplace
 Comment=Peer-to-peer documents
 Exec="$DIR/scripts/start.sh"
+Icon=$DIR/apps/desktop/build/icon.png
 Terminal=false
 Categories=Office;
 EOF

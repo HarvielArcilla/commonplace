@@ -300,7 +300,7 @@ button.crumb:hover { color: var(--ink); text-decoration: underline; text-underli
   padding: 0 20px 0 0;
 }
 #doc-view .bar [data-action="back"] { justify-self: end; margin-right: 12px; }
-#doc-view .title-input { margin-left: 16px; }
+#doc-view .title-input { margin-left: 16px; min-width: 0; width: calc(100% - 24px); box-sizing: border-box; text-overflow: ellipsis; }
 body.mac #doc-view .bar [data-action="back"] { justify-self: end; }
 .title-input {
   min-width: 120px;
@@ -776,3 +776,33 @@ body.mac #doc-view .bar [data-action="back"] { justify-self: end; }
   .print-slide { width: 13.333in; height: 7.5in; overflow: hidden; break-after: page; page-break-after: always; }
   .print-slide .slide-scaled { width: 13.333in !important; height: 7.5in !important; }
 }
+
+/* ---- update available --------------------------------------------------------- */
+.update-note { margin-left: auto; display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--ink); }
+.update-note .btn { padding: 3px 10px; font-size: 13px; }
+
+/* ---- the formatting toolbar stays on one row ------------------------------------ */
+#toolbar { flex-wrap: nowrap; overflow: hidden; }
+#toolbar > * { flex: none; }
+#toolbar > .tool-spacer { flex: 1; min-width: 8px; }
+.tool-more { font-size: 18px; letter-spacing: 1px; }
+.toolbar-more {
+  position: fixed; z-index: 55; max-width: min(520px, calc(100vw - 16px));
+  display: flex; flex-wrap: wrap; gap: 6px 4px; align-items: center;
+  padding: 8px; background: var(--paper-raised); border: 1px solid var(--rule); border-radius: 8px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.12);
+}
+.toolbar-more-group { display: flex; align-items: center; gap: 2px; padding-right: 6px; border-right: 1px solid var(--rule); }
+.toolbar-more-group:last-child { border-right: 0; padding-right: 0; }
+
+/* Narrow windows: the Drive filters use short labels so the bar stays on one row. */
+.label-short { display: none; }
+@media (max-width: 900px) {
+  .label-long { display: none; }
+  .label-short { display: inline; }
+  #type-filter { max-width: 130px; }
+  #doc-view .bar-actions { gap: 4px; }
+  #doc-view .bar-actions .btn-quiet { padding-left: 8px; padding-right: 8px; }
+}
+.drive-tools { flex-wrap: nowrap; }
+.drive-tools > * { flex: none; }

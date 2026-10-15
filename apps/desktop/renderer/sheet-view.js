@@ -11,7 +11,7 @@ import { shiftFormula, a1, colName } from '@commonplace/sheets/formula'
 import { $, el, toast, openMenu, promptText, confirmAction } from './ui.js'
 import { icons } from './icons.js'
 import { state } from './state.js'
-import { toolButton, toolbarGroups, press, swatchMenu, TEXT_COLORS, FILL_COLORS } from './toolbar.js'
+import { toolButton, toolbarGroups, setToolbar, press, swatchMenu, TEXT_COLORS, FILL_COLORS } from './toolbar.js'
 
 const CLIP_TYPE = 'application/x-commonplace-cells'
 const FORMATS = [['', 'Automatic'], ['number', 'Number'], ['percent', 'Percent'], ['currency', 'Currency'], ['date', 'Date'], ['text', 'Plain text']]
@@ -538,7 +538,7 @@ function renderToolbar (v) {
     const current = s.dp ?? (s.nf === 'percent' ? 0 : s.nf ? 2 : (typeof value === 'number' ? (String(value).split('.')[1] || '').length : 0))
     style({ dp: Math.max(0, Math.min(10, current + d)), nf: s.nf || 'number' })
   }
-  $('#toolbar').replaceChildren(...toolbarGroups([
+  setToolbar([...toolbarGroups([
     [
       tool('undo', 'Undo', icons.undo, () => v.undo.undo(), { key: 'Mod-Z' }),
       tool('redo', 'Redo', icons.redo, () => v.undo.redo(), { key: 'Mod-Shift-Z' })
@@ -564,7 +564,7 @@ function renderToolbar (v) {
       tool('lines', 'Insert or delete rows and columns', icons.table, (b) => linesMenu(v, b), { menu: true }),
       tool('sum', 'Sum the selected cells', el('span', { class: 'tool-text' }, 'Σ'), () => autoSum(v))
     ]
-  ]))
+  ])])
   syncToolbar(v)
 }
 

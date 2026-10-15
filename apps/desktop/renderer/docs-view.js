@@ -9,7 +9,7 @@ import { createDocsEditor, activeFormats, setBlock, pageGeometry, readPage, norm
 import { $, el, svg, toast, openMenu, dialog, selectField, cleanError } from './ui.js'
 import { icons } from './icons.js'
 import { state, cp } from './state.js'
-import { toolButton, sep, swatchMenu, showValue, TEXT_COLORS } from './toolbar.js'
+import { toolButton, sep, swatchMenu, showValue, setToolbar, TEXT_COLORS } from './toolbar.js'
 import { attachReview, recordMySuggestions, newComment } from './comments-view.js'
 
 // Fonts that ship with both macOS and Windows (plus Office's), so a document
@@ -220,7 +220,6 @@ function drawSheets (paper, pages, g) {
 function renderToolbar () {
   const o = state.open
   const paged = o.kind === 'paged'
-  const bar = $('#toolbar')
 
   const blockSelect = el('select', { class: 'tool-select', 'data-cmd': 'block', 'aria-label': 'Text style', onchange: (e) => setBlock(o.editor, e.target.value) },
     el('option', { value: 'p' }, 'Normal text'),
@@ -292,7 +291,7 @@ function renderToolbar () {
         onchange: (e) => { saveZoom(e.target.value); if (fitPaper()) state.open?.editor.storage.pagination?.refresh() }
       }, el('option', { value: 'fit' }, 'Fit'), ...ZOOMS.map((z) => el('option', { value: String(z) }, `${z}%`))))
   }
-  bar.replaceChildren(...children)
+  setToolbar(children)
   $('[data-action="page-setup"]').hidden = !paged
   syncToolbar()
 }

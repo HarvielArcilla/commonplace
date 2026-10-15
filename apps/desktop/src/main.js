@@ -15,6 +15,7 @@ import { sheetsApp } from '@commonplace/sheets'
 import { exportXlsx, importXlsx, exportCsv, importCsv } from '@commonplace/sheets/convert'
 import { slidesApp } from '@commonplace/slides'
 import { exportPptx } from '@commonplace/slides/convert'
+import { Updates } from './updates.js'
 import { readPage, PAGE_SIZES, DEFAULT_PAGE } from '@commonplace/docs/page'
 import { exportDocx, importDocx } from '@commonplace/docs/convert'
 
@@ -30,7 +31,14 @@ if (profile) app.setPath('userData', `${app.getPath('userData')}-${profile.repla
 
 if (!profile && !app.requestSingleInstanceLock()) app.quit()
 
+// Our name and icon, also when running from source (the Electron binary
+// itself is renamed by scripts/brand.mjs at install time).
+const ICON = path.join(here, '..', 'build', 'icon.png')
+if (process.platform === 'win32') app.setAppUserModelId('org.commonplace.desktop')
+app.setAboutPanelOptions?.({ applicationName: 'Commonplace', applicationVersion: app.getVersion(), copyright: 'MIT License' })
+
 let win = null
+let updates = null
 let drive = null
 let pendingInvite = null
 let pendingNotice = null // shown once the window has loaded
@@ -73,6 +81,7 @@ function createWindow () {
     minHeight: 520,
     title: 'Commonplace',
     backgroundColor: '#fbfbf9',
+    icon: ICON,
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
     webPreferences: {
       preload: path.join(here, 'preload.cjs'),
@@ -266,6 +275,9 @@ function registerIpc () {
     return code
   })
   ipcMain.handle('move:cancel', () => { move?.abort(); move = null })
+  ipcMain.handle('updates:state', () => updates?.state || null)
+  ipcMain.handle('updates:install', () => updates?.install(() => app.quit()))
+  ipcMain.handle('updates:open', () => { if (updates) shell.openExternal(updates.state.url) })
   ipcMain.handle('devices:list', () => drive.devices())
   ipcMain.handle('helpers:mine', () => drive.myHelpers())
   ipcMain.handle('helpers:addMine', (_e, address, options) => drive.addMyHelper(address, options || {}))
@@ -336,16 +348,27 @@ async function signOutAndWipe () {
 }
 
 app.whenReady().then(async () => {
+  if (process.platform === 'darwin' && !app.isPackaged) app.dock?.setIcon(ICON)
+  updates = new Updates({
+    root: app.isPackaged ? app.getAppPath() : path.resolve(here, '..', '..', '..'),
+    version: app.getVersion(),
+    packaged: app.isPackaged,
+    logDir: app.getPath('logs'),
+    onChange: (state) => send('updates:changed', state)
+  })
+  const last = updates.takeLastResult()
+  if (last) pendingNotice = last.ok ? 'Commonplace was updated to the newest version.' : `Commonplace couldn’t update itself. Run the install command again, or see ${last.log}.`
   registerIpc()
   await startDrive()
   createWindow()
+  updates.start()
 
   app.on('activate', () => { if (!win) createWindow() })
 })
 
-// Quitting stops sharing. On macOS the app keeps running (and keeps serving
-// your documents to collaborators) after the window closes, like most Mac apps.
-app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit() })
+// Closing the window quits, on every platform. Files stop syncing until
+// Commonplace is opened again.
+app.on('window-all-closed', () => app.quit())
 
 let stopping = false
 app.on('before-quit', (event) => {

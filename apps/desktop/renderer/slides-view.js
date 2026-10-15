@@ -12,7 +12,7 @@ import { createTextEditor } from '@commonplace/slides/editor'
 import { $, el, toast, openMenu, cleanError } from './ui.js'
 import { icons } from './icons.js'
 import { state, cp } from './state.js'
-import { toolButton, toolbarGroups, press, swatchMenu, showValue, TEXT_COLORS, FILL_COLORS } from './toolbar.js'
+import { toolButton, toolbarGroups, setToolbar, press, swatchMenu, showValue, TEXT_COLORS, FILL_COLORS } from './toolbar.js'
 
 const SIZES = [12, 14, 16, 18, 20, 24, 28, 32, 36, 44, 54, 66, 80]
 const BACKGROUNDS = [['White', '#ffffff'], ['Paper', '#fbfbf9'], ['Mist', '#eef1f6'], ['Sand', '#f3e6cf'], ['Sage', '#e3ece4'], ['Ink', '#1f2430'], ['Navy', '#1d2c4d'], ['Forest', '#1f3a2e']]
@@ -501,7 +501,7 @@ function renderToolbar (v) {
     title: 'Font for the whole presentation',
     onchange: (e) => v.ydoc.getMap(DECK).set('font', e.target.value)
   }, ...FONTS.map(([label, value]) => el('option', { value }, label)))
-  $('#toolbar').replaceChildren(...toolbarGroups([
+  setToolbar([...toolbarGroups([
     [
       tool('newSlide', 'New slide', icons.plus, (b) => layoutMenu(v, b)),
       tool('text', 'Text box', el('span', { class: 'tool-text' }, 'T'), () => addAndSelect(v, addText(v.ydoc, v.slideId, {}))),
@@ -536,7 +536,7 @@ function renderToolbar (v) {
       tool('undo', 'Undo', icons.undo, () => { const e = editorOf(v); if (e) e.commands.undo?.(); else v.undo.undo() }, { key: 'Mod-Z' }),
       tool('redo', 'Redo', icons.redo, () => { const e = editorOf(v); if (e) e.commands.redo?.(); else v.undo.redo() }, { key: 'Mod-Shift-Z' })
     ]
-  ]), el('span', { class: 'tool-spacer' }), el('button', { type: 'button', class: 'btn btn-primary tool-present', onclick: () => present(v) }, 'Present'))
+  ]), el('span', { class: 'tool-spacer' }), el('button', { type: 'button', class: 'btn btn-primary tool-present', onclick: () => present(v) }, 'Present')])
   syncToolbar(v)
 }
 

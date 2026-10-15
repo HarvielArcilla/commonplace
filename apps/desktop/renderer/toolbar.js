@@ -1,7 +1,7 @@
 // Toolbar pieces shared by every kind of file: buttons, separators, color
 // swatch menus and selects that can show a value outside their list.
 
-import { el, svg, openMenu, closeMenu } from './ui.js'
+import { $, el, svg, openMenu, closeMenu } from './ui.js'
 import { cp } from './state.js'
 
 // A toolbar button. `key` is shown in the tooltip, written like 'Mod-Shift-Z'.
@@ -58,3 +58,88 @@ export function showValue (select, value, label) {
   }
   select.value = value
 }
+
+// ---- one row, whatever the window width -------------------------------------
+//
+// The toolbar never wraps. When it doesn't fit, its last groups (the parts
+// between separators) move into a "More" panel below a ⋯ button. They're
+// the same controls, moved, so they keep working and stay in sync. Anything
+// after a .tool-spacer (zoom, mode, Present) stays on the row as long as
+// possible.
+
+let items = []
+let more = null
+let panel = null
+let observer = null
+
+export function setToolbar (children) {
+  const bar = $('#toolbar')
+  items = children.filter(Boolean)
+  if (!observer) {
+    let frame = 0
+    observer = new ResizeObserver(() => { cancelAnimationFrame(frame); frame = requestAnimationFrame(() => fitToolbar()) })
+    observer.observe(bar)
+  }
+  fitToolbar()
+}
+
+export function fitToolbar () {
+  const bar = $('#toolbar')
+  closeMore()
+  panel?.replaceChildren()
+  bar.replaceChildren(...items)
+  if (bar.hidden || !items.length || !overflowing(bar)) return
+
+  const spacer = items.findIndex((n) => n.classList?.contains('tool-spacer'))
+  const main = spacer < 0 ? items : items.slice(0, spacer)
+  const pinned = spacer < 0 ? [] : items.slice(spacer + 1)
+  // Groups start at a separator (the separator leaves with its group).
+  const groups = []
+  for (const n of main) {
+    if (!groups.length || n.classList?.contains('tool-sep')) groups.push([])
+    groups[groups.length - 1].push(n)
+  }
+  more = more || el('button', { type: 'button', class: 'tool tool-more', title: 'More tools', 'aria-label': 'More tools', 'aria-expanded': 'false', onmousedown: (e) => e.preventDefault(), onclick: () => toggleMore() }, '\u22ef')
+  bar.insertBefore(more, spacer < 0 ? null : items[spacer])
+
+  const moved = []
+  while (groups.length > 1 && overflowing(bar)) {
+    const g = groups.pop()
+    g.forEach((n) => n.remove())
+    moved.unshift(g.filter((n) => !n.classList?.contains('tool-sep')))
+  }
+  for (let i = pinned.length - 1; i >= 0 && overflowing(bar); i--) {
+    pinned[i].remove()
+    moved.push([pinned[i]])
+  }
+  panel = panel || el('div', { class: 'toolbar-more', role: 'group', 'aria-label': 'More tools', hidden: true })
+  if (!panel.isConnected) document.body.append(panel)
+  panel.replaceChildren(...moved.map((g) => el('div', { class: 'toolbar-more-group' }, ...g)))
+}
+
+const overflowing = (bar) => bar.scrollWidth > bar.clientWidth + 1
+
+function toggleMore () {
+  if (!panel || !more) return
+  if (!panel.hidden) { closeMore(); return }
+  const r = more.getBoundingClientRect()
+  panel.hidden = false
+  panel.style.top = `${r.bottom + 6}px`
+  panel.style.left = `${Math.max(8, Math.min(r.left, window.innerWidth - panel.offsetWidth - 8))}px`
+  more.setAttribute('aria-expanded', 'true')
+  setTimeout(() => document.addEventListener('mousedown', outside), 0)
+  document.addEventListener('keydown', escape)
+}
+
+function closeMore () {
+  if (!panel || panel.hidden) return
+  panel.hidden = true
+  more?.setAttribute('aria-expanded', 'false')
+  document.removeEventListener('mousedown', outside)
+  document.removeEventListener('keydown', escape)
+}
+
+// Menus opened from a button in the panel (colors, tables...) are outside
+// it too, so clicks in them don't close the panel.
+const outside = (e) => { if (!panel.contains(e.target) && e.target !== more && !e.target.closest?.('.menu')) closeMore() }
+const escape = (e) => { if (e.key === 'Escape') closeMore() }

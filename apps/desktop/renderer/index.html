@@ -20,9 +20,9 @@
     </header>
     <div class="toolbar drive-tools" role="toolbar" aria-label="View options">
       <div class="seg" role="group" aria-label="Show">
-        <button type="button" data-filter="all">All files</button>
-        <button type="button" data-filter="mine">Owned by me</button>
-        <button type="button" data-filter="shared">Shared with me</button>
+        <button type="button" data-filter="all" aria-label="All files"><span class="label-long">All files</span><span class="label-short">All</span></button>
+        <button type="button" data-filter="mine" aria-label="Owned by me"><span class="label-long">Owned by me</span><span class="label-short">Mine</span></button>
+        <button type="button" data-filter="shared" aria-label="Shared with me"><span class="label-long">Shared with me</span><span class="label-short">Shared</span></button>
       </div>
       <select id="type-filter" class="tool-select" aria-label="File type"></select>
       <select id="sort" class="tool-select" aria-label="Sort by">
@@ -45,6 +45,7 @@
         <span class="swatch" id="me-swatch"></span><span id="me-name"></span>
       </button>
       <span class="me-note">Files sync directly between computers. Nothing is stored on a server.</span>
+      <div id="update-note" class="update-note" role="status" hidden></div>
     </footer>
   </section>
 

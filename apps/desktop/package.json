@@ -12,7 +12,8 @@
     "dev": "node build.mjs && electron .",
     "dist": "node build.mjs && electron-builder",
     "dist:mac": "node build.mjs && electron-builder --mac",
-    "dist:win": "node build.mjs && electron-builder --win"
+    "dist:win": "node build.mjs && electron-builder --win",
+    "postinstall": "node scripts/brand.mjs"
   },
   "dependencies": {
     "@commonplace/core": "0.1.0",
@@ -27,7 +28,8 @@
   "devDependencies": {
     "electron": "44.7.2",
     "electron-builder": "^26.15.3",
-    "esbuild": "^0.28.2"
+    "esbuild": "^0.28.2",
+    "rcedit": "^5.0.2"
   },
   "build": {
     "appId": "org.commonplace.desktop",
@@ -36,6 +38,7 @@
       "output": "release"
     },
     "files": [
+      "build/icon.png",
       "src/**",
       "renderer/index.html",
       "renderer/styles.css",

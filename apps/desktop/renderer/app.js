@@ -130,6 +130,34 @@ $('#link-out').addEventListener('click', () => {
 })
 cp.onNotice((text) => toast(text))
 
+// ---- updates -------------------------------------------------------------------
+
+let toldAboutUpdate = false
+function showUpdate (u) {
+  const note = $('#update-note')
+  if (!u?.available) { note.hidden = true; return }
+  const what = u.behind ? `${u.behind} change${u.behind === 1 ? '' : 's'}` : u.changes[0] || 'A new version'
+  note.title = u.changes.length ? `What's new:\n${u.changes.join('\n')}` : ''
+  note.replaceChildren(
+    el('span', {}, u.installing ? 'Updating Commonplace…' : `A new version of Commonplace is available (${what}).`),
+    u.installing ? null : u.canInstall
+      ? el('button', { type: 'button', class: 'btn btn-primary', onclick: confirmUpdate }, 'Update and restart')
+      : el('button', { type: 'button', class: 'btn', onclick: () => cp.openUpdatePage() }, 'See what’s new'))
+  note.hidden = false
+  if (!toldAboutUpdate && !u.installing) { toldAboutUpdate = true; toast('A new version of Commonplace is available.') }
+}
+async function confirmUpdate () {
+  const ok = await confirmAction({
+    title: 'Update and restart?',
+    body: 'Commonplace closes, downloads the new version, and opens again in a minute or two. Your files stay where they are.',
+    confirm: 'Update and restart',
+    danger: false
+  })
+  if (ok) cp.installUpdate()
+}
+cp.onUpdates(showUpdate)
+cp.updateState().then(showUpdate)
+
 // ---- boot ----------------------------------------------------------------------
 
 cp.onDriveChanged((files, me, folders) => {

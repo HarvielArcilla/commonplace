@@ -2,6 +2,8 @@
 # Starts Commonplace (macOS and Linux). Used by the Desktop / menu launcher.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+# Started from Finder or a menu, PATH is minimal: look where Node usually is.
+export PATH="$PATH:/opt/homebrew/bin:/usr/local/bin"
 if ! command -v node >/dev/null 2>&1; then
   export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
   # shellcheck disable=SC1091
