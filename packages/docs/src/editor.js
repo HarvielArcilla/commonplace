@@ -115,7 +115,7 @@ const ConflictHighlight = Extension.create({
 })
 
 // kind: 'markdown' | 'paged'
-export function createDocsEditor ({ kind, element, ydoc, awareness, user, editable = true, onUpdate, onEditMath, onOpenLink, getPageSetup, getZoom, getMaxImageWidth, onLayout }) {
+export function createDocsEditor ({ kind, element, ydoc, awareness, user, editable = true, onUpdate = () => {}, onEditMath, onOpenLink, getPageSetup, getZoom, getMaxImageWidth, onLayout }) {
   const paged = kind === 'paged'
   const extensions = [
     // The CRDT keeps its own undo history (per user), so disable the default one.

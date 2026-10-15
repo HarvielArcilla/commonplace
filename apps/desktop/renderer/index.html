@@ -56,14 +56,18 @@
       <div class="bar-actions">
         <div id="presence" class="presence" aria-label="People in this document"></div>
         <button type="button" class="btn btn-quiet" data-action="page-setup" hidden>Page setup</button>
+        <button type="button" class="btn btn-quiet" data-action="history" data-panel="history" aria-pressed="false">History</button>
         <button type="button" class="btn" data-action="share">Share</button>
         <button type="button" class="btn" data-action="export" aria-haspopup="menu" aria-expanded="false">Export</button>
       </div>
     </header>
     <div id="toolbar" class="toolbar" role="toolbar" aria-label="Formatting"></div>
-    <div class="sheet">
-      <aside class="margin" id="doc-margin" aria-live="polite"></aside>
-      <div id="desk" class="desk"></div>
+    <div class="doc-body">
+      <div class="sheet">
+        <aside class="margin" id="doc-margin" aria-live="polite"></aside>
+        <div id="desk" class="desk"></div>
+      </div>
+      <aside id="side-panel" class="side-panel" hidden></aside>
     </div>
   </section>
 

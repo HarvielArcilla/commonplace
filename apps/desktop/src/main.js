@@ -220,6 +220,10 @@ function registerIpc () {
   ipcMain.handle('member:transfer', (_e, docId, userId) => drive.transferOwnership(docId, userId))
   ipcMain.handle('invites:reset', (_e, docId) => drive.resetInvites(docId))
   ipcMain.handle('file:syncMode', (_e, docId, mode) => drive.setSyncMode(docId, mode))
+  ipcMain.handle('history:list', (_e, docId) => drive.versions(docId))
+  ipcMain.handle('history:get', (_e, docId, id) => drive.version(docId, id))
+  ipcMain.handle('history:restore', (_e, docId, id) => drive.restoreVersion(docId, id))
+  ipcMain.handle('history:name', (_e, docId, id, label) => drive.nameVersion(docId, id, label))
   ipcMain.handle('conflicts:list', (_e, docId) => drive.conflicts(docId))
   ipcMain.handle('conflicts:resolve', (_e, docId, id, choice) => drive.resolveConflict(docId, id, choice))
 
@@ -272,7 +276,9 @@ function swarmOptions () {
 }
 
 async function startDrive () {
-  drive = new Drive({ dataDir: app.getPath('userData'), apps: docsApps, swarm: swarmOptions() })
+  // COMMONPLACE_CHECKPOINT_SECONDS shortens the pause before a version is saved (for testing).
+  const pause = Number(process.env.COMMONPLACE_CHECKPOINT_SECONDS) * 1000
+  drive = new Drive({ dataDir: app.getPath('userData'), apps: docsApps, swarm: swarmOptions(), history: pause ? { idleMs: pause } : {} })
   drive.on('error', (err) => console.error('[commonplace]', err))
   drive.on('changed', () => send('drive:changed', drive.list(), drive.me(), drive.listFolders()))
   drive.engine.on('update', (docId, update, origin) => {

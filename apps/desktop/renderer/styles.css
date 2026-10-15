@@ -322,13 +322,35 @@ body.mac #doc-view .bar [data-action="back"] { justify-self: end; }
   border: 2px solid var(--paper);
 }
 
+.doc-body { grid-row: 3 / 5; display: flex; min-height: 0; }
 .sheet {
+  flex: 1;
+  min-width: 0;
   display: grid;
   grid-template-columns: var(--margin-w) minmax(0, 1fr);
   overflow: auto;
-  grid-row: 3 / 5;
   min-height: 0;
 }
+
+/* ---- side panel (history, comments) --------------------------------- */
+.side-panel { width: 300px; flex: none; border-left: 1px solid var(--rule); background: var(--paper); display: flex; flex-direction: column; min-height: 0; }
+.side-panel[hidden] { display: none; }
+.panel-head { display: flex; align-items: center; gap: 8px; padding: 14px 12px 10px 16px; border-bottom: 1px solid var(--rule); }
+.panel-head h2 { flex: 1; margin: 0; font: 500 16px/1.3 var(--serif); }
+.panel-body { flex: 1; overflow-y: auto; padding: 8px 0 24px; }
+.panel-note { font: italic 13px/1.45 var(--serif); color: var(--ink-faint); padding: 4px 16px 10px; margin: 0; }
+.panel-day { font-size: 12px; font-weight: 600; color: var(--ink-faint); text-transform: uppercase; letter-spacing: 0.04em; padding: 14px 16px 4px; margin: 0; }
+.version-item { display: block; width: 100%; text-align: left; border: 0; background: none; padding: 8px 16px; cursor: pointer; color: var(--ink); font: inherit; border-left: 3px solid transparent; }
+.version-item:hover { background: var(--select); }
+.version-item[aria-current="true"] { background: var(--select); border-left-color: var(--accent); }
+.version-time { font-size: 14px; font-weight: 500; }
+.version-by { display: block; font-size: 12px; color: var(--ink-soft); margin-top: 2px; }
+.version-name { display: block; font: italic 13px var(--serif); color: var(--accent); margin-top: 2px; }
+.version-actions { display: flex; flex-wrap: wrap; gap: 6px; padding: 12px 16px; border-bottom: 1px solid var(--rule); background: var(--paper-raised); }
+.version-actions p { flex-basis: 100%; margin: 0 0 4px; font-size: 13px; color: var(--ink-soft); }
+#doc-view.previewing #toolbar { display: none; }
+#doc-view.previewing .desk-paged { background: color-mix(in srgb, var(--desk) 85%, var(--warn)); }
+#doc-view.previewing .desk-markdown { background: color-mix(in srgb, var(--paper) 92%, var(--warn)); }
 .margin { position: sticky; left: 0; align-self: stretch; z-index: 1; background: var(--paper); }
 .margin-inner { position: sticky; top: 0; padding: 32px 16px; }
 .margin .note { margin-bottom: 14px; }

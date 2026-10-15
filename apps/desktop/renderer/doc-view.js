@@ -10,6 +10,7 @@ import { icons } from './icons.js'
 import { state, cp, statusNotes, renderNotes } from './state.js'
 import { shareDialog } from './share.js'
 import { conflictsDialog } from './conflicts.js'
+import { toggleHistory, closePanel } from './history-view.js'
 
 // Fonts that ship with both macOS and Windows (plus Office's), so a document
 // looks the same on everyone's computer.
@@ -43,6 +44,7 @@ export function initDocView ({ onBack }) {
   $('[data-action="share"]').addEventListener('click', () => { if (state.open) shareDialog(state.open.docId) })
   $('[data-action="export"]').addEventListener('click', (e) => exportMenu(e.currentTarget))
   $('[data-action="page-setup"]').addEventListener('click', () => pageSetupDialog())
+  $('[data-action="history"]').addEventListener('click', () => toggleHistory())
 }
 
 // ---- open / close ---------------------------------------------------------------
@@ -106,7 +108,7 @@ export async function openDocument (docId, { focusTitle = false, initialContent 
     getPageSetup: () => readPage(ydoc),
     getZoom: () => o.zoom || 1,
     getMaxImageWidth: () => (kind === 'paged' ? pageGeometry(readPage(ydoc)).contentWidth : 680),
-    onLayout: ({ pages, geometry }) => { if (state.open !== o) return; o.pages = pages; drawSheets(pages, geometry); renderDocMargin() }
+    onLayout: ({ pages, geometry }) => { if (state.open !== o) return; o.pages = pages; drawSheets(o.paper, pages, geometry); renderDocMargin() }
   })
 
   if (kind === 'paged') {
@@ -122,7 +124,7 @@ export async function openDocument (docId, { focusTitle = false, initialContent 
   // Title lives in the shared container metadata.
   const meta = ydoc.getMap('meta')
   const title = $('#doc-title')
-  const showTitle = () => { if (document.activeElement !== title) title.value = meta.get('title') || '' }
+  const showTitle = () => { if (document.activeElement !== title && !o.closePreview) title.value = meta.get('title') || '' }
   meta.observe(showTitle)
   cleanup.push(() => meta.unobserve(showTitle))
   showTitle()
@@ -146,9 +148,65 @@ export async function openDocument (docId, { focusTitle = false, initialContent 
   if (focusTitle) { title.focus(); title.select() } else o.editor.commands.focus('start')
 }
 
+// Shows another state of this document (an old version) read-only in place
+// of the live one. Returns a function that puts the live document back.
+export function showPreview (update) {
+  const o = state.open
+  if (!o) return () => {}
+  o.closePreview?.()
+  const ydoc = new Y.Doc()
+  Y.applyUpdate(ydoc, update)
+  const awareness = new awarenessProtocol.Awareness(ydoc)
+  const desk = $('#desk')
+  const live = desk.firstElementChild
+  const host = el('div', { class: 'editor' })
+  let paper = null
+  if (o.kind === 'paged') {
+    paper = el('div', { class: 'paper', style: `zoom:${o.zoom || 1}` }, el('div', { class: 'sheets', 'aria-hidden': 'true' }), host)
+    setPaperGeometry(paper, readPage(ydoc))
+  }
+  live.hidden = true
+  desk.append(paper || host)
+  const editor = createDocsEditor({
+    kind: o.kind,
+    element: host,
+    ydoc,
+    awareness,
+    user: state.me,
+    editable: false,
+    onOpenLink: (href) => cp.openLink(href),
+    getPageSetup: () => readPage(ydoc),
+    getZoom: () => o.zoom || 1,
+    getMaxImageWidth: () => (o.kind === 'paged' ? pageGeometry(readPage(ydoc)).contentWidth : 680),
+    onLayout: ({ pages, geometry }) => { if (paper) drawSheets(paper, pages, geometry) }
+  })
+  $('#doc-view').classList.add('previewing')
+  o.closePreview = () => {}
+  renderDocMargin()
+  $('#doc-title').readOnly = true
+  $('#doc-title').value = ydoc.getMap('meta').get('title') || ''
+  const close = () => {
+    if (o.closePreview !== close) return
+    o.closePreview = null
+    editor.destroy()
+    awareness.destroy()
+    ydoc.destroy()
+    ;(paper || host).remove()
+    live.hidden = false
+    $('#doc-view').classList.remove('previewing')
+    $('#doc-title').value = o.ydoc.getMap('meta').get('title') || ''
+    renderDocMargin()
+    o.editor?.storage.pagination?.refresh()
+  }
+  o.closePreview = close
+  return close
+}
+
 export async function closeDocument () {
   const o = state.open
   if (!o) return
+  o.closePreview?.()
+  closePanel()
   state.open = null
   o.awareness.setLocalState(null) // tells everyone my cursor left
   o.cleanup.forEach((fn) => fn())
@@ -164,8 +222,13 @@ export async function closeDocument () {
 function applyPageGeometry () {
   const o = state.open
   if (!o?.paper) return
-  const g = pageGeometry(readPage(o.ydoc))
-  const s = o.paper.style
+  setPaperGeometry(o.paper, readPage(o.ydoc))
+  fitPaper()
+}
+
+function setPaperGeometry (paper, setup) {
+  const g = pageGeometry(setup)
+  const s = paper.style
   s.setProperty('--page-w', `${g.width}px`)
   s.setProperty('--page-h', `${g.height}px`)
   s.setProperty('--m-top', `${g.margins.top}px`)
@@ -173,7 +236,6 @@ function applyPageGeometry () {
   s.setProperty('--m-bottom', `${g.margins.bottom}px`)
   s.setProperty('--m-left', `${g.margins.left}px`)
   s.setProperty('--page-gap', `${g.gap}px`)
-  fitPaper()
 }
 
 // Pages are drawn at real size: 96 pixels per inch and text in points, so
@@ -202,10 +264,8 @@ function syncZoomControl (pref, zoom) {
   if (document.activeElement !== sel) sel.value = pref
 }
 
-function drawSheets (pages, g) {
-  const o = state.open
-  if (!o?.paper) return
-  const sheets = o.paper.querySelector('.sheets')
+function drawSheets (paper, pages, g) {
+  const sheets = paper.querySelector('.sheets')
   if (sheets.children.length !== pages || sheets.dataset.geo !== `${g.width}x${g.height}:${g.pageNumbers}`) {
     sheets.dataset.geo = `${g.width}x${g.height}:${g.pageNumbers}`
     sheets.replaceChildren(...Array.from({ length: pages }, (_, i) => el('div', {
@@ -213,7 +273,7 @@ function drawSheets (pages, g) {
       style: `top:${i * (g.height + g.gap)}px`
     }, g.pageNumbers ? el('span', { class: 'page-number', style: `bottom:${Math.max(8, g.margins.bottom / 2 - 8)}px` }, String(i + 1)) : null)))
   }
-  o.paper.style.minHeight = `${pages * (g.height + g.gap) - g.gap}px`
+  paper.style.minHeight = `${pages * (g.height + g.gap) - g.gap}px`
 }
 
 // ---- toolbar ---------------------------------------------------------------------------
@@ -575,7 +635,7 @@ function applyAccess () {
   const file = state.files.find((f) => f.docId === o.docId)
   const writable = Boolean(file) && (file.role === 'owner' || file.role === 'editor') && !file.access?.removed
   if (o.editor.isEditable !== writable) o.editor.setEditable(writable)
-  $('#doc-title').readOnly = !writable
+  $('#doc-title').readOnly = !writable || Boolean(o.closePreview)
   $('#toolbar').hidden = !writable
   $('#doc-view').classList.toggle('read-only', !writable)
 }
@@ -586,7 +646,8 @@ export function renderDocMargin () {
   applyAccess()
   const file = state.files.find((f) => f.docId === o.docId)
   const notes = file ? statusNotes(file, { detailed: true }) : []
-  if (o.kind === 'paged') notes.unshift({ text: o.pages === 1 ? '1 page' : `${o.pages} pages` })
+  if (o.kind === 'paged' && !o.closePreview) notes.unshift({ text: o.pages === 1 ? '1 page' : `${o.pages} pages` })
+  if (o.closePreview) notes.unshift({ text: 'Showing an earlier version. Nothing here changes unless you restore it.', cls: 'warn' })
   const conflicts = file?.conflicts || []
   const review = conflicts.length
     ? el('button', { type: 'button', class: 'btn margin-action', onclick: () => conflictsDialog(o.docId) }, file.role === 'owner' ? 'Review conflicts' : 'See conflicts')

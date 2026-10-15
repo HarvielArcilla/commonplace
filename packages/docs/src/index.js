@@ -106,7 +106,9 @@ export const markdownApp = {
   preview,
   units,
   resolve,
-  snapshotBlock
+  snapshotBlock,
+  // What restoring an old version puts back (the title always comes back).
+  history: { roots: [{ name: CONTENT_FIELD, type: 'xml' }] }
 }
 
 export const pagedApp = {
@@ -123,7 +125,8 @@ export const pagedApp = {
   preview,
   units,
   resolve,
-  snapshotBlock
+  snapshotBlock,
+  history: { roots: [{ name: CONTENT_FIELD, type: 'xml' }, { name: 'page', type: 'map' }] }
 }
 
 // Files created before there were two types used "docs"; they are markdown.

@@ -109,6 +109,11 @@ export class FileStore {
     fs.renameSync(tmp, path.join(dir, `${name}.bin`))
   }
 
+  removeFile (id, name) {
+    if (!/^[a-z0-9._-]+$/i.test(name)) throw new Error('bad file name')
+    fs.rmSync(path.join(this._docDir(id), name), { force: true })
+  }
+
   // Every file belonging to one document, for moving it to another computer.
   exportDoc (id) {
     const dir = this._docDir(id)

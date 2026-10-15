@@ -12,15 +12,19 @@ import * as Y from 'yjs'
 import {
   FileStore, SyncEngine, SwarmTransport, loadOrCreateIdentity, canEdit,
   newDocSecret, deriveDocKeys, encodeInvite, parseInvite, initContainer, readMeta, updatePerson,
-  findConflicts, conflictId, docFrom
+  findConflicts, conflictId, docFrom, History, restoreContent
 } from '@commonplace/core'
 
 export { sendDrive, receiveDrive, newMoveCode, parseMoveCode } from './move.js'
 
 export const INDEX_ID = 'drive-index'
 
+// A checkpoint is saved once edits pause for a minute, and at least every
+// ten minutes while someone keeps typing.
+const HISTORY = { idleMs: 60e3, maxMs: 10 * 60e3 }
+
 export class Drive extends EventEmitter {
-  constructor ({ dataDir, apps = [], swarm = {}, transport = true }) {
+  constructor ({ dataDir, apps = [], swarm = {}, transport = true, history = {} }) {
     super()
     this.dataDir = dataDir
     this.swarmOpts = swarm
@@ -28,6 +32,9 @@ export class Drive extends EventEmitter {
     this.identity = loadOrCreateIdentity(dataDir)
     this.store = new FileStore(path.join(dataDir, 'files'))
     this.engine = new SyncEngine({ identity: this.identity, store: this.store })
+    this.history = new History(this.store)
+    this.historyTiming = { ...HISTORY, ...history }
+    this._checkpoints = new Map() // docId -> { first, timer } for unsaved changes
     this._topicToDoc = new Map()
     this._joined = new Map() // docId -> Set(topicHex)
     this._open = new Set() // files open in a window right now
@@ -60,6 +67,7 @@ export class Drive extends EventEmitter {
     this.engine.on('update', (docId, update, origin) => {
       if (origin === 'renderer') this._patch(docId, { contributed: true, lastEditedAt: Date.now() })
       else if (origin !== 'disk' && origin !== 'local' && origin !== 'local-meta') this._remoteChange(docId, update)
+      if (origin !== 'disk' && origin !== 'local-meta' && this.files.has(docId)) this._scheduleCheckpoint(docId)
     })
   }
 
@@ -69,6 +77,7 @@ export class Drive extends EventEmitter {
   }
 
   async stop () {
+    for (const docId of [...this._checkpoints.keys()]) this.checkpoint(docId)
     for (const [docId, t] of this._persistTimers) {
       clearTimeout(t)
       const r = this._recent.get(docId)
@@ -284,10 +293,62 @@ export class Drive extends EventEmitter {
     const rec = map.get(id)
     if (!rec || rec.status !== 'open') return
     doc.ydoc.transact(() => {
+      this._signLocalEdits(doc)
       app.resolve(doc.ydoc, rec, choice)
       map.set(id, { ...rec, status: 'resolved', choice, resolvedBy: this.identity.userId, resolvedAt: Date.now() })
     }, 'local')
     this._patch(docId, { lastEditedAt: Date.now(), contributed: true })
+    this._changed()
+  }
+
+  // ---- version history -------------------------------------------------------
+
+  versions (docId) {
+    const doc = this.engine.getDoc(docId)
+    if (!doc) return []
+    const people = doc.ydoc.getMap('people')
+    const nameOf = (userId) => (userId === this.identity.userId ? this.identity.name : people.get(userId)?.name || this.files.get(docId)?.names?.[userId] || 'Someone')
+    return this.history.list(docId).reverse().map((v) => ({ ...v, names: v.by.map(nameOf) }))
+  }
+
+  // The file as it was at a version (a Yjs update the window can show).
+  version (docId, id) {
+    return this.history.load(docId, id)
+  }
+
+  nameVersion (docId, id, label) {
+    this.history.name(docId, id, label)
+    this._changed()
+  }
+
+  // Saves a checkpoint now if anything changed since the last one.
+  checkpoint (docId, opts = {}) {
+    const pending = this._checkpoints.get(docId)
+    if (pending) { clearTimeout(pending.timer); this._checkpoints.delete(docId) }
+    const doc = this.engine.getDoc(docId)
+    if (!doc || !this.files.get(docId)?.type) return null
+    const authors = doc.ydoc.getMap('authors')
+    return this.history.record(docId, doc.ydoc, { ...opts, authorOf: (client) => authors.get(String(client))?.userId || null })
+  }
+
+  // Puts the file back to an earlier version. That is an ordinary edit, so it
+  // reaches everyone, and the version it replaced stays in the history.
+  restoreVersion (docId, id) {
+    const doc = this.engine.getDoc(docId)
+    const entry = this.files.get(docId)
+    const app = entry && this.appsByType.get(entry.type)
+    if (!doc || !app?.history) throw new Error('This file can\u2019t be restored.')
+    if (!canEdit(this.engine.access(docId)?.role)) throw new Error('Only people who can edit can restore a version.')
+    const target = this.history.list(docId).find((v) => v.id === id)
+    const past = this.history.load(docId, id)
+    if (!target || !past) throw new Error('That version is no longer here.')
+    this.checkpoint(docId)
+    doc.ydoc.transact(() => {
+      this._signLocalEdits(doc)
+      restoreContent(doc.ydoc, docFrom(past), app.history.roots)
+    }, 'local')
+    this._patch(docId, { contributed: true, lastEditedAt: Date.now() })
+    this.checkpoint(docId, { kind: 'restore', restoredFrom: target.at })
     this._changed()
   }
 
@@ -320,6 +381,8 @@ export class Drive extends EventEmitter {
 
   // Removes the file from this device only. Other collaborators keep theirs.
   async remove (docId) {
+    clearTimeout(this._checkpoints.get(docId)?.timer)
+    this._checkpoints.delete(docId)
     await this._leaveTopics(docId)
     this.engine.closeDoc(docId, { deleteLocalData: true })
     this.files.delete(docId)
@@ -458,6 +521,21 @@ export class Drive extends EventEmitter {
       }
     }, 'local')
     this._changed()
+  }
+
+  // Edits Drive makes itself (restores, conflict decisions) are mine too.
+  _signLocalEdits (doc) {
+    const authors = doc.ydoc.getMap('authors')
+    if (!authors.has(String(doc.ydoc.clientID))) authors.set(String(doc.ydoc.clientID), { userId: this.identity.userId })
+  }
+
+  _scheduleCheckpoint (docId) {
+    const t = this._checkpoints.get(docId) || { first: Date.now(), timer: null }
+    clearTimeout(t.timer)
+    const { idleMs, maxMs } = this.historyTiming
+    t.timer = setTimeout(() => this.checkpoint(docId), Math.max(0, Math.min(idleMs, t.first + maxMs - Date.now())))
+    t.timer.unref?.()
+    this._checkpoints.set(docId, t)
   }
 
   _remoteChange (docId, update) {
