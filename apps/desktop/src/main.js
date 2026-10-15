@@ -218,6 +218,8 @@ function registerIpc () {
   ipcMain.handle('member:transfer', (_e, docId, userId) => drive.transferOwnership(docId, userId))
   ipcMain.handle('invites:reset', (_e, docId) => drive.resetInvites(docId))
   ipcMain.handle('file:syncMode', (_e, docId, mode) => drive.setSyncMode(docId, mode))
+  ipcMain.handle('conflicts:list', (_e, docId) => drive.conflicts(docId))
+  ipcMain.handle('conflicts:resolve', (_e, docId, id, choice) => drive.resolveConflict(docId, id, choice))
 
   // Moving the whole Drive to another computer.
   ipcMain.handle('move:start', () => {

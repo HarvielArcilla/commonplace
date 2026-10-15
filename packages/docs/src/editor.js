@@ -14,7 +14,12 @@ import { TextStyleKit } from '@tiptap/extension-text-style'
 import Highlight from '@tiptap/extension-highlight'
 import { Markdown } from '@tiptap/markdown'
 import { CONTENT_FIELD } from './index.js'
+import { Plugin, PluginKey } from '@tiptap/pm/state'
+import { Decoration, DecorationSet } from '@tiptap/pm/view'
+import { Extension } from '@tiptap/core'
+import { ySyncPluginKey } from '@tiptap/y-tiptap'
 import { Pagination, PageBreak } from './pagination.js'
+import { blockKey } from './index.js'
 import { Indent } from './indent.js'
 
 export { pageGeometry, readPage, normalizePage, PAGE_SIZES, DEFAULT_PAGE } from './page.js'
@@ -47,6 +52,46 @@ function resizableImage (getMaxWidth) {
     resize: { enabled: true, directions: ['top-left', 'top-right', 'bottom-left', 'bottom-right'], minWidth: 40, minHeight: 20, alwaysPreserveAspectRatio: true }
   })
 }
+
+// Marks paragraphs that have an open conflict. Blocks are matched to their
+// CRDT element, the same key conflicts are recorded with.
+const conflictKey = new PluginKey('cp-conflicts')
+const ConflictHighlight = Extension.create({
+  name: 'conflictHighlight',
+  addStorage () { return { keys: new Set() } },
+  addCommands () {
+    return {
+      setConflicts: (keys) => ({ tr, dispatch }) => {
+        this.storage.keys = new Set(keys)
+        if (dispatch) dispatch(tr.setMeta(conflictKey, true).setMeta('addToHistory', false))
+        return true
+      }
+    }
+  },
+  addProseMirrorPlugins () {
+    const storage = this.storage
+    return [new Plugin({
+      key: conflictKey,
+      props: {
+        decorations (state) {
+          if (!storage.keys.size) return DecorationSet.empty
+          const mapping = ySyncPluginKey.getState(state)?.binding?.mapping
+          if (!mapping) return DecorationSet.empty
+          const byNode = new Map()
+          for (const [yType, pmNode] of mapping) {
+            const key = blockKey(yType)
+            if (key && storage.keys.has(key)) byNode.set(pmNode, key)
+          }
+          const decos = []
+          state.doc.forEach((node, offset) => {
+            if (byNode.has(node)) decos.push(Decoration.node(offset, offset + node.nodeSize, { class: 'cp-conflict', 'data-conflict': byNode.get(node) }))
+          })
+          return DecorationSet.create(state.doc, decos)
+        }
+      }
+    })]
+  }
+})
 
 // kind: 'markdown' | 'paged'
 export function createDocsEditor ({ kind, element, ydoc, awareness, user, editable = true, onUpdate, onEditMath, onOpenLink, getPageSetup, getZoom, getMaxImageWidth, onLayout }) {
@@ -84,6 +129,7 @@ export function createDocsEditor ({ kind, element, ydoc, awareness, user, editab
     TableKit.configure({ table: { resizable: false } }),
     resizableImage(getMaxImageWidth),
     Indent,
+    ConflictHighlight,
     Markdown,
     PageBreak
   ]

@@ -81,6 +81,7 @@ export function openMenu (anchor, items, { align = 'start', label } = {}) {
   const menu = el('div', { class: 'menu', role: 'menu', 'aria-label': label || anchor.getAttribute('aria-label') || anchor.textContent })
   const buttons = []
   for (const item of items) {
+    if (!item) continue
     if (item.sep) { menu.append(el('div', { class: 'menu-sep', role: 'separator' })); continue }
     if (item.heading) { menu.append(el('div', { class: 'menu-heading' }, item.heading)); continue }
     if (item.custom) { menu.append(item.custom); continue }

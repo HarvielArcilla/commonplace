@@ -19,6 +19,7 @@ import { deriveDocKeys, epochKeys, seal, open } from './crypto.js'
 import { MSG, encodeFrame, FrameReader, encodeHello, decodeHello, helloProof } from './protocol.js'
 import { verifySignature } from './identity.js'
 import { Membership, canEdit } from './members.js'
+import { stateVectorMap, hasOpsBeyond, sameState, docFrom } from './conflicts.js'
 
 const EMPTY_UPDATE_BYTES = 2
 
@@ -128,6 +129,8 @@ export class SyncEngine extends EventEmitter {
     doc.state = { ...doc.state, ...(this.store.readState(docId) || {}) }
     const savedKeys = this.store.readJSON(docId, 'keys') || {}
     for (const [epoch, b64] of Object.entries(savedKeys)) this._addEpoch(doc, Number(epoch), Buffer.from(b64, 'base64'), { save: false })
+    // The last state I had in common with another computer (for conflicts).
+    doc.base = this.store.readBinary?.(docId, 'base') || null
     const savedLog = this.store.readJSON(docId, 'members')
     if (savedLog) doc.members.merge(savedLog)
     this._collectGrants(doc)
@@ -168,6 +171,7 @@ export class SyncEngine extends EventEmitter {
     const doc = this.docs.get(docId)
     if (!doc) return
     this.docs.delete(docId)
+    clearTimeout(doc._baseTimer)
     doc.awareness.destroy()
     doc.ydoc.destroy()
     if (deleteLocalData) this.store.remove(docId)
@@ -419,12 +423,26 @@ export class SyncEngine extends EventEmitter {
     switch (type) {
       case MSG.UPDATE: {
         if (!canEdit(link.role)) return // viewers can't change the document
+        const check = link.mergeCheck
+        link.mergeCheck = null
         try { Y.applyUpdate(doc.ydoc, plain, conn) } catch { return }
+        if (!check && link.lastSV && sameState(link.lastSV, Y.decodeStateVector(Y.encodeStateVector(doc.ydoc)))) this._saveBase(doc)
+        if (check) {
+          // Both of us changed the file while apart: let the app look for
+          // edits to the same paragraph.
+          this.emit('diverged', {
+            docId: doc.docId,
+            peer: link.user,
+            base: check.base,
+            mine: check.mine,
+            theirs: Y.encodeStateAsUpdate(docFrom(check.base, plain))
+          })
+        }
         this._scheduleAck(conn, doc)
         break
       }
       case MSG.ACK:
-        this._markAcked(doc, plain, link.user)
+        this._markAcked(doc, plain, link.user, link)
         break
       case MSG.AWARENESS:
         try { awarenessProtocol.applyAwarenessUpdate(doc.awareness, plain, conn) } catch {}
@@ -451,6 +469,7 @@ export class SyncEngine extends EventEmitter {
     link.enc = typeof info.enc === 'string' && /^[0-9a-f]{64}$/.test(info.enc) ? info.enc : null
     link.invite = info.invite && typeof info.invite === 'object' ? info.invite : null
     link.epochs.add(epoch)
+    link.lastSV = stateVectorMap(hello.stateVector)
 
     // Share the membership log if theirs is behind or different.
     const theirs = info.head || {}
@@ -487,11 +506,12 @@ export class SyncEngine extends EventEmitter {
     }
     const starting = link.contentEpoch !== contentEpoch
     link.contentEpoch = contentEpoch
+    if (starting) this._prepareMergeCheck(doc, link, hello.stateVector)
     // Send whatever they are missing, computed from their state vector.
     // (If I'm a viewer they'll ignore it; they get edits from editors.)
     const diff = Y.encodeStateAsUpdate(doc.ydoc, hello.stateVector)
     if (diff.length > EMPTY_UPDATE_BYTES) conn.send(MSG.UPDATE, doc.docId, contentEpoch, seal(doc.keyFor(contentEpoch), diff))
-    if (canEdit(link.role)) this._markAcked(doc, hello.stateVector, link.user)
+    if (canEdit(link.role)) this._markAcked(doc, hello.stateVector, link.user, link)
     if (starting) {
       const states = [...doc.awareness.getStates().keys()]
       if (states.length) {
@@ -500,6 +520,32 @@ export class SyncEngine extends EventEmitter {
       }
     }
     this._scheduleStatus(doc)
+  }
+
+  // Decides whether the catch-up update this peer is about to send could
+  // conflict with my own changes: true only if we both changed the file
+  // since the last state we had in common.
+  _prepareMergeCheck (doc, link, theirSVBytes) {
+    if (!canEdit(doc.myAccess?.role) || !doc.base) return
+    const base = stateVectorMap(Y.encodeStateVectorFromUpdate(doc.base))
+    const mine = Y.decodeStateVector(Y.encodeStateVector(doc.ydoc))
+    const theirs = stateVectorMap(theirSVBytes)
+    const iChanged = hasOpsBeyond(mine, base)
+    const theyMissMine = [...mine].some(([client, clock]) => clock > (base.get(client) || 0) && (theirs.get(client) || 0) < clock)
+    const theyChanged = hasOpsBeyond(theirs, mine)
+    if (iChanged && theyMissMine && theyChanged) link.mergeCheck = { base: doc.base, mine: Y.encodeStateAsUpdate(doc.ydoc) }
+  }
+
+  // Remembers the current state as the last one shared with a peer.
+  _saveBase (doc, { now = false } = {}) {
+    const write = () => {
+      doc._baseTimer = null
+      if (this.docs.get(doc.docId) !== doc) return
+      doc.base = Y.encodeStateAsUpdate(doc.ydoc)
+      this.store.writeBinary?.(doc.docId, 'base', doc.base)
+    }
+    if (now) { clearTimeout(doc._baseTimer); write(); return }
+    if (!doc._baseTimer) doc._baseTimer = setTimeout(write, 2000)
   }
 
   _stopContent (doc, conn, link) {
@@ -522,9 +568,11 @@ export class SyncEngine extends EventEmitter {
     }, 250))
   }
 
-  _markAcked (doc, stateVectorBytes, user) {
+  _markAcked (doc, stateVectorBytes, user, link) {
     let sv
     try { sv = Y.decodeStateVector(stateVectorBytes) } catch { return }
+    if (link) link.lastSV = sv
+    if (sameState(sv, Y.decodeStateVector(Y.encodeStateVector(doc.ydoc)))) this._saveBase(doc)
     for (const id of doc.state.clientIds) {
       const theirs = sv.get(id) || 0
       if (theirs > (doc.state.acked[id] || 0)) doc.state.acked[id] = theirs
@@ -540,6 +588,7 @@ export class SyncEngine extends EventEmitter {
     for (const doc of this.docs.values()) {
       const link = doc.links.get(conn)
       if (!link) continue
+      if (link.lastSV && sameState(link.lastSV, Y.decodeStateVector(Y.encodeStateVector(doc.ydoc)))) this._saveBase(doc, { now: true })
       this._dropLink(doc, conn, link)
       doc.links.delete(conn)
       this._scheduleStatus(doc)

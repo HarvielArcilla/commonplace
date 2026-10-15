@@ -12,7 +12,8 @@
     "dev": "npm run dev -w @commonplace/desktop",
     "build": "npm run build -w @commonplace/desktop",
     "dist": "npm run dist -w @commonplace/desktop",
-    "test": "node --test --test-concurrency=1 test/*.test.js"
+    "test": "node --test --test-concurrency=1 test/*.test.js",
+    "start": "npm run dev -w @commonplace/desktop"
   },
   "engines": {
     "node": ">=20"

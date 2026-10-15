@@ -11,6 +11,8 @@ Both support links, LaTeX math, tables and images. CommonDrive shows files as a 
 
 Sharing works with roles: invite people to edit or only view, change their role, remove them, or hand ownership to someone else. Removing someone stops sending them anything new; what they already have stays with them. You can move your whole Drive to another computer while both are online.
 
+Edits made while people are apart merge on their own, like a git merge. If two people changed the same paragraph (or the title), the file's owner sees both versions side by side and decides what stays.
+
 ## How it works
 
 - Every file is a CRDT (Yjs). Copies that have seen the same edits are identical, in any order, so nobody has to be online to "own" consistency.
@@ -22,28 +24,48 @@ The tradeoff, chosen on purpose: a file can only sync while at least one other p
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the design and roadmap.
 
-## Run it
+## Install
 
-Requires Node 20+ on macOS or Windows (Linux works too).
+One command installs everything it needs (Git and Node.js too, if they're missing) into `Commonplace` in your home folder, and adds a launcher. Run it again later to update.
+
+**macOS or Linux** (Terminal):
 
 ```sh
-npm install
-npm run dev          # builds the window UI and starts the app
-npm test             # sync tests on a private local DHT
+curl -fsSL https://raw.githubusercontent.com/HarvielArcilla/commonplace/main/scripts/install.sh | bash
 ```
+
+**Windows** (PowerShell):
+
+```powershell
+powershell -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/HarvielArcilla/commonplace/main/scripts/install.ps1 | iex"
+```
+
+Then double-click **Commonplace** on your Desktop (or in the app menu on Linux). When your computer asks whether Commonplace may use the network, allow it, or other people's computers can't reach yours.
+
+The scripts are short and commented: read [install.sh](scripts/install.sh) or [install.ps1](scripts/install.ps1) before running them if you like. Settings: `COMMONPLACE_DIR` (install location), `COMMONPLACE_NO_SHORTCUT=1`.
+
+### By hand
+
+Requires Git and Node 20+.
+
+```sh
+git clone https://github.com/HarvielArcilla/commonplace.git
+cd commonplace
+npm install
+npm start            # builds the window UI and starts the app
+npm test             # sync, access and conflict tests on a private local DHT
+```
+
+On Windows, if PowerShell says running scripts is disabled, use `npm.cmd install` and `npm.cmd start`.
 
 To try collaboration on one computer, start a second copy with its own identity and files:
 
 ```sh
-# macOS
-COMMONPLACE_PROFILE=bob npm run dev
-# Windows (PowerShell)
-$env:COMMONPLACE_PROFILE="bob"; npm run dev
+COMMONPLACE_PROFILE=bob npm start                 # macOS / Linux
+$env:COMMONPLACE_PROFILE="bob"; npm.cmd start     # Windows PowerShell
 ```
 
-Create a document in one window, click **Copy invite link**, and paste it into **Join with invite** in the other.
-
-On Windows, the first run asks whether to let the app use the network. Allow it, or other computers can't reach yours.
+Create a document in one window, open **Share**, copy an invite link, and paste it into **Join with invite** in the other.
 
 To run on a private network instead of the public DHT, set `COMMONPLACE_BOOTSTRAP=host:port` (and optionally `COMMONPLACE_DHT_HOST`).
 
@@ -65,7 +87,8 @@ packages/core    identity, encryption, storage, sync engine, P2P transport
 packages/drive   CommonDrive: the file index and background syncing
 packages/docs    CommonDocs: the app descriptor and the rich-text editor
 apps/desktop     Electron shell (background process + window UI)
-test/            end-to-end sync tests
+scripts/         one-step installers and launchers
+test/            end-to-end sync, access and conflict tests
 ```
 
 ## License

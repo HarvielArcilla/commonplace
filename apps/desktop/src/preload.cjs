@@ -33,6 +33,8 @@ contextBridge.exposeInMainWorld('commonplace', {
   transferOwnership: (docId, userId) => ipcRenderer.invoke('member:transfer', docId, userId),
   resetInvites: (docId) => ipcRenderer.invoke('invites:reset', docId),
   setSyncMode: (docId, mode) => ipcRenderer.invoke('file:syncMode', docId, mode),
+  listConflicts: (docId) => ipcRenderer.invoke('conflicts:list', docId),
+  resolveConflict: (docId, id, choice) => ipcRenderer.invoke('conflicts:resolve', docId, id, choice),
   startMove: () => ipcRenderer.invoke('move:start'),
   cancelMove: () => ipcRenderer.invoke('move:cancel'),
   receiveMove: (code) => ipcRenderer.invoke('move:receive', code),

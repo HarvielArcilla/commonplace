@@ -50,6 +50,13 @@ export function statusNotes (file, { detailed = false } = {}) {
     notes.push({ text: 'Made with a newer version of Commonplace', cls: 'warn' })
     return notes
   }
+  const conflicts = file.conflicts?.length || 0
+  if (conflicts) {
+    const what = conflicts === 1 ? '1 conflict' : `${conflicts} conflicts`
+    notes.push(file.role === 'owner'
+      ? { text: `${what} from edits made while apart. Your decision is needed.`, cls: 'warn', conflict: true }
+      : { text: `${what} from edits made while apart, waiting for ${file.owner?.name || 'the owner'} to decide`, cls: 'warn', conflict: true })
+  }
   if (here.length) notes.push({ text: `${listNames(here)} ${here.length === 1 ? 'is' : 'are'} here`, cls: 'live', dot: true })
   if (syncing.length) {
     notes.push({ text: `Syncing with ${listNames(syncing)}`, cls: here.length ? '' : 'live' })

@@ -4,6 +4,7 @@ import { $, el, svg, ago, listNames, plural, toast, openMenu, dialog, promptText
 import { icons } from './icons.js'
 import { state, cp, statusNotes, renderNotes, savePrefs } from './state.js'
 import { shareDialog, setSyncMode, moveInDialog } from './share.js'
+import { conflictsDialog } from './conflicts.js'
 
 let handlers = { openDocument: async () => {}, openJoinDialog: () => {} }
 export function initDrive (h) {
@@ -379,6 +380,7 @@ function fileMenu (anchor, f) {
     { label: 'Share\u2026', icon: icons.invite, disabled: f.waitingForPeer, onSelect: () => shareDialog(f.docId) },
     { label: 'Sync in the background', hint: f.syncMode === 'open' ? 'Off: syncs only while the file is open' : 'On: syncs whenever Commonplace is running', checked: f.syncMode !== 'open', onSelect: () => setSyncMode(f.docId, f.syncMode === 'open' ? 'always' : 'open') },
     { label: 'Move to…', icon: icons.folder, onSelect: () => moveDialog({ kind: 'file', id: f.docId, name: f.title, current: f.folderId }) },
+    f.conflicts?.length ? { label: f.role === 'owner' ? 'Review conflicts\u2026' : 'See conflicts\u2026', onSelect: () => conflictsDialog(f.docId) } : null,
     { label: 'Details', onSelect: () => detailsDialog(f) },
     { sep: true },
     {

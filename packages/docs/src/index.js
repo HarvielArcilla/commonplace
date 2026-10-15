@@ -33,6 +33,68 @@ function preview (ydoc) {
   return parts.join(' ').replace(/\s+/g, ' ').trim()
 }
 
+// Conflict units: each top-level block of the content (paragraph, heading,
+// list, table, image...) plus the title. A block is identified by the CRDT
+// item that created it, so the same paragraph has the same key everywhere.
+const plainText = (node) => {
+  if (node instanceof Y.XmlText) return node.toDelta().map((d) => (typeof d.insert === 'string' ? d.insert : '')).join('')
+  if (node instanceof Y.XmlElement && (node.nodeName === 'inlineMath' || node.nodeName === 'blockMath')) return `$${node.getAttribute('latex') || ''}$`
+  if (node instanceof Y.XmlElement || node instanceof Y.XmlFragment) {
+    const parts = node.toArray().map(plainText)
+    return node instanceof Y.XmlElement && ['paragraph', 'heading', 'listItem', 'tableCell', 'tableHeader'].includes(node.nodeName) ? parts.join('') : parts.join('\n')
+  }
+  return ''
+}
+
+export const blockKey = (el) => (el?._item ? `${el._item.id.client}:${el._item.id.clock}` : null)
+
+export function snapshotBlock (el) {
+  const d = new Y.Doc()
+  d.getXmlFragment('block').insert(0, [el.clone()])
+  return Buffer.from(Y.encodeStateAsUpdate(d)).toString('base64')
+}
+
+function units (ydoc) {
+  const out = new Map()
+  let prev = null
+  ydoc.getXmlFragment(CONTENT_FIELD).toArray().forEach((el, index) => {
+    const key = blockKey(el)
+    if (!key) return
+    out.set(key, { kind: 'block', name: el.nodeName, sig: el.toString(), text: plainText(el), prev, index, el })
+    prev = key
+  })
+  const title = ydoc.getMap('meta').get('title')
+  if (title != null) out.set('title', { kind: 'title', sig: String(title), text: String(title), prev: null })
+  return out
+}
+
+// Applies the owner's decision. choice: 'v0' | 'v1' (one version), 'both'
+// (one after the other), or 'current' (keep what the merge produced).
+function resolve (ydoc, rec, choice) {
+  if (choice === 'current') return
+  const picked = choice === 'both' ? rec.versions : [rec.versions[Number(String(choice).slice(1))]].filter(Boolean)
+  if (rec.kind === 'title') {
+    const v = picked.find((x) => x.exists)
+    if (v) ydoc.getMap('meta').set('title', choice === 'both' ? picked.filter((x) => x.exists).map((x) => x.text).join(' / ') : v.text)
+    return
+  }
+  const frag = ydoc.getXmlFragment(CONTENT_FIELD)
+  const arr = frag.toArray()
+  let at = arr.findIndex((el) => blockKey(el) === rec.unit)
+  if (at >= 0) frag.delete(at, 1)
+  else {
+    // The merge deleted it: put it back after the block that came before it.
+    const p = rec.prev ? arr.findIndex((el) => blockKey(el) === rec.prev) : -1
+    at = p >= 0 ? p + 1 : Math.min(rec.index ?? 0, arr.length)
+  }
+  const clones = picked.filter((v) => v.exists && v.snapshot).map((v) => {
+    const d = new Y.Doc()
+    Y.applyUpdate(d, Buffer.from(v.snapshot, 'base64'))
+    return d.getXmlFragment('block').get(0).clone()
+  })
+  if (clones.length) frag.insert(at, clones)
+}
+
 export const markdownApp = {
   type: 'markdown',
   kind: 'markdown',
@@ -41,7 +103,10 @@ export const markdownApp = {
   schemaVersion: 1,
   exports: ['md', 'docx'],
   initContent (ydoc) { ydoc.getXmlFragment(CONTENT_FIELD) },
-  preview
+  preview,
+  units,
+  resolve,
+  snapshotBlock
 }
 
 export const pagedApp = {
@@ -55,7 +120,10 @@ export const pagedApp = {
     ydoc.getXmlFragment(CONTENT_FIELD)
     ydoc.getMap('page').set('setup', { ...DEFAULT_PAGE, margins: { ...DEFAULT_PAGE.margins } })
   },
-  preview
+  preview,
+  units,
+  resolve,
+  snapshotBlock
 }
 
 // Files created before there were two types used "docs"; they are markdown.

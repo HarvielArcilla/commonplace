@@ -9,6 +9,7 @@ import { $, el, svg, toast, openMenu, closeMenu, dialog, selectField, cleanError
 import { icons } from './icons.js'
 import { state, cp, statusNotes, renderNotes } from './state.js'
 import { shareDialog } from './share.js'
+import { conflictsDialog } from './conflicts.js'
 
 // Fonts that ship with both macOS and Windows (plus Office's), so a document
 // looks the same on everyone's computer.
@@ -585,5 +586,16 @@ export function renderDocMargin () {
   const file = state.files.find((f) => f.docId === o.docId)
   const notes = file ? statusNotes(file, { detailed: true }) : []
   if (o.kind === 'paged') notes.unshift({ text: o.pages === 1 ? '1 page' : `${o.pages} pages` })
-  $('#doc-margin').replaceChildren(el('div', { class: 'margin-inner' }, ...renderNotes(notes)))
+  const conflicts = file?.conflicts || []
+  const review = conflicts.length
+    ? el('button', { type: 'button', class: 'btn margin-action', onclick: () => conflictsDialog(o.docId) }, file.role === 'owner' ? 'Review conflicts' : 'See conflicts')
+    : null
+  $('#doc-margin').replaceChildren(el('div', { class: 'margin-inner' }, ...renderNotes(notes), review))
+  // Mark the paragraphs in question.
+  const keys = conflicts.filter((c) => c.kind === 'block').map((c) => c.unit)
+  const sig = keys.join(',')
+  if (o.editor && o.conflictSig !== sig) {
+    o.conflictSig = sig
+    o.editor.commands.setConflicts(keys)
+  }
 }

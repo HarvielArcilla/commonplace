@@ -97,6 +97,18 @@ export class FileStore {
     fs.renameSync(tmp, path.join(dir, `${name}.json`))
   }
 
+  readBinary (id, name) {
+    try { return new Uint8Array(fs.readFileSync(path.join(this._docDir(id), `${name}.bin`))) } catch { return null }
+  }
+
+  writeBinary (id, name, bytes) {
+    const dir = this._docDir(id)
+    fs.mkdirSync(dir, { recursive: true })
+    const tmp = path.join(dir, `${name}.bin.tmp`)
+    fs.writeFileSync(tmp, Buffer.from(bytes))
+    fs.renameSync(tmp, path.join(dir, `${name}.bin`))
+  }
+
   // Every file belonging to one document, for moving it to another computer.
   exportDoc (id) {
     const dir = this._docDir(id)

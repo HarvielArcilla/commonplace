@@ -585,3 +585,24 @@ body.mac #doc-view .bar [data-action="back"] { justify-self: end; }
 
 /* Read-only documents (viewers, or after being removed) */
 #doc-view.read-only .cp-page { caret-color: transparent; }
+
+/* ---- conflicts --------------------------------------------------------- */
+.cp-conflict { position: relative; background: color-mix(in srgb, var(--warn) 8%, transparent); border-radius: 2px; }
+.cp-conflict::before { content: ""; position: absolute; left: -12px; top: 2px; bottom: 2px; width: 3px; border-radius: 2px; background: var(--warn); }
+.cp-paged .cp-conflict { background: rgba(138, 90, 20, 0.07); }
+.cp-paged .cp-conflict::before { background: #8a5a14; }
+.margin-action { display: block; margin: 4px 0 14px auto; font-size: 13px; padding: 4px 10px; }
+.conflict-list { max-height: 60vh; overflow-y: auto; margin: 0 -4px; padding: 0 4px; }
+.conflict { border-top: 1px solid var(--rule); padding: 14px 0; }
+.conflict h3 { font: 500 15px/1.35 var(--serif); margin: 0 0 8px; }
+.versions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 8px 0; }
+.version { border: 1px solid var(--rule); border-radius: 6px; padding: 8px 10px; background: var(--paper); }
+.version-label { font-size: 12px; color: var(--ink-faint) !important; margin: 0 0 4px !important; }
+.version-text { margin: 0 !important; color: var(--ink) !important; font: 14px/1.5 var(--serif); white-space: pre-wrap; }
+.version-text ins { text-decoration: none; background: color-mix(in srgb, var(--live) 18%, transparent); border-radius: 2px; }
+.version-text del { color: var(--ink-faint); }
+.version-deleted { font-style: italic; color: var(--ink-faint) !important; }
+.version-base { font-size: 13px; margin: 6px 0 !important; }
+.version-base .version-label { display: inline; }
+.conflict-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+@media (max-width: 760px) { .versions { grid-template-columns: 1fr; } }

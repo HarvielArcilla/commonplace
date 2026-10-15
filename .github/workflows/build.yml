@@ -45,3 +45,31 @@ jobs:
             apps/desktop/release/*.zip
             apps/desktop/release/*.exe
           if-no-files-found: error
+
+  # Runs the one-step installers on clean macOS and Windows machines.
+  installers:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: install.sh
+        if: runner.os == 'macOS'
+        run: bash scripts/install.sh && test -x "$RUNNER_TEMP/Commonplace/node_modules/.bin/electron"
+        env:
+          COMMONPLACE_REPO: ${{ github.workspace }}
+          COMMONPLACE_DIR: ${{ runner.temp }}/Commonplace
+          COMMONPLACE_NO_SHORTCUT: '1'
+      - name: install.ps1
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          powershell -ExecutionPolicy Bypass -File scripts\install.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (-not (Test-Path "$env:RUNNER_TEMP\Commonplace\node_modules\.bin\electron.cmd")) { throw 'electron missing' }
+          if (-not (Test-Path ([Environment]::GetFolderPath('Desktop') + '\Commonplace.lnk'))) { throw 'shortcut missing' }
+        env:
+          COMMONPLACE_REPO: ${{ github.workspace }}
+          COMMONPLACE_DIR: ${{ runner.temp }}\Commonplace
