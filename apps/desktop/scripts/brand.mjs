@@ -47,7 +47,7 @@ function brandMac () {
   const dist = path.join(electronDir, 'dist')
   const fresh = path.join(dist, 'Electron.app')
   const appDir = path.join(dist, `${NAME}.app`)
-  const marker = path.join(appDir, 'Contents', '.commonplace')
+  const marker = path.join(dist, '.commonplace-brand') // outside the bundle, so it doesn't break the signature
   const stamp = `${NAME} ${fs.statSync(icon).size}`
   const exePath = `${NAME}.app/Contents/MacOS/${NAME}`
   const pointAtUs = () => fs.writeFileSync(path.join(electronDir, 'path.txt'), exePath)
