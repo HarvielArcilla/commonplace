@@ -75,12 +75,15 @@ export function statusNotes (file, { detailed = false } = {}) {
   ].filter(Boolean)
   if (review.length && !detailed) notes.push({ text: review.join(', ') })
   if (here.length) notes.push({ text: `${listNames(here)} ${here.length === 1 ? 'is' : 'are'} here`, cls: 'live', dot: true })
+  const devices = file.sync.devices || []
   if (syncing.length) {
     notes.push({ text: `Syncing with ${listNames(syncing)}`, cls: here.length ? '' : 'live' })
+  } else if (devices.length && !here.length) {
+    notes.push({ text: `Syncing with your computer ${devices.map((d) => `“${d.name}”`).join(' and ')}`, cls: 'live' })
   } else if (!here.length) {
     if (file.syncMode === 'open' && !file.sync.active) notes.push({ text: 'Syncs only while open' })
     else if (file.sync.lastSyncedAt) {
-      const who = file.sync.lastSyncedWith ? ` with ${file.sync.lastSyncedWith}` : ''
+      const who = file.sync.lastSyncedWith ? ` with ${file.sync.lastSyncedWith}` : file.sync.lastSyncedDevice ? ` with your computer “${file.sync.lastSyncedDevice}”` : ''
       notes.push({ text: `Synced${who} ${ago(file.sync.lastSyncedAt)}` })
     } else {
       notes.push({ text: file.role === 'owner' ? 'Only on this computer so far' : 'Not synced yet' })

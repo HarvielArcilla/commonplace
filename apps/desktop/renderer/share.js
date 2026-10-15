@@ -177,32 +177,38 @@ export async function setSyncMode (docId, mode) {
 
 // ---- moving the Drive -----------------------------------------------------
 
-export async function moveOutDialog () {
+// keep: link another computer (both keep the Drive and stay in sync).
+// Otherwise move to it: this computer signs out once it has everything.
+export async function moveOutDialog ({ keep = false } = {}) {
   const status = el('p', { class: 'move-status', role: 'status' }, 'Getting a code…')
   const codeBox = el('code', { class: 'move-code' }, '…')
   const copy = el('button', { type: 'button', class: 'btn', disabled: true }, 'Copy code')
   const d = el('dialog', { class: 'dialog dialog-wide' }, el('form', { method: 'dialog' },
-    el('h2', {}, 'Move your Drive to another computer'),
-    el('p', {}, 'Your identity, folders and every file move to the other computer. When it confirms it has everything, this computer signs out and deletes its copies. Both computers need to be online.'),
+    el('h2', {}, keep ? 'Link another computer' : 'Move your Drive to another computer'),
+    el('p', {}, keep
+      ? 'The other computer gets your identity, folders and every file, and from then on both stay in sync, including files you add or remove. Both computers need to be online now.'
+      : 'Your identity, folders and every file move to the other computer. When it confirms it has everything, this computer signs out and deletes its copies. Both computers need to be online.'),
     el('ol', { class: 'move-steps' },
       el('li', {}, 'On the other computer, install Commonplace and open it.'),
       el('li', {}, 'Choose “Bring my Drive here” and paste this code.')),
     el('div', { class: 'move-code-row' }, codeBox, copy),
     el('p', { class: 'fineprint-plain' }, 'Anyone with this code can take your Drive while this window is open. Only paste it on your own computer. It expires in 15 minutes.'),
     status,
-    el('div', { class: 'dialog-actions' }, el('button', { type: 'button', class: 'btn btn-quiet', onclick: () => d.close() }, 'Cancel'))))
+    el('div', { class: 'dialog-actions' }, el('button', { type: 'button', class: 'btn btn-quiet', 'data-role': 'close', onclick: () => d.close() }, 'Cancel'))))
   document.body.append(d)
   let finished = false
+  const done = (text) => { finished = true; status.textContent = text; const b = d.querySelector('[data-role="close"]'); b.textContent = 'Done'; b.className = 'btn btn-primary' }
   const off = cp.onMoveStatus((s) => {
     if (s.phase === 'connected') status.textContent = 'Connected to the other computer.'
     else if (s.phase === 'sending') status.textContent = 'Sending your Drive…'
-    else if (s.phase === 'confirmed') status.textContent = 'The other computer has everything. Signing out here…'
-    else if (s.phase === 'signed-out') { finished = true; status.textContent = 'Done. This computer is signed out.' }
+    else if (s.phase === 'confirmed') status.textContent = keep ? 'The other computer has everything.' : 'The other computer has everything. Signing out here…'
+    else if (s.phase === 'linked') done('Done. Both computers now share your Drive.')
+    else if (s.phase === 'signed-out') done('Done. This computer is signed out.')
     else if (s.phase === 'error') status.textContent = s.message
   })
   d.addEventListener('close', () => { off(); if (!finished) cp.cancelMove(); d.remove() })
   d.showModal()
-  const code = await cp.startMove()
+  const code = await cp.startMove({ keep })
   codeBox.textContent = code
   copy.disabled = false
   copy.onclick = async () => { await cp.copyText(code); toast('Code copied') }
@@ -219,7 +225,7 @@ export async function moveInDialog () {
   })
   const res = await dialog({
     title: 'Bring my Drive here',
-    body: 'On your other computer, choose “Move to another computer” and paste the code it shows. This computer must not have any files of its own yet.',
+    body: 'On your other computer, open your name at the bottom left, choose “Link another computer” or “Move to another computer”, and paste the code it shows here. This computer must not have any files of its own yet.',
     fields: [el('label', { class: 'field' }, 'Code', input), status],
     confirm: 'Bring it here',
     validate: (data) => (/cpmove1\.[A-Za-z0-9_-]{32}/.test(data.code) ? null : 'Paste the code from your other computer.')

@@ -110,10 +110,13 @@ class DocHandle {
 }
 
 export class SyncEngine extends EventEmitter {
-  constructor ({ identity, store }) {
+  // device: { id, name } for this computer, so my other computers can tell
+  // which of them they're talking to.
+  constructor ({ identity, store, device = null }) {
     super()
     this.identity = identity
     this.store = store
+    this.device = device
     this.docs = new Map()
     this.connections = new Set()
   }
@@ -317,6 +320,27 @@ export class SyncEngine extends EventEmitter {
     this._ownerAction(docId, (doc) => [doc.members.rotate(this.identity, crypto.randomBytes(32))])
   }
 
+  // Two of my computers changed who has access at the same moment and the
+  // other one's change won: make mine again on top of it, if it still applies.
+  _redoDropped (doc, dropped = []) {
+    const mineNow = () => doc.members.owner === this.identity.userId
+    for (const e of dropped) {
+      if (e.by !== this.identity.userId || !mineNow()) continue
+      const m = doc.members
+      try {
+        if (e.type === 'add' && !m.member(e.userId)) this._admit(doc, { userId: e.userId, role: e.role, enc: e.enc, invite: e.via ? { once: true, i: e.via } : null })
+        else if (e.type === 'role' && m.member(e.userId) && m.member(e.userId).role !== e.role) m.setRole(this.identity, e.userId, e.role)
+        else if (e.type === 'remove' && m.member(e.userId)) m.remove(this.identity, e.userId, crypto.randomBytes(32))
+        else if (e.type === 'rotate' && !dropped.some((x) => x.type === 'remove')) m.rotate(this.identity, crypto.randomBytes(32))
+        else if (e.type === 'owner' && m.member(e.userId)) m.transfer(this.identity, e.userId)
+        else if (e.type === 'revoke-invites') m.revokeInvites(this.identity)
+        else if (e.type === 'retire-legacy') m.retireLegacyLinks(this.identity)
+        else continue
+      } catch { continue }
+      this._membersChanged(doc)
+    }
+  }
+
   _ownerAction (docId, fn) {
     const doc = this.docs.get(docId)
     if (!doc) throw new Error('No such file.')
@@ -336,7 +360,12 @@ export class SyncEngine extends EventEmitter {
       for (const id of doc.state.clientIds) pending += Math.max(0, (local.get(id) || 0) - (doc.state.acked[id] || 0))
     }
     const peers = new Map()
-    for (const link of doc.links.values()) if (link.contentEpoch != null) peers.set(link.user.userId, { ...link.user, role: link.role, pending: link.pending })
+    const devices = new Map() // my own other computers
+    for (const [conn, link] of doc.links) {
+      if (link.contentEpoch == null) continue
+      if (link.user.userId === this.identity.userId) devices.set(link.device?.id || conn.remoteId, { id: link.device?.id || null, name: link.device?.name || 'Another computer' })
+      else peers.set(link.user.userId, { ...link.user, role: link.role, pending: link.pending })
+    }
     // People with the document open right now (their editor publishes presence).
     const here = new Map()
     for (const [clientId, s] of doc.awareness.getStates()) {
@@ -347,9 +376,11 @@ export class SyncEngine extends EventEmitter {
       docId,
       active: doc.active,
       peers: [...peers.values()],
+      devices: [...devices.values()],
       here: [...here.values()],
       lastSyncedAt: doc.state.lastSyncedAt,
       lastSyncedWith: doc.state.lastSyncedWith,
+      lastSyncedDevice: doc.state.lastSyncedDevice || null,
       pending,
       requests: this.requests(docId).length
     }
@@ -427,7 +458,8 @@ export class SyncEngine extends EventEmitter {
       enc: this.identity.encPublic,
       sig: this.identity.sign(helloProof(doc.docId, epoch, conn.localId, this.identity.encPublic)).toString('base64'),
       invite: doc.invite,
-      head: doc.members.head
+      head: doc.members.head,
+      device: this.device
     }
     conn.send(MSG.HELLO, doc.docId, epoch, seal(doc.keyFor(epoch), encodeHello(info, Y.encodeStateVector(doc.ydoc))))
   }
@@ -458,7 +490,10 @@ export class SyncEngine extends EventEmitter {
     if (type === MSG.MEMBERS) {
       let entries
       try { entries = JSON.parse(plain.toString('utf8')) } catch { return }
-      if (doc.members.merge(entries)) this._membersChanged(doc)
+      if (doc.members.merge(entries)) {
+        this._membersChanged(doc)
+        this._redoDropped(doc, doc.members.dropped)
+      }
       return
     }
 
@@ -513,6 +548,9 @@ export class SyncEngine extends EventEmitter {
       doc.links.set(conn, link)
     }
     link.user = sanitizeUser(info)
+    link.device = info.device && typeof info.device === 'object'
+      ? { id: String(info.device.id || '').slice(0, 32), name: String(info.device.name || 'Another computer').slice(0, 60) }
+      : null
     link.enc = typeof info.enc === 'string' && /^[0-9a-f]{64}$/.test(info.enc) ? info.enc : null
     link.invite = info.invite && typeof info.invite === 'object' ? info.invite : null
     link.epochs.add(epoch)
@@ -657,7 +695,8 @@ export class SyncEngine extends EventEmitter {
       if (theirs > (doc.state.acked[id] || 0)) doc.state.acked[id] = theirs
     }
     doc.state.lastSyncedAt = Date.now()
-    doc.state.lastSyncedWith = user?.name || null
+    doc.state.lastSyncedWith = user?.userId === this.identity.userId ? null : (user?.name || null)
+    doc.state.lastSyncedDevice = user?.userId === this.identity.userId ? (link?.device?.name || 'your other computer') : null
     this.store.writeState(doc.docId, doc.state)
     this._scheduleStatus(doc)
   }

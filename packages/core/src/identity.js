@@ -5,8 +5,9 @@
 // There is no account and no server. Display name and color are self-chosen
 // and not unique; the key is what distinguishes two people both called "Alex".
 //
-// An identity lives on one computer at a time. "Move to another computer"
-// exports it (exportBundle) and the old computer deletes its copy.
+// The same identity can live on several of your computers ("Link another
+// computer" copies it). They share one Drive index, synced like a document
+// whose key only holders of this identity can derive (driveSecret).
 
 import crypto from 'node:crypto'
 import fs from 'node:fs'
@@ -79,6 +80,11 @@ export class Identity {
   sign (data) {
     const key = crypto.createPrivateKey({ key: Buffer.from(this._saved.privateKey, 'base64'), format: 'der', type: 'pkcs8' })
     return crypto.sign(null, Buffer.from(data), key)
+  }
+
+  // The key for this person's Drive index, the same on each of their computers.
+  driveSecret () {
+    return crypto.createHash('sha256').update('commonplace/v1/drive-index').update(Buffer.from(this._saved.privateKey, 'base64')).digest()
   }
 
   // Opens something sealed to this person's encryption key.

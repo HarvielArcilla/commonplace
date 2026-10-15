@@ -1,7 +1,7 @@
 // Window entry point: wires CommonDrive and CommonDocs to the background process.
 // Bundled by build.mjs into renderer/dist/app.js.
 
-import { $, el, toast, cleanError } from './ui.js'
+import { $, el, ago, toast, confirmAction, cleanError } from './ui.js'
 import { state, cp } from './state.js'
 import { initDrive, renderDrive } from './drive-view.js'
 import { initDocView, openDocument, renderDocMargin } from './doc-view.js'
@@ -65,8 +65,28 @@ function openProfileDialog () {
       el('span', { class: 'swatch', style: `--swatch:${c}` })))
   }
   $('#profile-id').textContent = `Your ID: ${state.me.userId}`
-  $('#move-out').hidden = !state.me.hasChosenName // not during first-run setup
+  $('#profile-computers').hidden = !state.me.hasChosenName // not during first-run setup
+  if (state.me.hasChosenName) renderComputers()
   d.showModal()
+}
+
+async function renderComputers () {
+  const devices = await cp.listDevices()
+  $('#profile-devices').replaceChildren(...devices.map((dv) => el('li', { class: 'person' },
+    el('span', { class: `presence-dot${dv.online ? ' on' : ''}`, 'aria-hidden': 'true' }),
+    el('span', { class: 'person-name' }, dv.name,
+      el('span', { class: 'person-note' }, dv.thisComputer ? 'This computer' : dv.online ? 'Online now' : `Last seen ${ago(dv.lastSeenAt)}`)),
+    dv.thisComputer ? null : el('button', { type: 'button', class: 'btn btn-quiet btn-danger', onclick: () => unlink(dv) }, 'Unlink'))))
+}
+
+async function unlink (dv) {
+  const ok = await confirmAction({
+    title: `Unlink ${dv.name}?`,
+    body: `${dv.name} will sign out and delete its copy of your Drive the next time it connects. Your files stay on this computer and with your collaborators. If that computer was lost or stolen, also remove yourself from files that matter, since it has your identity until it connects.`,
+    confirm: 'Unlink'
+  })
+  if (!ok) return
+  try { await cp.unlinkDevice(dv.id); toast(`${dv.name} will sign out when it next connects`); renderComputers() } catch (err) { toast(cleanError(err)) }
 }
 
 $('#profile-form').addEventListener('submit', async (e) => {
@@ -83,8 +103,13 @@ $('#profile-dialog').addEventListener('cancel', (e) => { if (!state.me?.hasChose
 $('[data-action="profile"]').addEventListener('click', openProfileDialog)
 $('#move-out').addEventListener('click', () => {
   $('#profile-dialog').close()
-  moveOutDialog()
+  moveOutDialog({ keep: false })
 })
+$('#link-out').addEventListener('click', () => {
+  $('#profile-dialog').close()
+  moveOutDialog({ keep: true })
+})
+cp.onNotice((text) => toast(text))
 
 // ---- boot ----------------------------------------------------------------------
 
@@ -92,6 +117,7 @@ cp.onDriveChanged((files, me, folders) => {
   state.files = files
   state.me = me
   if (folders) state.folders = folders
+  if ($('#profile-dialog').open && !$('#profile-computers').hidden) renderComputers()
   if (state.open) renderDocMargin()
   else renderDrive()
 })

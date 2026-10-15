@@ -6,6 +6,8 @@
 // apps (CommonSheets, CommonSlides) plug in without changes here.
 
 import { EventEmitter } from 'node:events'
+import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import { randomBytes } from 'node:crypto'
 import * as Y from 'yjs'
@@ -17,6 +19,8 @@ import {
 
 export { sendDrive, receiveDrive, newMoveCode, parseMoveCode } from './move.js'
 
+// Where the index lived before it synced between computers (still used to
+// hand an index over when moving or linking a Drive).
 export const INDEX_ID = 'drive-index'
 
 // A checkpoint is saved once edits pause for a minute, and at least every
@@ -24,14 +28,15 @@ export const INDEX_ID = 'drive-index'
 const HISTORY = { idleMs: 60e3, maxMs: 10 * 60e3 }
 
 export class Drive extends EventEmitter {
-  constructor ({ dataDir, apps = [], swarm = {}, transport = true, history = {} }) {
+  constructor ({ dataDir, apps = [], swarm = {}, transport = true, history = {}, deviceName = defaultDeviceName() }) {
     super()
     this.dataDir = dataDir
     this.swarmOpts = swarm
     this.appsByType = new Map(apps.map((a) => [a.type, a]))
     this.identity = loadOrCreateIdentity(dataDir)
+    this.device = { id: loadDeviceId(dataDir), name: String(deviceName).slice(0, 60) }
     this.store = new FileStore(path.join(dataDir, 'files'))
-    this.engine = new SyncEngine({ identity: this.identity, store: this.store })
+    this.engine = new SyncEngine({ identity: this.identity, store: this.store, device: this.device })
     this.history = new History(this.store)
     this.historyTiming = { ...HISTORY, ...history }
     this._checkpoints = new Map() // docId -> { first, timer } for unsaved changes
@@ -43,19 +48,33 @@ export class Drive extends EventEmitter {
         ...swarm,
         isLonely: (topicHex) => {
           const status = this.engine.status(this._topicToDoc.get(topicHex))
-          return !status || status.peers.length === 0
+          return !status || (status.peers.length === 0 && status.devices.length === 0)
         }
       })
       : null
 
-    // The index is itself a CRDT, so it can later sync between your own
-    // devices with the exact same machinery as a shared document.
-    this.index = new Y.Doc()
-    this.store.load(INDEX_ID, this.index)
-    this.index.on('update', (u, origin) => { if (origin !== 'disk') this.store.append(INDEX_ID, u) })
+    // The index (my files, folders and computers) is itself a document,
+    // synced between my own computers with the same machinery as a shared
+    // file. Only my identity can derive its key, and it has no members.
+    const indexDoc = this.engine.openDoc(this.identity.driveSecret())
+    this.indexId = indexDoc.docId
+    this.index = indexDoc.ydoc
+    this._adoptOldIndex()
     this.files = this.index.getMap('files')
     // Personal folders: they organize your Drive only and are never shared.
     this.folders = this.index.getMap('folders')
+    // My computers: deviceId -> { name, platform, linkedAt, lastSeenAt, unlinked }
+    this.devicesMap = this.index.getMap('devices')
+    this._attached = new Set()
+    // Files added or removed on my other computers.
+    this.files.observe((event, tr) => {
+      if (!(tr.origin && typeof tr.origin === 'object')) return // only changes that came from my other computers
+      for (const [docId, change] of event.changes.keys) {
+        if (change.action === 'add' && this.files.get(docId)?.secret) this._attach(this.files.get(docId))
+        else if (change.action === 'delete') this._forget(docId)
+      }
+    })
+    this.devicesMap.observe(() => { this._checkUnlinked(); this._changed() })
 
     this.engine.on('status', (status) => { this._rememberNames(status); this._changed() })
     this.engine.on('members', () => this._changed())
@@ -65,6 +84,7 @@ export class Drive extends EventEmitter {
     this._recent = new Map() // docId -> { at, by } for changes made by others
     this._persistTimers = new Map()
     this.engine.on('update', (docId, update, origin) => {
+      if (docId === this.indexId) { if (origin !== 'disk') this._changed(); return }
       if (origin === 'renderer') this._patch(docId, { contributed: true, lastEditedAt: Date.now() })
       else if (origin !== 'disk' && origin !== 'local' && origin !== 'local-meta') this._remoteChange(docId, update)
       if (origin !== 'disk' && origin !== 'local-meta' && this.files.has(docId)) this._scheduleCheckpoint(docId)
@@ -72,11 +92,18 @@ export class Drive extends EventEmitter {
   }
 
   async start () {
+    this._joinTopics(this.indexId)
     for (const entry of this.files.values()) this._attach(entry)
+    this._seen()
+    this._checkUnlinked()
+    this._seenTimer = setInterval(() => this._seen(), 3600e3)
+    this._seenTimer.unref?.()
     this._changed()
   }
 
   async stop () {
+    clearInterval(this._seenTimer)
+    if (!this.signedOut) this._seen()
     for (const docId of [...this._checkpoints.keys()]) this.checkpoint(docId)
     for (const [docId, t] of this._persistTimers) {
       clearTimeout(t)
@@ -187,6 +214,9 @@ export class Drive extends EventEmitter {
         ownerOnline,
         lastSyncedAt: status.lastSyncedAt || null,
         lastSyncedWith: status.lastSyncedWith || null,
+        lastSyncedDevice: status.lastSyncedDevice || null,
+        // My own other computers connected for this file.
+        devices: status.devices || [],
         pending: status.pending
       }
     }
@@ -381,15 +411,11 @@ export class Drive extends EventEmitter {
     this._patch(docId, { lastOpenedAt: Date.now() })
   }
 
-  // Removes the file from this device only. Other collaborators keep theirs.
+  // Removes the file from my Drive, on each of my computers. Other
+  // collaborators keep theirs.
   async remove (docId) {
-    clearTimeout(this._checkpoints.get(docId)?.timer)
-    this._checkpoints.delete(docId)
-    await this._leaveTopics(docId)
-    this.engine.closeDoc(docId, { deleteLocalData: true })
     this.files.delete(docId)
-    this._open.delete(docId)
-    this._changed()
+    await this._forget(docId)
   }
 
   // ---- folders -------------------------------------------------------------
@@ -460,16 +486,75 @@ export class Drive extends EventEmitter {
     doc.ydoc.transact(() => updatePerson(doc.ydoc, me), 'local-meta')
   }
 
-  // Everything needed to recreate this Drive on another computer.
-  exportForMove () {
+  // ---- my computers ----------------------------------------------------------
+
+  // The computers this Drive is linked on, this one first.
+  devices () {
+    const online = new Set((this.engine.status(this.indexId)?.devices || []).map((d) => d.id))
+    return [...this.devicesMap.entries()]
+      .filter(([, d]) => d && !d.unlinked)
+      .map(([id, d]) => ({ id, name: d.name, platform: d.platform, lastSeenAt: d.lastSeenAt, thisComputer: id === this.device.id, online: id === this.device.id || online.has(id) }))
+      .sort((a, b) => (b.thisComputer - a.thisComputer) || (b.lastSeenAt || 0) - (a.lastSeenAt || 0))
+  }
+
+  // Asks another of my computers to sign out and delete its copy the next
+  // time it connects. It shares my identity, so this relies on it doing so.
+  unlinkDevice (id) {
+    if (id === this.device.id) throw new Error('To stop using this computer, unlink it from another one, or move your Drive.')
+    const d = this.devicesMap.get(id)
+    if (d) this.devicesMap.set(id, { ...d, unlinked: true, unlinkedAt: Date.now() })
+  }
+
+  // Everything needed to recreate this Drive on another computer. `leaving`:
+  // this computer is moving away, so the copy doesn't list it any more.
+  exportForMove ({ leaving = false } = {}) {
+    let index = this.index
+    if (leaving) {
+      index = new Y.Doc()
+      Y.applyUpdate(index, Y.encodeStateAsUpdate(this.index))
+      index.getMap('devices').delete(this.device.id)
+    }
     return {
       identity: this.identity.exportBundle(),
-      index: Buffer.from(Y.encodeStateAsUpdate(this.index)).toString('base64'),
+      index: Buffer.from(Y.encodeStateAsUpdate(index)).toString('base64'),
       docs: [...this.files.keys()].map((docId) => ({ docId, files: this.store.exportDoc(docId) }))
     }
   }
 
   // ---- internals -----------------------------------------------------------
+
+  // The index from before it synced between computers: adopt it once.
+  _adoptOldIndex () {
+    if (!this.store.has(INDEX_ID)) return
+    const old = new Y.Doc()
+    this.store.load(INDEX_ID, old)
+    Y.applyUpdate(this.index, Y.encodeStateAsUpdate(old), 'adopt')
+    this.store.remove(INDEX_ID)
+  }
+
+  _seen () {
+    const cur = this.devicesMap.get(this.device.id)
+    if (cur?.unlinked) return
+    this.devicesMap.set(this.device.id, { ...cur, name: this.device.name, platform: process.platform, linkedAt: cur?.linkedAt || Date.now(), lastSeenAt: Date.now() })
+  }
+
+  _checkUnlinked () {
+    if (this.devicesMap.get(this.device.id)?.unlinked && !this.signedOut) {
+      this.signedOut = true
+      this.emit('unlinked')
+    }
+  }
+
+  // A file was removed on another of my computers: remove it here too.
+  async _forget (docId) {
+    clearTimeout(this._checkpoints.get(docId)?.timer)
+    this._checkpoints.delete(docId)
+    this._attached.delete(docId)
+    this._open.delete(docId)
+    this.engine.closeDoc(docId, { deleteLocalData: true })
+    this._changed()
+    await this._leaveTopics(docId)
+  }
 
   _rememberNames (status) {
     const entry = status && this.files.get(status.docId)
@@ -562,6 +647,8 @@ export class Drive extends EventEmitter {
   }
 
   _attach (entry) {
+    if (this._attached.has(entry.docId)) return
+    this._attached.add(entry.docId)
     const doc = this.engine.openDoc(Buffer.from(entry.secret, 'base64'), { invite: entry.invite || null, active: this._shouldSync(entry) })
     const refresh = () => {
       const meta = readMeta(doc.ydoc)
@@ -607,7 +694,10 @@ export class Drive extends EventEmitter {
   // Joins the network topic for every key epoch of a file I'm syncing.
   _syncTopics (docId) {
     const entry = this.files.get(docId)
-    if (!entry || !this._shouldSync(entry)) return
+    if (entry && this._shouldSync(entry)) this._joinTopics(docId)
+  }
+
+  _joinTopics (docId) {
     const joined = this._joined.get(docId) || new Set()
     this._joined.set(docId, joined)
     for (const topic of this.engine.topicsFor(docId)) {
@@ -647,6 +737,21 @@ export class Drive extends EventEmitter {
 
 function openConflicts (ydoc) {
   return [...ydoc.getMap('conflicts').values()].filter((c) => c?.status === 'open').sort((a, b) => a.at - b.at)
+}
+
+// A stable id for this computer, kept outside the identity so linking or
+// moving a Drive never copies it.
+function loadDeviceId (dataDir) {
+  const file = path.join(dataDir, 'device.json')
+  try { return JSON.parse(fs.readFileSync(file, 'utf8')).id } catch {}
+  const id = randomBytes(8).toString('hex')
+  fs.writeFileSync(file, JSON.stringify({ id }))
+  return id
+}
+
+function defaultDeviceName () {
+  const host = os.hostname().replace(/\.(local|lan|home)$/i, '').replace(/[-_]+/g, ' ').trim()
+  return host || { darwin: 'Mac', win32: 'Windows PC' }[process.platform] || 'Computer'
 }
 
 function safeCall (fn, fallback) {

@@ -29,6 +29,7 @@ if (!profile && !app.requestSingleInstanceLock()) app.quit()
 let win = null
 let drive = null
 let pendingInvite = null
+let pendingNotice = null // shown once the window has loaded
 const openDocs = new Set()
 
 function findInvite (argv) {
@@ -81,6 +82,7 @@ function createWindow () {
   win.loadFile(path.join(here, '..', 'renderer', 'index.html'))
   win.webContents.on('did-finish-load', () => {
     if (pendingInvite) { send('invite:received', pendingInvite); pendingInvite = null }
+    if (pendingNotice) { send('notice', pendingNotice); pendingNotice = null }
   })
   // Links inside documents open in the system browser, never in the app.
   win.webContents.setWindowOpenHandler(({ url }) => {
@@ -227,16 +229,17 @@ function registerIpc () {
   ipcMain.handle('conflicts:list', (_e, docId) => drive.conflicts(docId))
   ipcMain.handle('conflicts:resolve', (_e, docId, id, choice) => drive.resolveConflict(docId, id, choice))
 
-  // Moving the whole Drive to another computer.
-  ipcMain.handle('move:start', () => {
+  // Linking another computer (both keep the Drive) or moving to it (this
+  // one signs out once the other has everything).
+  ipcMain.handle('move:start', (_e, { keep = false } = {}) => {
     if (move) move.abort()
     const code = newMoveCode()
     const controller = new AbortController()
     move = controller
-    sendDrive({ code, drive, swarm: swarmOptions(), signal: controller.signal, onStatus: (s) => send('move:status', s) })
+    sendDrive({ code, drive, swarm: swarmOptions(), signal: controller.signal, leaving: !keep, onStatus: (s) => send('move:status', s) })
       .then(async ({ count }) => {
-        // The new computer has everything: sign out here and delete it all.
         move = null
+        if (keep) { send('move:status', { phase: 'linked', count }); return }
         await signOutAndWipe()
         send('move:status', { phase: 'signed-out', count })
       })
@@ -244,6 +247,8 @@ function registerIpc () {
     return code
   })
   ipcMain.handle('move:cancel', () => { move?.abort(); move = null })
+  ipcMain.handle('devices:list', () => drive.devices())
+  ipcMain.handle('devices:unlink', (_e, id) => drive.unlinkDevice(id))
   ipcMain.handle('move:receive', async (_e, code) => {
     if (!drive.isEmpty) throw new Error('This computer already has files. A Drive can only be moved to a computer with an empty Drive.')
     const result = await receiveDrive({
@@ -280,6 +285,11 @@ async function startDrive () {
   const pause = Number(process.env.COMMONPLACE_CHECKPOINT_SECONDS) * 1000
   drive = new Drive({ dataDir: app.getPath('userData'), apps: docsApps, swarm: swarmOptions(), history: pause ? { idleMs: pause } : {} })
   drive.on('error', (err) => console.error('[commonplace]', err))
+  // Another of my computers unlinked this one: sign out and delete it all here.
+  drive.on('unlinked', () => {
+    pendingNotice = 'This computer was unlinked from your Drive on another computer, so its copy was deleted.'
+    signOutAndWipe().catch((err) => console.error('[commonplace]', err))
+  })
   drive.on('changed', () => send('drive:changed', drive.list(), drive.me(), drive.listFolders()))
   drive.engine.on('update', (docId, update, origin) => {
     if (origin !== 'renderer' && origin !== 'disk' && openDocs.has(docId)) send('doc:update', docId, update)

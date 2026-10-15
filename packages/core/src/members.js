@@ -163,9 +163,12 @@ export class Membership {
 
   // Adopts another copy of the log if it is valid and newer. Returns true if
   // anything changed. Only the owner writes, so copies normally just extend
-  // each other; if the owner ever signed two different entries at the same
-  // position, every peer keeps the branch with the smaller hash.
+  // each other. If the owner signed two different entries at the same
+  // position (from two of their computers at once), every peer keeps the
+  // branch with the smaller hash; the entries this copy loses are left in
+  // `dropped` so the owner's computer can make those changes again.
   merge (entries) {
+    this.dropped = []
     if (!Array.isArray(entries) || !entries.length) return false
     let next
     try { next = replay(this.docId, entries) } catch { return false }
@@ -176,6 +179,7 @@ export class Membership {
     if (i < mine.length) {
       // A fork: keep the branch whose first differing entry hashes lower.
       if (hashOf(entries[i]) > hashOf(mine[i])) return false
+      this.dropped = mine.slice(i)
     }
     this.entries = entries.map((e) => ({ ...e }))
     this.state = next

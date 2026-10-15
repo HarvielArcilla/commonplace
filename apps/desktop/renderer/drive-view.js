@@ -384,15 +384,15 @@ function fileMenu (anchor, f) {
     { label: 'Details', onSelect: () => detailsDialog(f) },
     { sep: true },
     {
-      label: 'Remove from this computer…',
+      label: 'Remove from your Drive…',
       danger: true,
       onSelect: async () => {
         const body = f.role === 'owner'
-          ? 'This deletes your copy. Anyone you shared it with keeps theirs.'
-          : `Shared by ${f.owner?.name || 'someone'}. This deletes your copy only.`
+          ? 'This deletes your copy, on each of your computers. Anyone you shared it with keeps theirs.'
+          : `Shared by ${f.owner?.name || 'someone'}. This deletes your copy only, on each of your computers.`
         if (await confirmAction({ title: `Remove “${f.title}”?`, body, confirm: 'Remove' })) {
           await cp.removeFile(f.docId)
-          toast('Removed from this computer')
+          toast('Removed from your Drive')
         }
       }
     }

@@ -1,12 +1,13 @@
-// Moving a whole Drive (your identity, folders and every file) from one
+// Copying a whole Drive (your identity, folders and every file) from one
 // computer to another, directly between the two, while both are online.
+// Used both to link another computer (both keep the Drive and stay in sync)
+// and to move to one (the old computer signs out afterwards).
 //
 // The old computer shows a one-time code. The new computer enters it. Both
 // derive a meeting place on the peer-to-peer network and an encryption key
-// from the code, the old computer sends everything, the new one confirms it
-// has written all of it to disk, and only then does the old computer sign out
-// and delete its copies. Your identity (and so your ownership of files) lives
-// on exactly one computer at a time.
+// from the code, the old computer sends everything, and the new one confirms
+// it has written all of it to disk. Only then, when moving, does the old
+// computer sign out and delete its copies.
 //
 // Anyone who sees the code while it is active could take the Drive, so it is
 // shown only on the old computer and expires after 15 minutes.
@@ -60,7 +61,8 @@ function channel (socket, key, onMessage) {
 
 // Old computer: waits for the new one, sends the Drive, resolves once the new
 // computer confirms it has everything. Does not delete anything itself.
-export function sendDrive ({ code, drive, swarm = {}, onStatus = () => {}, signal }) {
+// `leaving`: this is a move, so this computer will sign out afterwards.
+export function sendDrive ({ code, drive, swarm = {}, onStatus = () => {}, signal, leaving = false }) {
   const secret = parseMoveCode(code)
   if (!secret) throw new Error('Invalid move code.')
   const { topic, key } = keysFor(secret)
@@ -82,7 +84,7 @@ export function sendDrive ({ code, drive, swarm = {}, onStatus = () => {}, signa
         if (msg.type === 'ready') {
           if (!msg.empty) { send({ type: 'refused', reason: 'not-empty' }); return }
           onStatus({ phase: 'sending' })
-          const payload = drive.exportForMove()
+          const payload = drive.exportForMove({ leaving })
           send({ type: 'identity', identity: payload.identity })
           send({ type: 'index', index: payload.index })
           for (const doc of payload.docs) send({ type: 'doc', ...doc })
