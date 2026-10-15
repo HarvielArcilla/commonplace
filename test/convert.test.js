@@ -52,20 +52,46 @@ test('docx export then import keeps structure and page setup', async () => {
   assert.equal(page.pageNumbers, true)
 })
 
-test('pagination pushes a block that does not fit to the next page', () => {
+test('docx export keeps indents and uses the editor\'s default fonts', async () => {
+  const JSZip = (await import('jszip')).default
+  const doc = { type: 'doc', content: [{ type: 'paragraph', attrs: { indent: 2, firstLine: 1 }, content: [{ type: 'text', text: 'Indented' }] }, { type: 'codeBlock', content: [{ type: 'text', text: 'x = 1' }] }] }
+  const xml = await (await JSZip.loadAsync(await exportDocx(doc, normalizePage({})))).file('word/document.xml').async('string')
+  assert.match(xml, /<w:ind w:left="1440" w:firstLine="720"\/>/)
+  assert.match(xml, /Courier New/)
+})
+
+test('pagination: blocks move whole, paragraphs split by line, with widow and orphan control', () => {
   const geo = pageGeometry({ size: 'letter', margins: { top: 1, right: 1, bottom: 1, left: 1 } })
-  // contentHeight = 1056 - 192 = 864
-  assert.equal(geo.contentHeight, 864)
-  const blocks = [
-    { pos: 0, height: 400, marginTop: 0 },
-    { pos: 10, height: 400, marginTop: 12 },
-    { pos: 20, height: 100, marginTop: 12 }, // 400+12+400+12+100 > 864 -> new page
-    { pos: 30, height: 20, marginTop: 12, forced: true }, // manual break
-    { pos: 40, height: 30, marginTop: 12 }
-  ]
-  const { breaks, pages } = computeBreaks(blocks, geo)
-  assert.equal(pages, 3)
-  assert.deepEqual(breaks.map((b) => b.pos), [20, 40])
-  // Spacer fills the rest of page 1, then bottom margin, gap and top margin.
-  assert.equal(breaks[0].height, (864 - 812) + 96 + geo.gap + 96)
+  assert.equal(geo.contentHeight, 864) // 11in - 2in, at 96 px per inch
+  const stride = geo.height + geo.gap
+  const lines = (top, n, h = 24) => Array.from({ length: n }, (_, i) => ({ top: top + i * h, bottom: top + (i + 1) * h }))
+
+  // An image that doesn't fit moves to the next page whole.
+  let r = computeBreaks([{ top: 0, bottom: 800 }, { top: 810, bottom: 1000 }], geo)
+  assert.equal(r.pages, 2)
+  assert.deepEqual(r.breaks, [{ unit: 1, height: stride - 810 }])
+
+  // A long paragraph splits at the first line that doesn't fit.
+  r = computeBreaks([{ top: 0, bottom: 700 }, { top: 710, bottom: 710 + 20 * 24, lines: lines(710, 20) }], geo)
+  // lines 0..5 fit (710 + 6*24 = 854 <= 864); line 6 starts the next page
+  assert.deepEqual(r.breaks, [{ unit: 1, line: 6, height: stride - (710 + 6 * 24) }])
+  assert.equal(r.pages, 2)
+
+  // Orphan: only one line would stay behind, so the whole paragraph moves.
+  r = computeBreaks([{ top: 0, bottom: 830 }, { top: 840, bottom: 840 + 5 * 24, lines: lines(840, 5) }], geo)
+  assert.deepEqual(r.breaks, [{ unit: 1, height: stride - 840 }])
+
+  // Widow: only the last line would move, so the last two move together.
+  r = computeBreaks([{ top: 0, bottom: 700 }, { top: 744, bottom: 744 + 6 * 24, lines: lines(744, 6) }], geo)
+  // natural fit is lines 0..4 (744+5*24=864); line 5 alone would be a widow
+  assert.deepEqual(r.breaks, [{ unit: 1, line: 4, height: stride - (744 + 4 * 24) }])
+
+  // A manual page break starts a new page.
+  r = computeBreaks([{ top: 0, bottom: 40 }, { top: 50, bottom: 50, forced: true }, { top: 60, bottom: 90 }], geo)
+  assert.deepEqual(r.breaks, [{ unit: 2, height: stride - 60 }])
+  assert.equal(r.pages, 2)
+
+  // Results never depend on spacers, so recomputing is stable.
+  const units = [{ top: 0, bottom: 700 }, { top: 710, bottom: 710 + 40 * 24, lines: lines(710, 40) }]
+  assert.deepEqual(computeBreaks(units, geo), computeBreaks(units, geo))
 })

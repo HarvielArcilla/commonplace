@@ -15,26 +15,41 @@ import Highlight from '@tiptap/extension-highlight'
 import { Markdown } from '@tiptap/markdown'
 import { CONTENT_FIELD } from './index.js'
 import { Pagination, PageBreak } from './pagination.js'
+import { Indent } from './indent.js'
 
 export { pageGeometry, readPage, normalizePage, PAGE_SIZES, DEFAULT_PAGE } from './page.js'
 
-const SizedImage = Image.extend({
-  addAttributes () {
-    return {
-      ...this.parent?.(),
-      width: { default: null, parseHTML: (el) => numberAttr(el, 'width'), renderHTML: (a) => (a.width ? { width: a.width } : {}) },
-      height: { default: null, parseHTML: (el) => numberAttr(el, 'height'), renderHTML: (a) => (a.height ? { height: a.height } : {}) }
-    }
-  }
-})
+// What paged documents use when no font or size is set on the text. These
+// match the .docx export, so a file looks the same in Word.
+export const PAGED_DEFAULTS = {
+  font: 'Georgia',
+  mono: 'Courier New',
+  size: { p: 12, h1: 20, h2: 16, h3: 13, code: 10 } // points
+}
 
-function numberAttr (el, name) {
-  const v = parseInt(el.getAttribute(name), 10)
-  return Number.isFinite(v) ? v : null
+// Images can be resized by dragging their corners. The width never exceeds
+// the text column (getMaxWidth), and the aspect ratio is kept.
+function resizableImage (getMaxWidth) {
+  return Image.extend({
+    addNodeView () {
+      const make = this.parent?.()
+      if (!make) return null
+      return (props) => {
+        const view = make(props)
+        const max = getMaxWidth?.()
+        if (max && view) view.maxSize = { width: max, height: Infinity }
+        return view
+      }
+    }
+  }).configure({
+    allowBase64: true,
+    inline: false,
+    resize: { enabled: true, directions: ['top-left', 'top-right', 'bottom-left', 'bottom-right'], minWidth: 40, minHeight: 20, alwaysPreserveAspectRatio: true }
+  })
 }
 
 // kind: 'markdown' | 'paged'
-export function createDocsEditor ({ kind, element, ydoc, awareness, user, editable = true, onUpdate, onEditMath, onOpenLink, getPageSetup, getZoom, onLayout }) {
+export function createDocsEditor ({ kind, element, ydoc, awareness, user, editable = true, onUpdate, onEditMath, onOpenLink, getPageSetup, getZoom, getMaxImageWidth, onLayout }) {
   const paged = kind === 'paged'
   const extensions = [
     // The CRDT keeps its own undo history (per user), so disable the default one.
@@ -67,7 +82,8 @@ export function createDocsEditor ({ kind, element, ydoc, awareness, user, editab
       blockOptions: { onClick: (node, pos) => onEditMath?.({ display: true, latex: node.attrs.latex, pos }) }
     }),
     TableKit.configure({ table: { resizable: false } }),
-    SizedImage.configure({ allowBase64: true, inline: false }),
+    resizableImage(getMaxImageWidth),
+    Indent,
     Markdown,
     PageBreak
   ]
@@ -109,6 +125,7 @@ export function activeFormats (e) {
         : e.isActive('codeBlock') ? 'code'
           : 'p'
   const style = e.getAttributes('textStyle')
+  const { font, size } = effectiveTextStyle(e, block)
   return {
     block,
     bold: e.isActive('bold'),
@@ -124,8 +141,48 @@ export function activeFormats (e) {
     align: ['center', 'right', 'justify'].find((a) => e.isActive({ textAlign: a })) || 'left',
     fontFamily: style.fontFamily || '',
     fontSize: style.fontSize || '',
+    // What the text actually uses, defaults included; 'mixed' if the
+    // selection spans more than one.
+    font,
+    size,
+    indent: e.state.selection.$from.parent.attrs.indent || 0,
     color: style.color || '',
     highlight: e.getAttributes('highlight').color || (e.isActive('highlight') ? 'yes' : '')
+  }
+}
+
+const firstFamily = (stack) => String(stack).split(',')[0].trim().replace(/^["']|["']$/g, '')
+const toPt = (v) => {
+  const m = /^([\d.]+)\s*(px|pt)?$/.exec(String(v || '').trim())
+  if (!m) return null
+  const n = parseFloat(m[1])
+  return Math.round((m[2] === 'pt' ? n : n * 0.75) * 2) / 2
+}
+const blockOf = (node) => node.type.name === 'heading' ? `h${node.attrs.level}` : node.type.name === 'codeBlock' ? 'code' : 'p'
+
+// The font and size (in points) of the selected text, defaults included.
+export function effectiveTextStyle (e, block) {
+  const { state } = e
+  const { from, to, empty, $from } = state.selection
+  const fonts = new Set()
+  const sizes = new Set()
+  const add = (marks, b) => {
+    const ts = marks.find((m) => m.type.name === 'textStyle')?.attrs || {}
+    const code = b === 'code' || marks.some((m) => m.type.name === 'code')
+    fonts.add(ts.fontFamily ? firstFamily(ts.fontFamily) : (code ? PAGED_DEFAULTS.mono : PAGED_DEFAULTS.font))
+    sizes.add(toPt(ts.fontSize) ?? PAGED_DEFAULTS.size[b])
+  }
+  if (empty) {
+    add(state.storedMarks || $from.marks(), block)
+  } else {
+    state.doc.nodesBetween(from, to, (node, pos, parent) => {
+      if (node.isText) add(node.marks, blockOf(parent))
+    })
+    if (!fonts.size) add($from.marks(), block)
+  }
+  return {
+    font: fonts.size === 1 ? [...fonts][0] : 'mixed',
+    size: sizes.size === 1 ? [...sizes][0] : 'mixed'
   }
 }
 

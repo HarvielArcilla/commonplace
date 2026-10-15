@@ -46,7 +46,11 @@ All payloads are sealed with the file key. One connection carries many files.
 
 Both have links (Ctrl/Cmd+click opens them in the browser), LaTeX math rendered with KaTeX, tables and images. Images are stored inside the document as data URLs, up to 8 MB each.
 
-**Pagination (`packages/docs/src/pagination.js`).** The paged editor stays one continuous ProseMirror view. After each change it measures every top-level block (list items individually) and inserts an invisible spacer widget before any block that would cross the bottom margin, tall enough to push it to the next page's top margin. Spacers are view decorations, never part of the document or the CRDT. Sheets are drawn behind the text from the page count. PDF export uses the same breaks. Narrow windows zoom the pages to fit.
+**Pagination (`packages/docs/src/pagination.js`).** The paged editor stays one continuous ProseMirror view. After each change it measures the natural layout (spacers hidden for the measurement, all within one frame) and decides where pages end. Paragraphs and headings split at the first line that doesn't fit, with widow and orphan control; images, tables, math, code and list items move whole. An invisible spacer widget (a view decoration, never part of the document or the CRDT) is inserted before the line or block, exactly tall enough to reach the next page's text area. Because measurement never sees the spacers, the result can't oscillate. Sheets are drawn behind the text from the page count; PDF export uses the same breaks.
+
+**Units and zoom.** Pages are 96 px per inch and text sizes are in points, so a page has the proportions of paper. Defaults (Georgia 12 pt, headings 20/16/13 pt, code Courier New 10 pt) match the .docx export. Zoom scales everything together; "Fit" uses 100% unless the window is narrower than the page.
+
+**Indentation.** Paragraphs and headings carry `indent` (0.5 in steps) and `firstLine` attributes that are kept when Enter splits a paragraph. Tab indents (first line at the start of a paragraph), Shift+Tab outdents, and Backspace at the start removes indentation first. Lists and tables handle Tab first. Indents export to .docx; Markdown has no way to express them.
 
 **Drive folders.** Folders are personal: they live in your Drive index (a local CRDT), never in the shared files. Deleting a folder moves its contents up a level; it never deletes files.
 
@@ -73,7 +77,8 @@ Both have links (Ctrl/Cmd+click opens them in the browser), LaTeX math rendered 
 - Files are stored unencrypted on your own disk, which is protected only by your OS account.
 - A peer you share one file with learns the public IDs of other files you're syncing (not their contents or keys).
 - The first launch needs Hyperswarm's public bootstrap nodes to join the DHT. You can supply your own list.
-- A single paragraph or table taller than a page isn't split across pages on screen (PDF export does split it).
+- A single table, image or code block taller than a page isn't split across pages on screen (PDF export does split it). Paragraphs do split.
+- In justified text, the line just before a page break isn't stretched to full width.
 - Math is exported to .docx as its LaTeX source in Cambria Math, not as Word equations.
 - .docx import keeps structure but not exact fonts, colors or alignment.
 - Headers, footers other than page numbers, columns and footnotes aren't supported yet.

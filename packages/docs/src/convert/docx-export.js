@@ -16,7 +16,7 @@ import { dataUrlToBuffer, imageType, imageSize } from './image-size.js'
 
 const TWIP = 1440 // per inch
 const BODY_FONT = 'Georgia'
-const MONO_FONT = 'Consolas'
+const MONO_FONT = 'Courier New'
 const MATH_FONT = 'Cambria Math'
 
 const HEADINGS = { 1: HeadingLevel.HEADING_1, 2: HeadingLevel.HEADING_2, 3: HeadingLevel.HEADING_3 }
@@ -82,13 +82,20 @@ function blocks (nodes, ctx, para = {}) {
   return out
 }
 
+// Indent levels are 0.5 in each (720 twips), matching the editor.
+function indentOf (attrs, para) {
+  const left = (para.indent?.left || 0) + (attrs?.indent || 0) * 720
+  const firstLine = attrs?.firstLine ? 720 : 0
+  return left || firstLine ? { left: left || undefined, firstLine: firstLine || undefined } : para.indent
+}
+
 function block (node, ctx, para) {
   const align = ALIGN[node.attrs?.textAlign]
   switch (node.type) {
     case 'paragraph':
-      return [new Paragraph({ ...para, alignment: align, children: inlines(node.content, ctx) })]
+      return [new Paragraph({ ...para, indent: indentOf(node.attrs, para), alignment: align, children: inlines(node.content, ctx) })]
     case 'heading':
-      return [new Paragraph({ ...para, heading: HEADINGS[node.attrs?.level] || HeadingLevel.HEADING_1, alignment: align, children: inlines(node.content, ctx) })]
+      return [new Paragraph({ ...para, indent: indentOf(node.attrs, para), heading: HEADINGS[node.attrs?.level] || HeadingLevel.HEADING_1, alignment: align, children: inlines(node.content, ctx) })]
     case 'bulletList':
     case 'orderedList':
       return list(node, ctx, para, 0)
@@ -104,7 +111,7 @@ function block (node, ctx, para) {
         ...para,
         spacing: { after: 0, line: 260 },
         shading: { type: ShadingType.CLEAR, fill: 'F3F4F6', color: 'auto' },
-        children: [new TextRun({ text: line || ' ', font: MONO_FONT, size: 19 })]
+        children: [new TextRun({ text: line || ' ', font: MONO_FONT, size: 20 })]
       }))
     }
     case 'horizontalRule':

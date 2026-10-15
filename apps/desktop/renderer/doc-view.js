@@ -10,8 +10,9 @@ import { icons } from './icons.js'
 import { state, cp, statusNotes, renderNotes } from './state.js'
 import { shareDialog } from './share.js'
 
+// Fonts that ship with both macOS and Windows (plus Office's), so a document
+// looks the same on everyone's computer.
 const FONTS = [
-  { label: 'Default', value: '' },
   { label: 'Georgia', value: 'Georgia, serif' },
   { label: 'Times New Roman', value: '"Times New Roman", Times, serif' },
   { label: 'Palatino', value: '"Palatino Linotype", Palatino, serif' },
@@ -21,7 +22,11 @@ const FONTS = [
   { label: 'Verdana', value: 'Verdana, sans-serif' },
   { label: 'Courier New', value: '"Courier New", Courier, monospace' }
 ]
-const SIZES = [8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 32, 36, 48, 60]
+const SIZES = [8, 9, 10, 10.5, 11, 12, 13, 14, 16, 18, 20, 24, 28, 32, 36, 48, 60, 72]
+const ZOOMS = [50, 75, 90, 100, 110, 125, 150, 200]
+const ZOOM_KEY = 'commonplace.doc.zoom'
+const loadZoom = () => { try { return localStorage.getItem(ZOOM_KEY) || 'fit' } catch { return 'fit' } }
+const saveZoom = (v) => { try { localStorage.setItem(ZOOM_KEY, v) } catch {} }
 const TEXT_COLORS = [
   ['Ink', '#1f2430'], ['Slate', '#5c6270'], ['Blue', '#284b8c'], ['Green', '#2f6b4f'],
   ['Red', '#9b2c2c'], ['Rust', '#b4532a'], ['Ochre', '#a2741b'], ['Plum', '#6b3f8c']
@@ -99,6 +104,7 @@ export async function openDocument (docId, { focusTitle = false, initialContent 
     onOpenLink: (href) => cp.openLink(href),
     getPageSetup: () => readPage(ydoc),
     getZoom: () => o.zoom || 1,
+    getMaxImageWidth: () => (kind === 'paged' ? pageGeometry(readPage(ydoc)).contentWidth : 680),
     onLayout: ({ pages, geometry }) => { if (state.open !== o) return; o.pages = pages; drawSheets(pages, geometry); renderDocMargin() }
   })
 
@@ -169,16 +175,29 @@ function applyPageGeometry () {
   fitPaper()
 }
 
+// Pages are drawn at real size: 96 pixels per inch and text in points, so
+// 12 pt text on a Letter page has the same proportions as on paper. Zoom
+// scales both together. "Fit" uses 100% unless the window is too narrow.
 function fitPaper () {
   const o = state.open
   if (!o?.paper) return false
   const g = pageGeometry(readPage(o.ydoc))
+  const pref = loadZoom()
   const room = $('#desk').clientWidth - 64
-  const zoom = Math.max(0.5, Math.min(1, room / g.width))
+  const zoom = pref === 'fit' ? Math.max(0.3, Math.min(1, room / g.width)) : Number(pref) / 100
+  syncZoomControl(pref, zoom)
   if (Math.abs(zoom - o.zoom) < 0.005) return false
   o.zoom = zoom
   o.paper.style.zoom = String(zoom)
   return true
+}
+
+function syncZoomControl (pref, zoom) {
+  const sel = $('[data-cmd="zoom"]')
+  if (!sel) return
+  const fit = sel.querySelector('option[value="fit"]')
+  if (fit) fit.textContent = `Fit (${Math.round(zoom * 100)}%)`
+  if (document.activeElement !== sel) sel.value = pref
 }
 
 function drawSheets (pages, g) {
@@ -229,10 +248,10 @@ function renderToolbar () {
   const groups = [[blockSelect]]
   if (paged) {
     groups[0].push(
-      el('select', { class: 'tool-select tool-font', 'data-cmd': 'font', 'aria-label': 'Font', onchange: (e) => { const v = e.target.value; const c = o.editor.chain().focus(); (v ? c.setFontFamily(v) : c.unsetFontFamily()).run() } },
+      el('select', { class: 'tool-select tool-font', 'data-cmd': 'font', 'aria-label': 'Font', onchange: (e) => { const v = e.target.value; if (v && v !== 'mixed') o.editor.chain().focus().setFontFamily(v).run() } },
         ...FONTS.map((f) => el('option', { value: f.value }, f.label))),
-      el('select', { class: 'tool-select tool-size', 'data-cmd': 'size', 'aria-label': 'Font size', onchange: (e) => { const v = e.target.value; const c = o.editor.chain().focus(); (v ? c.setFontSize(v) : c.unsetFontSize()).run() } },
-        el('option', { value: '' }, 'Size'), ...SIZES.map((n) => el('option', { value: `${n}pt` }, String(n)))))
+      el('select', { class: 'tool-select tool-size', 'data-cmd': 'size', 'aria-label': 'Font size', onchange: (e) => { const v = e.target.value; if (v && v !== 'mixed') o.editor.chain().focus().setFontSize(`${v}pt`).run() } },
+        ...SIZES.map((n) => el('option', { value: String(n) }, String(n)))))
   }
   groups.push([
     toolButton('bold', 'Bold', el('b', {}, 'B'), (e) => e.chain().focus().toggleBold().run(), { key: 'Mod-B' }),
@@ -269,9 +288,28 @@ function renderToolbar () {
 
   const children = []
   groups.forEach((g, i) => { if (i) children.push(sep()); children.push(...g) })
+  if (paged) {
+    children.push(el('span', { class: 'tool-spacer' }),
+      el('select', {
+        class: 'tool-select tool-zoom',
+        'data-cmd': 'zoom',
+        'aria-label': 'Zoom',
+        onchange: (e) => { saveZoom(e.target.value); if (fitPaper()) state.open?.editor.storage.pagination?.refresh() }
+      }, el('option', { value: 'fit' }, 'Fit'), ...ZOOMS.map((z) => el('option', { value: String(z) }, `${z}%`))))
+  }
   bar.replaceChildren(...children)
   $('[data-action="page-setup"]').hidden = !paged
   syncToolbar()
+}
+
+// Selects a value, adding a temporary option for values outside the list
+// (a size like 15.5 pasted from elsewhere, a font from an imported file).
+function showValue (select, value, label) {
+  select.querySelectorAll('option[data-extra]').forEach((x) => x.remove())
+  if (![...select.options].some((x) => x.value === value)) {
+    select.append(el('option', { value, 'data-extra': 'true', disabled: value === 'mixed' || null }, label))
+  }
+  select.value = value
 }
 
 function syncToolbar () {
@@ -289,10 +327,16 @@ function syncToolbar () {
   }
   const block = $('[data-cmd="block"]')
   if (block && document.activeElement !== block) block.value = f.block
+  // Font and size always show what the text really uses, defaults included.
   const font = $('[data-cmd="font"]')
-  if (font && document.activeElement !== font) font.value = FONTS.some((x) => x.value === f.fontFamily) ? f.fontFamily : ''
+  if (font && document.activeElement !== font) {
+    const known = FONTS.find((x) => x.label.toLowerCase() === String(f.font).toLowerCase())
+    showValue(font, f.font === 'mixed' ? 'mixed' : (known?.value || f.font), f.font === 'mixed' ? 'Mixed' : f.font)
+  }
   const size = $('[data-cmd="size"]')
-  if (size && document.activeElement !== size) size.value = /pt$/.test(f.fontSize) && SIZES.includes(parseFloat(f.fontSize)) ? f.fontSize : ''
+  if (size && document.activeElement !== size) showValue(size, String(f.size), f.size === 'mixed' ? 'Mixed' : String(f.size))
+  const zoomSel = $('[data-cmd="zoom"]')
+  if (zoomSel) syncZoomControl(loadZoom(), o.zoom || 1)
 }
 
 function swatchMenu (anchor, label, colors, apply, clear, clearLabel) {
@@ -306,9 +350,14 @@ const ALIGN_ICONS = { left: icons.alignLeft, center: icons.alignCenter, right: i
 function alignMenu (anchor) {
   const e = state.open.editor
   const current = activeFormats(e).align
+  const mac = cp.platform === 'darwin'
   openMenu(anchor, [
-    ['left', 'Align left'], ['center', 'Center'], ['right', 'Align right'], ['justify', 'Justify']
-  ].map(([value, label]) => ({ label, icon: ALIGN_ICONS[value], checked: current === value, onSelect: () => e.chain().focus().setTextAlign(value).run() })), { label: 'Alignment' })
+    ...[['left', 'Align left'], ['center', 'Center'], ['right', 'Align right'], ['justify', 'Justify']]
+      .map(([value, label]) => ({ label, icon: ALIGN_ICONS[value], checked: current === value, onSelect: () => e.chain().focus().setTextAlign(value).run() })),
+    { sep: true },
+    { label: 'Increase indent', hint: 'Tab', onSelect: () => e.chain().focus().indent().run() },
+    { label: 'Decrease indent', hint: mac ? '\u21e7 Tab' : 'Shift+Tab', onSelect: () => e.chain().focus().outdent().run() }
+  ], { label: 'Alignment and indent' })
 }
 
 function colorMenu (anchor) {
