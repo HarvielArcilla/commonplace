@@ -187,11 +187,13 @@ function registerIpc () {
   ipcMain.handle('drive:create', (_e, type, title, folderId) => drive.create(type, title, { folderId }))
   ipcMain.handle('drive:join', (_e, invite, folderId) => drive.join(invite, { folderId }))
   ipcMain.handle('drive:remove', (_e, docId) => { openDocs.delete(docId); return drive.remove(docId) })
-  ipcMain.handle('drive:copyInvite', (_e, docId, role) => {
-    const invite = drive.invite(docId, role)
+  ipcMain.handle('drive:copyInvite', (_e, docId, role, options) => {
+    const invite = drive.invite(docId, role, options || {})
     if (invite) clipboard.writeText(invite)
     return invite
   })
+  ipcMain.handle('request:approve', (_e, docId, userId, role) => drive.approveRequest(docId, userId, role))
+  ipcMain.handle('request:decline', (_e, docId, userId) => drive.declineRequest(docId, userId))
 
   // Opening a document hands the window a full copy plus current presence.
   // From then on, updates flow both ways as small binary messages.

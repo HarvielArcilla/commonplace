@@ -193,3 +193,67 @@ test('a Drive moves to another computer and keeps ownership', async (t) => {
   editorFor(bob, docId).type(' From Bob.')
   await until(() => text(moved, docId) === 'Chapter one. From Bob.', 20000, 'moved drive to sync')
 })
+
+test('invite tokens can expire, be single-use, or need approval', () => {
+  const dir = tmp()
+  const alice = loadOrCreateIdentity(path.join(dir, 'a'))
+  const bob = loadOrCreateIdentity(path.join(dir, 'b'))
+  const carol = loadOrCreateIdentity(path.join(dir, 'c'))
+  const m = Membership.create(alice, 'cd'.repeat(16))
+  const soon = m.createInvite(alice, 'editor', { expiresAt: Date.now() + 1000 })
+  assert.equal(m.inviteProblem(soon), null)
+  assert.equal(m.inviteProblem(soon, { now: Date.now() + 2000 }), 'expired')
+  assert.equal(m.inviteProblem({ ...soon, x: soon.x + 60000 }), 'invalid', 'the expiry is signed')
+
+  const once = m.createInvite(alice, 'viewer', { once: true })
+  assert.deepEqual(m.roleOf(bob.userId, once), { role: 'viewer', pending: true, gated: true })
+  m.admit(alice, { userId: bob.userId, role: 'viewer', enc: bob.encPublic, via: once.i })
+  assert.equal(m.roleOf(bob.userId, once).pending, false)
+  assert.equal(m.inviteProblem(once, { userId: carol.userId }), 'used')
+  assert.equal(m.roleOf(carol.userId, once), null)
+
+  const ask = m.createInvite(alice, 'editor', { ask: true })
+  assert.equal(m.roleOf(carol.userId, ask).gated, true)
+  // Links from before roles existed don't work on new files.
+  assert.equal(m.roleOf(carol.userId, null), null)
+})
+
+test('approval links let people in only when the owner says yes', async (t) => {
+  const { alice, bob } = await people(t, ['alice', 'bob'])
+  const docId = await alice.create('docs', 'Budget')
+  editorFor(alice, docId).type('Private numbers.')
+  await bob.join(alice.invite(docId, 'editor', { ask: true }))
+  await until(() => alice.describe(docId).requests.some((r) => r.userId === bob.identity.userId), 20000, 'request to reach the owner')
+  await until(() => bob.describe(docId).access.waitingForApproval, 20000, 'bob to learn he must wait')
+  await sleep(1000)
+  assert.equal(bob.describe(docId).waitingForPeer, true, 'nothing arrives before approval')
+  assert.equal(alice.describe(docId).sync.peers.length, 0)
+
+  alice.approveRequest(docId, bob.identity.userId, 'viewer')
+  await until(() => text(bob, docId) === 'Private numbers.', 20000, 'content after approval')
+  assert.equal(bob.describe(docId).role, 'viewer', 'the owner can change the role when approving')
+  assert.equal(alice.describe(docId).requests.length, 0)
+})
+
+test('a one-person link stops working once someone has used it', async (t) => {
+  const { alice, bob, carol } = await people(t, ['alice', 'bob', 'carol'])
+  const docId = await alice.create('docs', 'Letter')
+  editorFor(alice, docId).type('Dear Bob.')
+  const link = alice.invite(docId, 'editor', { once: true })
+  await bob.join(link)
+  await until(() => text(bob, docId) === 'Dear Bob.', 20000, 'bob to get the file')
+  await carol.join(link)
+  await until(() => carol.describe(docId).access.inviteProblem === 'used', 20000, 'carol to learn the link is used up')
+  await sleep(1000)
+  assert.equal(carol.describe(docId).waitingForPeer, true)
+  assert.equal(text(carol, docId), '')
+})
+
+test('expired and old-style links are refused when joining', async (t) => {
+  const { alice, bob } = await people(t, ['alice', 'bob'])
+  const docId = await alice.create('docs', 'Old')
+  const expired = alice.invite(docId, 'editor', { expiresIn: 1 })
+  await sleep(5)
+  await assert.rejects(bob.join(expired), /expired/)
+  await assert.rejects(bob.join('commonplace://join/cp1.' + Buffer.alloc(32, 1).toString('base64url')), /older version/)
+})

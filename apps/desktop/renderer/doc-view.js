@@ -591,7 +591,10 @@ export function renderDocMargin () {
   const review = conflicts.length
     ? el('button', { type: 'button', class: 'btn margin-action', onclick: () => conflictsDialog(o.docId) }, file.role === 'owner' ? 'Review conflicts' : 'See conflicts')
     : null
-  $('#doc-margin').replaceChildren(el('div', { class: 'margin-inner' }, ...renderNotes(notes), review))
+  const requests = file?.requests?.length
+    ? el('button', { type: 'button', class: 'btn margin-action', onclick: () => shareDialog(o.docId) }, 'Review requests')
+    : null
+  $('#doc-margin').replaceChildren(el('div', { class: 'margin-inner' }, ...renderNotes(notes), review, requests))
   // Mark the paragraphs in question.
   const keys = conflicts.filter((c) => c.kind === 'block').map((c) => c.unit)
   const sig = keys.join(',')

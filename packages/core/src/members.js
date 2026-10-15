@@ -13,6 +13,13 @@
 //             member, and every invite link issued before it stops working
 //   owner   - hand ownership to another member
 //   revoke-invites - stop all invite links issued so far
+//   retire-legacy  - stop accepting unsigned links from before roles existed
+//
+// Invite links carry an owner-signed token: the role, and optionally an
+// expiry (x), single use (once: the first person admitted with it uses it
+// up) and approval (ask: the owner must say yes to each person). People
+// holding a single-use or approval link get nothing until the owner has
+// admitted them, so those links only work while the owner is online.
 //
 // What this can and can't do: once someone is removed, honest peers stop
 // sending them anything new and stop accepting their edits. Whatever they
@@ -48,6 +55,7 @@ function emptyState (docId) {
     epoch: 0,
     grants: new Map(), // userId -> Map(epoch -> sealed key)
     invitesValidFrom: 0,
+    usedInvites: new Map(), // single-use invite id -> userId it admitted
     legacyLinks: true // pre-membership invite links (no signature) still work
   }
 }
@@ -84,12 +92,14 @@ function apply (s, e, i) {
       s.owners.add(e.owner)
       for (const m of e.members || []) if (m.userId !== e.owner) s.members.set(m.userId, { role: m.role === 'viewer' ? 'viewer' : 'editor', enc: m.enc || null })
       s.members.set(e.owner, { role: 'owner', enc: e.ownerEnc || null })
+      if (e.legacy === false) s.legacyLinks = false
       break
     case 'add':
       if (!['viewer', 'editor'].includes(e.role) && !(e.userId === s.owner && e.role === 'owner')) throw new Error('bad role')
       s.members.set(e.userId, { role: e.userId === s.owner ? 'owner' : e.role, enc: e.enc || s.members.get(e.userId)?.enc || null })
       s.removed.delete(e.userId)
       if (e.key) grant(s, e.userId, e.key.epoch, e.key.sealed)
+      if (typeof e.via === 'string' && !s.usedInvites.has(e.via)) s.usedInvites.set(e.via, e.userId)
       break
     case 'role':
       if (!s.members.has(e.userId) || e.userId === s.owner || !['viewer', 'editor'].includes(e.role)) throw new Error('bad role change')
@@ -118,6 +128,9 @@ function apply (s, e, i) {
       s.invitesValidFrom = i + 1
       s.legacyLinks = false
       break
+    case 'retire-legacy':
+      s.legacyLinks = false
+      break
     default:
       throw new Error(`unknown entry type ${e.type}`)
   }
@@ -136,12 +149,13 @@ export class Membership {
   get owner () { return this.state.owner }
   get epoch () { return this.state.epoch }
   get head () { return this.state.head }
+  get acceptsLegacyLinks () { return this.state.legacyLinks }
 
   // Starts a log. `members` lets a document made before membership keep
   // everyone who was already working on it.
   static create (identity, docId, { members = [] } = {}) {
     const m = new Membership(docId)
-    const body = { seq: 0, prev: null, doc: docId, type: 'create', by: identity.userId, owner: identity.userId, ownerEnc: identity.encPublic, at: Date.now(), members }
+    const body = { seq: 0, prev: null, doc: docId, type: 'create', by: identity.userId, owner: identity.userId, ownerEnc: identity.encPublic, at: Date.now(), members, legacy: false }
     m.entries = [{ ...body, sig: signWith(identity, body) }]
     m.state = replay(docId, m.entries)
     return m
@@ -191,41 +205,66 @@ export class Membership {
     return this.state.grants.get(userId)?.get(epoch) || null
   }
 
-  // What a peer may do: { role, pending } or null for no access.
-  // `invite` is the token they joined with, if any.
-  roleOf (userId, invite) {
-    if (!this.exists) return { role: 'editor', pending: false } // no membership yet: invite link = editor
+  // What a peer may do: { role, pending, gated } or null for no access.
+  // `invite` is the token they joined with, if any. pending: not in the log
+  // yet. gated: they hold a single-use or approval link, so they get nothing
+  // until the owner admits them.
+  roleOf (userId, invite, now = Date.now()) {
+    if (!this.exists) return { role: 'editor', pending: false, gated: false } // no membership yet: invite link = editor
     const m = this.member(userId)
-    if (m) return { role: m.role, pending: false }
-    if (this.isRemoved(userId) && !this.validInvite(invite)) return null
-    if (this.validInvite(invite)) return { role: invite.r, pending: true }
-    if (!invite && this.state.legacyLinks) return { role: 'editor', pending: true }
+    if (m) return { role: m.role, pending: false, gated: false }
+    if (this.validInvite(invite, { userId, now })) return { role: invite.r, pending: true, gated: Boolean(invite.once || invite.ask) }
+    if (this.isRemoved(userId)) return null
+    if (!invite && this.state.legacyLinks) return { role: 'editor', pending: true, gated: false }
     return null
   }
 
-  validInvite (token) {
-    if (!token || typeof token !== 'object') return false
+  // Why a token can't be used, or null if it can. `userId` is who is using it.
+  inviteProblem (token, { userId = null, now = Date.now() } = {}) {
+    if (!token || typeof token !== 'object') return 'invalid'
     const { sig, ...body } = token
-    if (body.d !== this.docId || !['viewer', 'editor'].includes(body.r)) return false
-    if (!this.state.owners.has(body.by)) return false
-    if (!(body.q >= this.state.invitesValidFrom)) return false
-    return verifyWith(body.by, body, sig)
+    if (body.d !== this.docId || !['viewer', 'editor'].includes(body.r)) return 'invalid'
+    if (!this.state.owners.has(body.by) || !verifyWith(body.by, body, sig)) return 'invalid'
+    if (!(body.q >= this.state.invitesValidFrom)) return 'revoked'
+    if (body.x != null && !(now < body.x)) return 'expired'
+    if (body.once) {
+      const usedBy = this.state.usedInvites.get(body.i)
+      if (usedBy && usedBy !== userId) return 'used'
+    }
+    return null
   }
 
-  createInvite (identity, role) {
+  validInvite (token, opts) {
+    return this.inviteProblem(token, opts) === null
+  }
+
+  // options: { expiresAt (ms), once, ask }. The owner's name rides along so
+  // the person joining knows whose file it is before anything arrives.
+  createInvite (identity, role, { expiresAt = null, once = false, ask = false } = {}) {
     if (identity.userId !== this.state.owner) throw new Error('Only the owner can invite people.')
-    const body = { d: this.docId, r: role === 'viewer' ? 'viewer' : 'editor', q: this.entries.length, i: crypto.randomBytes(6).toString('hex'), by: identity.userId }
+    const body = {
+      d: this.docId,
+      r: role === 'viewer' ? 'viewer' : 'editor',
+      q: this.entries.length,
+      i: crypto.randomBytes(6).toString('hex'),
+      by: identity.userId,
+      n: identity.name,
+      x: expiresAt ? Math.floor(expiresAt) : undefined,
+      once: once || undefined,
+      ask: ask || undefined
+    }
     return { ...body, sig: signWith(identity, body) }
   }
 
   // ---- owner actions (each returns the entries appended) -----------------
 
   // Admits someone with a role, sealing the current key to them if needed.
-  admit (identity, { userId, role, enc, epochSecret }) {
+  // `via` is the id of the single-use invite this uses up, if any.
+  admit (identity, { userId, role, enc, epochSecret, via }) {
     const key = this.state.epoch > 0 && enc && epochSecret
       ? { epoch: this.state.epoch, sealed: sealTo(enc, epochSecret) }
       : undefined
-    return [this.append(identity, { type: 'add', userId, role: userId === this.state.owner ? 'owner' : role, enc, key })]
+    return [this.append(identity, { type: 'add', userId, role: userId === this.state.owner ? 'owner' : role, enc, key, via })]
   }
 
   setRole (identity, userId, role) {
@@ -251,6 +290,10 @@ export class Membership {
 
   revokeInvites (identity) {
     return [this.append(identity, { type: 'revoke-invites' })]
+  }
+
+  retireLegacyLinks (identity) {
+    return this.state.legacyLinks ? [this.append(identity, { type: 'retire-legacy' })] : []
   }
 
   list () {

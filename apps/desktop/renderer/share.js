@@ -12,75 +12,131 @@ function currentFile (docId) {
 
 // ---- share dialog ---------------------------------------------------------
 
+// The invite controls are built once; the lists below them re-render as
+// people come and go (skipped while one of their menus is in use).
 export function shareDialog (docId) {
-  const d = el('dialog', { class: 'dialog dialog-wide share' })
-  document.body.append(d)
+  const f = currentFile(docId)
+  if (!f) return
+  const isOwner = f.role === 'owner'
+  const live = el('div', { class: 'share-live' })
+  const title = el('h2', {})
+  const d = el('dialog', { class: 'dialog dialog-wide share' }, el('form', { method: 'dialog' },
+    title,
+    el('div', { class: 'share-body' },
+      isOwner ? inviteControls(docId) : el('p', {}, `Only ${f.owner?.name || 'the owner'} can invite people or change access.`),
+      live),
+    el('div', { class: 'dialog-actions' }, el('button', { class: 'btn btn-primary', value: 'done' }, 'Done'))))
   const render = () => {
     const f = currentFile(docId)
     if (!f) { d.close(); return }
-    const isOwner = f.role === 'owner'
-    const body = el('div', { class: 'share-body' })
-
-    if (!f.access.managed && !isOwner) {
-      // A file made before membership whose owner hasn't been online since.
-      body.append(
-        el('p', {}, 'This file was shared before Commonplace had roles. Anyone with its link can edit it until the owner next opens Commonplace.'),
-        el('div', { class: 'invite-row' }, el('button', { type: 'button', class: 'btn btn-primary', onclick: () => copyLink(docId, 'editor') }, 'Copy invite link')))
-    } else if (isOwner) {
-      const role = el('select', { class: 'tool-select', 'aria-label': 'Role for people who use this link' },
-        el('option', { value: 'editor' }, 'Can edit'), el('option', { value: 'viewer' }, 'Can view'))
-      body.append(el('div', { class: 'invite-row' },
-        el('span', { class: 'invite-label' }, 'Anyone with the link'), role,
-        el('button', { type: 'button', class: 'btn btn-primary', onclick: () => copyLink(docId, role.value) }, 'Copy invite link')),
-      el('p', { class: 'fineprint-plain' }, 'People who open the link join right away. After you\u2019ve removed someone from this file, new people can join only while you\u2019re online.'))
-    } else {
-      body.append(el('p', {}, `Only ${f.owner?.name || 'the owner'} can invite people or change access.`))
-    }
-
-    const list = el('ul', { class: 'people', 'aria-label': 'People with access' })
-    const members = f.members.length ? f.members : (f.owner ? [{ userId: f.owner.userId, name: f.owner.name, role: 'owner' }] : [])
-    for (const m of members) {
-      const isMe = m.userId === state.me.userId
-      const controls = el('div', { class: 'person-controls' })
-      if (isOwner && m.role !== 'owner') {
-        const select = el('select', { class: 'tool-select', 'aria-label': `Role for ${m.name}`, onchange: (e) => act(() => cp.setMemberRole(docId, m.userId, e.target.value)) },
-          el('option', { value: 'editor', selected: m.role === 'editor' || null }, 'Can edit'),
-          el('option', { value: 'viewer', selected: m.role === 'viewer' || null }, 'Can view'))
-        controls.append(select,
-          el('button', { type: 'button', class: 'btn btn-quiet', title: 'Make this person the owner', onclick: () => transfer(docId, m) }, 'Make owner'),
-          el('button', { type: 'button', class: 'btn btn-quiet btn-danger', onclick: () => removePerson(docId, m) }, 'Remove'))
-      } else {
-        controls.append(el('span', { class: 'person-role' }, ROLE_LABEL[m.role] || m.role))
-      }
-      list.append(el('li', { class: 'person' },
-        el('span', { class: `presence-dot${m.online ? ' on' : ''}`, title: m.online ? 'Online' : 'Offline', 'aria-hidden': 'true' }),
-        el('span', { class: 'person-name' }, isMe ? `${m.name} (you)` : m.name, m.pending ? el('span', { class: 'person-note' }, 'Joining with a link') : null),
-        controls))
-    }
-    body.append(el('h3', {}, 'People with access'), list)
-
-    if (isOwner && f.access.managed) {
-      body.append(el('div', { class: 'share-footer' },
-        el('button', { type: 'button', class: 'btn btn-quiet', onclick: () => resetLinks(docId) }, 'Stop all invite links…'),
-        el('span', { class: 'fineprint-plain' }, 'Removing someone stops sending them changes. Anything they already have stays on their computer.')))
-    }
-
-    d.replaceChildren(el('form', { method: 'dialog' },
-      el('h2', {}, `Share “${f.title || 'Untitled'}”`),
-      body,
-      el('div', { class: 'dialog-actions' }, el('button', { class: 'btn btn-primary', value: 'done' }, 'Done'))))
+    title.textContent = `Share “${f.title || 'Untitled'}”`
+    live.replaceChildren(...shareLists(docId, f))
   }
   render()
-  const off = cp.onDriveChanged(() => setTimeout(() => { if (d.open && !d.querySelector('select:focus')) render() }, 0))
+  document.body.append(d)
+  const off = cp.onDriveChanged(() => setTimeout(() => { if (d.open && !live.querySelector('select:focus')) render() }, 0))
   d.addEventListener('close', () => { off(); d.remove() })
   d.showModal()
 }
 
-async function copyLink (docId, role) {
+function shareLists (docId, f) {
+  const isOwner = f.role === 'owner'
+  const out = []
+  if (isOwner && f.requests?.length) out.push(el('h3', {}, 'Asking to join'), requestList(docId, f.requests))
+  const list = el('ul', { class: 'people', 'aria-label': 'People with access' })
+  const members = f.members.length ? f.members : (f.owner ? [{ userId: f.owner.userId, name: f.owner.name, role: 'owner' }] : [])
+  for (const m of members) {
+    const isMe = m.userId === state.me.userId
+    const controls = el('div', { class: 'person-controls' })
+    if (isOwner && m.role !== 'owner') {
+      const select = el('select', { class: 'tool-select', 'aria-label': `Role for ${m.name}`, onchange: (e) => act(() => cp.setMemberRole(docId, m.userId, e.target.value)) },
+        el('option', { value: 'editor', selected: m.role === 'editor' || null }, 'Can edit'),
+        el('option', { value: 'viewer', selected: m.role === 'viewer' || null }, 'Can view'))
+      controls.append(select,
+        el('button', { type: 'button', class: 'btn btn-quiet', title: 'Make this person the owner', onclick: () => transfer(docId, m) }, 'Make owner'),
+        el('button', { type: 'button', class: 'btn btn-quiet btn-danger', onclick: () => removePerson(docId, m) }, 'Remove'))
+    } else {
+      controls.append(el('span', { class: 'person-role' }, ROLE_LABEL[m.role] || m.role))
+    }
+    list.append(el('li', { class: 'person' },
+      el('span', { class: `presence-dot${m.online ? ' on' : ''}`, title: m.online ? 'Online' : 'Offline', 'aria-hidden': 'true' }),
+      el('span', { class: 'person-name' }, isMe ? `${m.name} (you)` : m.name, m.pending ? el('span', { class: 'person-note' }, 'Joining with a link') : null),
+      controls))
+  }
+  out.push(el('h3', {}, 'People with access'), list)
+  if (isOwner && f.access.managed) {
+    out.push(el('div', { class: 'share-footer' },
+      el('button', { type: 'button', class: 'btn btn-quiet', onclick: () => resetLinks(docId) }, 'Stop all invite links…'),
+      el('span', { class: 'fineprint-plain' }, 'Removing someone stops sending them changes. Anything they already have stays on their computer.')))
+  }
+  return out
+}
+
+// ---- invite links ------------------------------------------------------------
+
+const INVITE_KEY = 'commonplace.invite.options'
+const EXPIRY = [
+  { value: '3600000', label: 'Works for 1 hour' },
+  { value: '86400000', label: 'Works for 1 day' },
+  { value: '604800000', label: 'Works for 7 days' },
+  { value: '2592000000', label: 'Works for 30 days' },
+  { value: '', label: 'Never expires' }
+]
+const loadInviteOptions = () => {
+  try { return { role: 'editor', expiresIn: '604800000', once: false, ask: false, ...JSON.parse(localStorage.getItem(INVITE_KEY) || '{}') } } catch { return { role: 'editor', expiresIn: '604800000', once: false, ask: false } }
+}
+const saveInviteOptions = (o) => { try { localStorage.setItem(INVITE_KEY, JSON.stringify(o)) } catch {} }
+
+function inviteControls (docId) {
+  const o = loadInviteOptions()
+  const role = el('select', { class: 'tool-select', 'aria-label': 'Role for people who use this link' },
+    el('option', { value: 'editor', selected: o.role === 'editor' || null }, 'Can edit'),
+    el('option', { value: 'viewer', selected: o.role === 'viewer' || null }, 'Can view'))
+  const expiry = el('select', { class: 'tool-select', 'aria-label': 'How long the link works' },
+    ...EXPIRY.map((e) => el('option', { value: e.value, selected: e.value === String(o.expiresIn || '') || null }, e.label)))
+  const once = el('input', { type: 'checkbox', checked: o.once || null })
+  const ask = el('input', { type: 'checkbox', checked: o.ask || null })
+  const note = el('p', { class: 'fineprint-plain' })
+  const options = () => ({ role: role.value, expiresIn: expiry.value, once: once.checked, ask: ask.checked })
+  const explain = () => {
+    const v = options()
+    note.textContent = v.ask
+      ? 'Each person who opens the link shows up here, and gets nothing until you approve them. You need to be online to approve.'
+      : v.once
+        ? 'The first person you let in uses up the link. They get the file once you\u2019re online.'
+        : 'People who open the link join right away, from you or anyone else who has the file.'
+  }
+  for (const c of [role, expiry, once, ask]) c.addEventListener('change', () => { saveInviteOptions(options()); explain() })
+  explain()
+  return el('div', { class: 'invite-box' },
+    el('div', { class: 'invite-row' }, el('span', { class: 'invite-label' }, 'Invite link'), role, expiry,
+      el('button', { type: 'button', class: 'btn btn-primary', onclick: () => copyLink(docId, options()) }, 'Copy invite link')),
+    el('div', { class: 'invite-options' },
+      el('label', { class: 'check' }, once, 'One person only'),
+      el('label', { class: 'check' }, ask, 'I approve each person')),
+    note)
+}
+
+async function copyLink (docId, { role, expiresIn, once, ask }) {
   try {
-    await cp.copyInvite(docId, role)
-    toast(role === 'viewer' ? 'View-only invite link copied.' : 'Invite link copied. Anyone with it can edit.')
+    await cp.copyInvite(docId, role, { expiresIn: Number(expiresIn) || null, once, ask })
+    const what = role === 'viewer' ? 'View-only invite link copied.' : 'Invite link copied.'
+    toast(ask ? `${what} You\u2019ll approve each person.` : what)
   } catch (err) { toast(cleanError(err)) }
+}
+
+function requestList (docId, requests) {
+  return el('ul', { class: 'people', 'aria-label': 'People asking to join' }, ...requests.map((r) => {
+    const role = el('select', { class: 'tool-select', 'aria-label': `Role for ${r.name}` },
+      el('option', { value: 'editor', selected: r.role === 'editor' || null }, 'Can edit'),
+      el('option', { value: 'viewer', selected: r.role === 'viewer' || null }, 'Can view'))
+    return el('li', { class: 'person' },
+      el('span', { class: 'presence-dot on', 'aria-hidden': 'true' }),
+      el('span', { class: 'person-name' }, r.name, el('span', { class: 'person-note' }, 'Asking to join')),
+      el('div', { class: 'person-controls' }, role,
+        el('button', { type: 'button', class: 'btn btn-primary', onclick: () => act(async () => { await cp.approveRequest(docId, r.userId, role.value); toast(`${r.name} can now open the file`) }) }, 'Let in'),
+        el('button', { type: 'button', class: 'btn btn-quiet btn-danger', onclick: () => act(() => cp.declineRequest(docId, r.userId)) }, 'Decline')))
+  }))
 }
 
 async function act (fn) {

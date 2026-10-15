@@ -38,6 +38,18 @@ export function statusNotes (file, { detailed = false } = {}) {
     notes.push({ text: 'You no longer have access. This copy stays as it was.', cls: 'warn' })
     return notes
   }
+  if (file.requests?.length) {
+    notes.push({ text: `${listNames(file.requests)} ${file.requests.length === 1 ? 'is' : 'are'} asking to join`, cls: 'warn', request: true })
+  }
+  if (file.access?.inviteProblem) {
+    const why = { expired: 'This invite link expired before you were let in.', used: 'Someone else already used this one-person link.', revoked: 'The owner stopped this invite link.' }[file.access.inviteProblem] || 'This invite link doesn\u2019t work.'
+    notes.push({ text: `${why} Ask ${file.owner?.name || 'the owner'} for a new one.`, cls: 'warn' })
+    return notes
+  }
+  if (file.access?.waitingForApproval) {
+    notes.push({ text: `Asked ${file.owner?.name || 'the owner'} to let you in. They need to be online to say yes.`, cls: 'warn' })
+    return notes
+  }
   if (file.waitingForPeer) {
     notes.push({ text: 'Waiting for someone who has this file to come online', cls: 'warn' })
     return notes

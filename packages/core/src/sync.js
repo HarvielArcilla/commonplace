@@ -71,8 +71,10 @@ class DocHandle {
     this.awareness.setLocalState(null) // the engine itself is not a cursor
     this.members = new Membership(this.docId)
     this.invite = null // the signed invite I joined with, if any
+    this.requests = new Map() // userId -> people asking the owner to let them in
+    this.declined = new Set() // userIds whose request the owner turned down
     this.active = true // false = not syncing right now (per-file setting)
-    // Connection -> { user, role, pending, epochs: Set, contentEpoch, awarenessIds }
+    // Connection -> { user, role, pending, gated, epochs: Set, contentEpoch, awarenessIds, sv }
     this.links = new Map()
     this.state = { clientIds: [], acked: {}, lastSyncedAt: null, lastSyncedWith: null }
     this._statusTimer = null
@@ -89,7 +91,8 @@ class DocHandle {
 
   // Content flows only on the current epoch, and only if I still have access.
   get contentEpoch () {
-    if (!this.myAccess) return null
+    const access = this.myAccess
+    if (!access || access.gated) return null
     return this.myEpoch === this.members.epoch ? this.myEpoch : null
   }
 
@@ -133,6 +136,7 @@ export class SyncEngine extends EventEmitter {
     doc.base = this.store.readBinary?.(docId, 'base') || null
     const savedLog = this.store.readJSON(docId, 'members')
     if (savedLog) doc.members.merge(savedLog)
+    for (const userId of this.store.readJSON(docId, 'declined') || []) doc.declined.add(userId)
     this._collectGrants(doc)
 
     doc.ydoc.on('update', (update, origin) => {
@@ -234,7 +238,11 @@ export class SyncEngine extends EventEmitter {
       pending: Boolean(a?.pending),
       removed,
       // Waiting for the owner to hand over the current key.
-      waitingForKey: Boolean(a) && doc.myEpoch < doc.members.epoch,
+      waitingForKey: Boolean(a) && !a.gated && doc.myEpoch < doc.members.epoch,
+      // Holding a single-use or approval link the owner hasn't acted on yet.
+      waitingForApproval: Boolean(a?.gated),
+      // Why my invite link doesn't work, if it doesn't: expired, used, revoked.
+      inviteProblem: !a && doc.invite && doc.members.exists ? doc.members.inviteProblem(doc.invite, { userId: this.identity.userId }) : null,
       hasMembership: doc.members.exists,
       owner: doc.members.owner
     }
@@ -250,10 +258,45 @@ export class SyncEngine extends EventEmitter {
     return true
   }
 
-  createInvite (docId, role) {
+  createInvite (docId, role, options) {
     const doc = this.docs.get(docId)
     if (!doc) throw new Error('No such file.')
-    return doc.members.createInvite(this.identity, role)
+    return doc.members.createInvite(this.identity, role, options)
+  }
+
+  // People holding an approval link who are waiting for the owner.
+  requests (docId) {
+    const doc = this.docs.get(docId)
+    if (!doc) return []
+    return [...doc.requests.values()]
+      .filter((r) => !doc.members.member(r.userId) && !doc.declined.has(r.userId))
+      .map(({ userId, name, color, role, at }) => ({ userId, name, color, role, at }))
+  }
+
+  approveRequest (docId, userId, role) {
+    this._ownerAction(docId, (doc) => {
+      const r = doc.requests.get(userId)
+      if (!r) throw new Error('That person is no longer asking to join.')
+      doc.requests.delete(userId)
+      this._admit(doc, { userId, role: role || r.role, enc: r.enc, invite: r.invite })
+    })
+  }
+
+  declineRequest (docId, userId) {
+    const doc = this.docs.get(docId)
+    if (!doc) return
+    doc.requests.delete(userId)
+    doc.declined.add(userId)
+    this.store.writeJSON(docId, 'declined', [...doc.declined])
+    this._scheduleStatus(doc)
+  }
+
+  // Unsigned links from before roles existed stop working for this file.
+  retireLegacyLinks (docId) {
+    const doc = this.docs.get(docId)
+    if (!doc || doc.members.owner !== this.identity.userId || !doc.members.acceptsLegacyLinks) return
+    doc.members.retireLegacyLinks(this.identity)
+    this._membersChanged(doc)
   }
 
   setRole (docId, userId, role) {
@@ -307,7 +350,8 @@ export class SyncEngine extends EventEmitter {
       here: [...here.values()],
       lastSyncedAt: doc.state.lastSyncedAt,
       lastSyncedWith: doc.state.lastSyncedWith,
-      pending
+      pending,
+      requests: this.requests(docId).length
     }
   }
 
@@ -357,11 +401,10 @@ export class SyncEngine extends EventEmitter {
       // Tell everyone, on the newest epoch we share.
       const shared = Math.max(...[...link.epochs].filter((e) => doc.epochs.has(e)))
       if (Number.isFinite(shared)) conn.send(MSG.MEMBERS, doc.docId, shared, seal(doc.keyFor(shared), log))
-      // Re-check what each peer may do now.
-      const access = doc.members.roleOf(link.user.userId, link.invite)
-      link.role = access?.role || null
-      link.pending = Boolean(access?.pending)
-      if (!access || link.contentEpoch !== doc.contentEpoch) this._stopContent(doc, conn, link)
+      // Re-check what each peer may do now, and start or stop content.
+      this._checkAccess(doc, link)
+      if (!this._mayExchange(doc, link) || link.contentEpoch !== doc.contentEpoch) this._stopContent(doc, conn, link)
+      if (this._mayExchange(doc, link)) this._startContent(doc, conn, link)
     }
     if (newKeys) {
       this.emit('topics', doc.docId)
@@ -373,19 +416,20 @@ export class SyncEngine extends EventEmitter {
 
   _sendHellos (doc, conn) {
     if (!doc.active) return
-    const sv = Y.encodeStateVector(doc.ydoc)
-    for (const epoch of doc.epochs.keys()) {
-      const info = {
-        userId: this.identity.userId,
-        name: this.identity.name,
-        color: this.identity.color,
-        enc: this.identity.encPublic,
-        sig: this.identity.sign(helloProof(doc.docId, epoch, conn.localId, this.identity.encPublic)).toString('base64'),
-        invite: doc.invite,
-        head: doc.members.head
-      }
-      conn.send(MSG.HELLO, doc.docId, epoch, seal(doc.keyFor(epoch), encodeHello(info, sv)))
+    for (const epoch of doc.epochs.keys()) this._sendHello(doc, conn, epoch)
+  }
+
+  _sendHello (doc, conn, epoch) {
+    const info = {
+      userId: this.identity.userId,
+      name: this.identity.name,
+      color: this.identity.color,
+      enc: this.identity.encPublic,
+      sig: this.identity.sign(helloProof(doc.docId, epoch, conn.localId, this.identity.encPublic)).toString('base64'),
+      invite: doc.invite,
+      head: doc.members.head
     }
+    conn.send(MSG.HELLO, doc.docId, epoch, seal(doc.keyFor(epoch), encodeHello(info, Y.encodeStateVector(doc.ydoc))))
   }
 
   _broadcast (doc, type, payload, except) {
@@ -461,8 +505,11 @@ export class SyncEngine extends EventEmitter {
 
     let link = doc.links.get(conn)
     const isNew = !link
+    // A peer can gain an epoch's key after we greeted them (a late joiner
+    // handed the new key), so answer the first hello on each epoch.
+    const newEpoch = !link?.epochs.has(epoch)
     if (!link) {
-      link = { user: null, role: null, pending: false, epochs: new Set(), contentEpoch: null, awarenessIds: new Set(), invite: null }
+      link = { user: null, role: null, pending: false, gated: false, epochs: new Set(), contentEpoch: null, awarenessIds: new Set(), invite: null, sv: null }
       doc.links.set(conn, link)
     }
     link.user = sanitizeUser(info)
@@ -477,49 +524,81 @@ export class SyncEngine extends EventEmitter {
       conn.send(MSG.MEMBERS, doc.docId, epoch, seal(doc.keyFor(epoch), Buffer.from(JSON.stringify(doc.members.entries))))
     }
     if (isNew) this._sendHellos(doc, conn) // they may have joined after we connected
+    else if (newEpoch) this._sendHello(doc, conn, epoch)
 
+    const access = this._checkAccess(doc, link)
+    if (doc.members.owner === this.identity.userId && access && link.user.userId !== this.identity.userId) this._ownerGreets(doc, link, access)
+
+    // Content flows only on the current epoch, between people with access.
+    link.sv = hello.stateVector
+    if (epoch === doc.contentEpoch && this._mayExchange(doc, link)) this._startContent(doc, conn, link)
+    this._scheduleStatus(doc)
+  }
+
+  // Updates what a peer may do from the membership log and their invite.
+  _checkAccess (doc, link) {
     const access = doc.members.roleOf(link.user.userId, link.invite)
     link.role = access?.role || null
     link.pending = Boolean(access?.pending)
+    link.gated = Boolean(access?.gated)
+    return access
+  }
 
-    // As owner, let in people holding a valid invite, and hand the current
-    // key to members who don't have it yet.
-    if (doc.members.owner === this.identity.userId && access && link.user.userId !== this.identity.userId) {
-      const m = doc.members.member(link.user.userId)
-      const needsKey = doc.members.epoch > 0 && !doc.members.sealedKeyFor(link.user.userId, doc.members.epoch)
-      if ((access.pending || !m?.enc || needsKey) && link.enc) {
-        doc.members.admit(this.identity, {
-          userId: link.user.userId,
-          role: access.role,
-          enc: link.enc,
-          epochSecret: doc.epochs.get(doc.members.epoch)?.secret
-        })
-        this._membersChanged(doc)
+  _mayExchange (doc, link) {
+    return Boolean(link.role) && !link.gated && doc.contentEpoch != null && link.epochs.has(doc.contentEpoch)
+  }
+
+  // As owner: let in people holding a valid invite (or note their request,
+  // for approval links), and hand the current key to members without it.
+  _ownerGreets (doc, link, access) {
+    const { userId } = link.user
+    if (!link.enc) return
+    if (access.pending) {
+      if (link.invite?.ask) {
+        if (!doc.declined.has(userId) && !doc.requests.has(userId)) {
+          doc.requests.set(userId, { ...link.user, role: access.role, enc: link.enc, invite: link.invite, at: Date.now() })
+          this.emit('request', doc.docId, userId)
+        }
+        return
       }
-    }
-
-    // Content flows only on the current epoch, between people with access.
-    const contentEpoch = doc.contentEpoch
-    if (!link.role || contentEpoch == null || epoch !== contentEpoch) {
-      this._scheduleStatus(doc)
+      this._admit(doc, { userId, role: access.role, enc: link.enc, invite: link.invite })
+      this._membersChanged(doc)
       return
     }
-    const starting = link.contentEpoch !== contentEpoch
-    link.contentEpoch = contentEpoch
-    if (starting) this._prepareMergeCheck(doc, link, hello.stateVector)
-    // Send whatever they are missing, computed from their state vector.
-    // (If I'm a viewer they'll ignore it; they get edits from editors.)
-    const diff = Y.encodeStateAsUpdate(doc.ydoc, hello.stateVector)
-    if (diff.length > EMPTY_UPDATE_BYTES) conn.send(MSG.UPDATE, doc.docId, contentEpoch, seal(doc.keyFor(contentEpoch), diff))
-    if (canEdit(link.role)) this._markAcked(doc, hello.stateVector, link.user, link)
-    if (starting) {
-      const states = [...doc.awareness.getStates().keys()]
-      if (states.length) {
-        const msg = awarenessProtocol.encodeAwarenessUpdate(doc.awareness, states)
-        conn.send(MSG.AWARENESS, doc.docId, contentEpoch, seal(doc.keyFor(contentEpoch), msg))
-      }
+    const m = doc.members.member(userId)
+    const needsKey = doc.members.epoch > 0 && !doc.members.sealedKeyFor(userId, doc.members.epoch)
+    if (!m?.enc || needsKey) {
+      this._admit(doc, { userId, role: access.role, enc: link.enc })
+      this._membersChanged(doc)
     }
-    this._scheduleStatus(doc)
+  }
+
+  _admit (doc, { userId, role, enc, invite = null }) {
+    doc.members.admit(this.identity, {
+      userId,
+      role,
+      enc,
+      epochSecret: doc.epochs.get(doc.members.epoch)?.secret,
+      via: invite?.once ? invite.i : undefined
+    })
+  }
+
+  // Starts exchanging content with a peer on the current epoch: send what
+  // they're missing (from the state vector in their hello) and who's here.
+  _startContent (doc, conn, link) {
+    const contentEpoch = doc.contentEpoch
+    if (link.contentEpoch === contentEpoch || !link.sv) return
+    link.contentEpoch = contentEpoch
+    this._prepareMergeCheck(doc, link, link.sv)
+    // (If I'm a viewer they'll ignore it; they get edits from editors.)
+    const diff = Y.encodeStateAsUpdate(doc.ydoc, link.sv)
+    if (diff.length > EMPTY_UPDATE_BYTES) conn.send(MSG.UPDATE, doc.docId, contentEpoch, seal(doc.keyFor(contentEpoch), diff))
+    if (canEdit(link.role)) this._markAcked(doc, link.sv, link.user, link)
+    const states = [...doc.awareness.getStates().keys()]
+    if (states.length) {
+      const msg = awarenessProtocol.encodeAwarenessUpdate(doc.awareness, states)
+      conn.send(MSG.AWARENESS, doc.docId, contentEpoch, seal(doc.keyFor(contentEpoch), msg))
+    }
   }
 
   // Decides whether the catch-up update this peer is about to send could

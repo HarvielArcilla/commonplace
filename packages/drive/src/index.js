@@ -52,6 +52,7 @@ export class Drive extends EventEmitter {
 
     this.engine.on('status', (status) => { this._rememberNames(status); this._changed() })
     this.engine.on('members', () => this._changed())
+    this.engine.on('request', () => this._changed())
     this.engine.on('topics', (docId) => this._syncTopics(docId))
     this.engine.on('diverged', (info) => this._recordConflicts(info))
     this._recent = new Map() // docId -> { at, by } for changes made by others
@@ -141,9 +142,13 @@ export class Drive extends EventEmitter {
         pending: Boolean(access.pending),
         removed: Boolean(access.removed),
         waitingForKey: Boolean(access.waitingForKey),
+        waitingForApproval: Boolean(access.waitingForApproval),
+        inviteProblem: access.inviteProblem || null,
         managed: Boolean(access.hasMembership)
       },
       members: [...members, ...waiting],
+      // People with an approval link asking the owner to let them in.
+      requests: isOwner ? this.engine.requests(docId).map((r) => ({ ...r, name: nameOf(r.userId, r.name) })) : [],
       contributed: Boolean(entry.contributed),
       contributors: entry.contributors || [],
       addedAt: entry.addedAt,
@@ -205,6 +210,8 @@ export class Drive extends EventEmitter {
   async join (inviteText, { folderId = null } = {}) {
     const parsed = parseInvite(inviteText)
     if (!parsed) throw new Error('That invite code is not valid.')
+    if (!parsed.token) throw new Error('This invite link is from an older version of Commonplace. Ask for a new one.')
+    if (parsed.token.x != null && !(Date.now() < parsed.token.x)) throw new Error('This invite link has expired. Ask for a new one.')
     const { docId } = deriveDocKeys(parsed.secret)
     const existing = this.files.get(docId)
     if (existing) {
@@ -222,7 +229,7 @@ export class Drive extends EventEmitter {
       invite: parsed.token,
       type: null,
       title: 'Waiting for a peer…',
-      owner: parsed.token ? { userId: parsed.token.by, name: null } : null,
+      owner: { userId: parsed.token.by, name: typeof parsed.token.n === 'string' ? parsed.token.n.slice(0, 40) : null },
       folderId: this.folders.has(folderId) ? folderId : null,
       addedAt: Date.now()
     })
@@ -231,17 +238,22 @@ export class Drive extends EventEmitter {
     return docId
   }
 
-  // An invite link for a role. Once a file has an owner-signed membership,
-  // only the owner can make links (the link carries their signature).
-  invite (docId, role = 'editor') {
+  // An invite link for a role, signed by the owner. options:
+  //   expiresIn  milliseconds until the link stops working (null: never)
+  //   once       the first person admitted uses it up
+  //   ask        the owner approves each person who uses it
+  invite (docId, role = 'editor', { expiresIn = null, once = false, ask = false } = {}) {
     const entry = this.files.get(docId)
     const doc = this.engine.getDoc(docId)
     if (!entry || !doc) return null
-    const secret = Buffer.from(entry.secret, 'base64')
-    if (!doc.members.exists) return encodeInvite(secret)
+    if (!doc.members.exists && readMeta(doc.ydoc)?.owner?.userId === this.identity.userId) this.engine.ensureMembership(docId)
     if (doc.members.owner !== this.identity.userId) throw new Error('Only the owner can invite people to this file.')
-    return encodeInvite(secret, this.engine.createInvite(docId, role))
+    const expiresAt = expiresIn ? Date.now() + expiresIn : null
+    return encodeInvite(Buffer.from(entry.secret, 'base64'), this.engine.createInvite(docId, role, { expiresAt, once, ask }))
   }
+
+  approveRequest (docId, userId, role) { this.engine.approveRequest(docId, userId, role) }
+  declineRequest (docId, userId) { this.engine.declineRequest(docId, userId) }
 
   // ---- conflicts -------------------------------------------------------------
 
@@ -489,6 +501,7 @@ export class Drive extends EventEmitter {
           .map((userId) => ({ userId, role: 'editor' }))
         this.engine.ensureMembership(entry.docId, { members })
       }
+      this.engine.retireLegacyLinks(entry.docId)
     }
     doc.meta.observe(refresh)
     doc.ydoc.getMap('authors').observe(refresh)
