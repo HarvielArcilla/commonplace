@@ -12,6 +12,34 @@ const COLORS = ['#b4532a', '#2f6f5e', '#4a5aa8', '#8a4f8c', '#a2741b', '#2d6f8f'
 
 document.body.classList.toggle('mac', cp.platform === 'darwin')
 
+// ---- the margin ------------------------------------------------------------------
+// Its rule starts below each view's toolbars, and it can fold to a narrow
+// rail (one choice for every view, remembered).
+
+const FOLD_KEY = 'commonplace.marginFolded'
+function setFolded (folded, save = true) {
+  document.body.classList.toggle('margin-folded', folded)
+  for (const b of document.querySelectorAll('[data-action="fold"]')) {
+    b.textContent = folded ? '›' : '‹'
+    b.title = folded ? 'Show notes' : 'Hide notes'
+    b.setAttribute('aria-label', b.title)
+    b.setAttribute('aria-expanded', String(!folded))
+  }
+  if (save) try { localStorage.setItem(FOLD_KEY, folded ? '1' : '0') } catch {}
+}
+try { setFolded(localStorage.getItem(FOLD_KEY) === '1', false) } catch { setFolded(false, false) }
+document.querySelectorAll('[data-action="fold"]').forEach((b) => b.addEventListener('click', () => setFolded(!document.body.classList.contains('margin-folded'))))
+
+const placeRule = (view) => {
+  const bar = view.querySelector('.bar')
+  const tools = view.querySelector('.toolbar')
+  view.style.setProperty('--rule-top', `${bar.offsetHeight + (tools?.offsetParent ? tools.offsetHeight : 0)}px`)
+}
+for (const view of document.querySelectorAll('.view')) {
+  const watch = new ResizeObserver(() => placeRule(view))
+  view.querySelectorAll('.bar, .toolbar').forEach((n) => watch.observe(n))
+}
+
 function showDrive () {
   $('#doc-view').hidden = true
   $('#drive-view').hidden = false

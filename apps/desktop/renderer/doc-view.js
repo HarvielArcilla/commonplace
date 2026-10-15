@@ -14,7 +14,7 @@ import * as Y from 'yjs'
 import * as awarenessProtocol from 'y-protocols/awareness'
 import { $, el, toast, openMenu, cleanError } from './ui.js'
 import { icons } from './icons.js'
-import { state, cp, statusNotes, renderNotes } from './state.js'
+import { state, cp, statusNotes, renderNotes, marginMark } from './state.js'
 import { shareDialog } from './share.js'
 import { conflictsDialog } from './conflicts.js'
 import { toggleHistory, closePanel } from './history-view.js'
@@ -209,31 +209,8 @@ export function renderDocMargin () {
   const requests = file?.requests?.length
     ? el('button', { type: 'button', class: 'btn margin-action', onclick: () => shareDialog(o.docId) }, 'Review requests')
     : null
-  const folded = marginFolded()
-  $('#doc-view').classList.toggle('margin-folded', folded)
-  if (folded) {
-    // Folded to a rail: one mark for the note that matters most, the full
-    // notes in its tooltip, and a way back.
-    const urgent = review || requests || notes.find((n) => n.cls === 'warn')
-    const mark = urgent ? 'warn' : notes.find((n) => n.cls === 'live') ? 'live' : ''
-    const summary = notes.map((n) => n.text).concat(review ? [review.textContent] : [], requests ? [requests.textContent] : []).join('\n')
-    $('#doc-margin').replaceChildren(el('div', { class: 'margin-inner' },
-      el('button', { type: 'button', class: 'margin-fold', title: 'Show notes', 'aria-label': 'Show notes', 'aria-expanded': 'false', onclick: () => foldMargin(false) }, '\u203a'),
-      el('span', { class: `margin-mark ${mark}`, title: summary, role: 'img', 'aria-label': summary })))
-  } else {
-    $('#doc-margin').replaceChildren(el('div', { class: 'margin-inner' },
-      el('button', { type: 'button', class: 'margin-fold', title: 'Hide notes', 'aria-label': 'Hide notes', 'aria-expanded': 'true', onclick: () => foldMargin(true) }, '\u2039'),
-      ...renderNotes(notes), review, requests))
-  }
+  $('#doc-margin').replaceChildren(el('div', { class: 'margin-inner' },
+    ...renderNotes(notes), review, requests,
+    marginMark([...notes, ...(review ? [{ text: review.textContent }] : []), ...(requests ? [{ text: requests.textContent }] : [])], { urgent: Boolean(review || requests) })))
   o.view.showConflicts?.(conflicts)
-}
-
-// The notes beside the margin rule can fold away to a narrow rail. The
-// choice is remembered for every file.
-const FOLD_KEY = 'commonplace.marginFolded'
-const marginFolded = () => { try { return localStorage.getItem(FOLD_KEY) === '1' } catch { return false } }
-function foldMargin (folded) {
-  try { localStorage.setItem(FOLD_KEY, folded ? '1' : '0') } catch {}
-  renderDocMargin()
-  $('#doc-margin .margin-fold')?.focus()
 }

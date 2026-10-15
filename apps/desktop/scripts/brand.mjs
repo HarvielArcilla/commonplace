@@ -16,21 +16,58 @@ const here = path.dirname(fileURLToPath(import.meta.url))
 const icon = path.join(here, '..', 'build', 'icon.png')
 const ico = path.join(here, '..', 'build', 'icon.ico')
 
+const electronDir = path.dirname(createRequire(import.meta.url).resolve('electron/package.json'))
+
 try {
-  const exe = createRequire(import.meta.url)('electron') // path to the binary
-  if (process.platform === 'darwin') brandMac(exe)
-  else if (process.platform === 'win32') await brandWindows(exe)
+  if (process.platform === 'darwin') brandMac()
+  else if (process.platform === 'win32') await brandWindows(path.join(electronDir, 'dist', 'electron.exe'))
 } catch (err) {
   console.log(`[commonplace] Couldn't rename the Electron binary (${err.message}). commonplace works the same; only its name in the Dock or taskbar may show as Electron.`)
 }
 
-function brandMac (exe) {
-  const appDir = path.resolve(exe, '..', '..', '..') // .../Electron.app
-  const plist = path.join(appDir, 'Contents', 'Info.plist')
+// macOS shows an app by its bundle's folder name (Dock, Finder, Activity
+// Monitor) and by CFBundleName (menu bar), so both change. Following
+// Electron's rebranding guide: rename Electron.app and its executable, set
+// CFBundleName, CFBundleDisplayName and CFBundleIdentifier in it and in its
+// helpers, then point the electron package (path.txt) at the new binary.
+// A fresh copy of Electron (a new version) arrives as Electron.app again and
+// gets the same treatment.
+function brandMac () {
+  const dist = path.join(electronDir, 'dist')
+  const fresh = path.join(dist, 'Electron.app')
+  const appDir = path.join(dist, `${NAME}.app`)
   const marker = path.join(appDir, 'Contents', '.commonplace')
   const stamp = `${NAME} ${fs.statSync(icon).size}`
-  if (fs.existsSync(marker) && fs.readFileSync(marker, 'utf8') === stamp) return
-  for (const key of ['CFBundleName', 'CFBundleDisplayName']) execFileSync('plutil', ['-replace', key, '-string', NAME, plist])
+  const exePath = `${NAME}.app/Contents/MacOS/${NAME}`
+  const pointAtUs = () => fs.writeFileSync(path.join(electronDir, 'path.txt'), exePath)
+  if (fs.existsSync(fresh)) {
+    fs.rmSync(appDir, { recursive: true, force: true })
+    fs.renameSync(fresh, appDir)
+  } else if (fs.existsSync(marker) && fs.readFileSync(marker, 'utf8') === stamp) {
+    pointAtUs()
+    return
+  }
+  if (!fs.existsSync(appDir)) throw new Error('Electron.app is missing')
+
+  const plutil = (plist, key, value) => execFileSync('plutil', ['-replace', key, '-string', value, plist])
+  const plist = path.join(appDir, 'Contents', 'Info.plist')
+  plutil(plist, 'CFBundleName', NAME)
+  plutil(plist, 'CFBundleDisplayName', NAME)
+  plutil(plist, 'CFBundleIdentifier', 'org.commonplace.desktop.dev')
+  plutil(plist, 'CFBundleExecutable', NAME)
+  const frameworks = path.join(appDir, 'Contents', 'Frameworks')
+  for (const helper of fs.readdirSync(frameworks).filter((f) => /^Electron Helper.*\.app$/.test(f))) {
+    const kind = (/\((\w+)\)/.exec(helper)?.[1] || '').toLowerCase()
+    const hp = path.join(frameworks, helper, 'Contents', 'Info.plist')
+    const label = helper.replace(/^Electron/, NAME).replace(/\.app$/, '')
+    plutil(hp, 'CFBundleName', label)
+    plutil(hp, 'CFBundleDisplayName', label)
+    plutil(hp, 'CFBundleIdentifier', `org.commonplace.desktop.dev.helper${kind ? '.' + kind : ''}`)
+  }
+  const oldExe = path.join(appDir, 'Contents', 'MacOS', 'Electron')
+  if (fs.existsSync(oldExe)) fs.renameSync(oldExe, path.join(appDir, 'Contents', 'MacOS', NAME))
+  pointAtUs()
+
   // electron.icns from our icon, at every size macOS asks for.
   const set = fs.mkdtempSync(path.join(os.tmpdir(), 'commonplace-icon-')) + '/icon.iconset'
   fs.mkdirSync(set)
@@ -42,7 +79,11 @@ function brandMac (exe) {
   // Editing the bundle breaks its signature; sign it again for this computer.
   execFileSync('codesign', ['--force', '--deep', '--sign', '-', appDir], { stdio: 'ignore' })
   fs.writeFileSync(marker, stamp)
-  execFileSync('touch', [appDir]) // so Finder and the Dock notice the change
+  // Tell Launch Services about the new name now, rather than whenever it
+  // next looks (so the Dock doesn't keep showing a cached "Electron").
+  const lsregister = '/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister'
+  try { execFileSync(lsregister, ['-f', appDir], { stdio: 'ignore' }) } catch {}
+  execFileSync('touch', [appDir])
 }
 
 async function brandWindows (exe) {

@@ -2,7 +2,7 @@
 
 import { $, el, svg, ago, listNames, plural, toast, openMenu, dialog, promptText, confirmAction, cleanError } from './ui.js'
 import { icons, kindIcon } from './icons.js'
-import { state, cp, statusNotes, renderNotes, savePrefs } from './state.js'
+import { state, cp, statusNotes, renderNotes, marginMark, savePrefs } from './state.js'
 import { shareDialog, setSyncMode, moveInDialog } from './share.js'
 import { restoreDialog } from './recovery-view.js'
 import { conflictsDialog } from './conflicts.js'
@@ -170,7 +170,10 @@ function renderList (list, files, folders, searching) {
       onclick: (e) => { if (!e.target.closest('.row-menu')) goTo(f.id) },
       onkeydown: (e) => { if ((e.key === 'Enter' || e.key === ' ') && e.target === row) { e.preventDefault(); goTo(f.id) } }
     },
-    el('div', { class: 'row-margin' }, renderNotes([{ text: stats.items ? plural(stats.items, 'item') : 'Empty' }, stats.live ? { text: `${stats.live} live now`, cls: 'live', dot: true } : null].filter(Boolean))),
+    (() => {
+      const notes = [{ text: stats.items ? plural(stats.items, 'item') : 'Empty' }, stats.live ? { text: `${stats.live} live now`, cls: 'live', dot: true } : null].filter(Boolean)
+      return el('div', { class: 'row-margin' }, ...renderNotes(notes), marginMark(notes))
+    })(),
     el('div', { class: 'row-main' },
       el('p', { class: 'row-title' }, svg(icons.folder), el('span', {}, f.name)),
       searching && f.parentId ? el('p', { class: 'row-preview' }, `In ${folderPath(f.parentId).map((p) => p.name).join(' / ')}`) : null),
@@ -196,7 +199,7 @@ function renderList (list, files, folders, searching) {
       onclick: (e) => { if (!e.target.closest('.row-menu') && openable) handlers.openDocument(f.docId) },
       onkeydown: (e) => { if ((e.key === 'Enter' || e.key === ' ') && openable && e.target === row) { e.preventDefault(); handlers.openDocument(f.docId) } }
     },
-    el('div', { class: 'row-margin' }, renderNotes(statusNotes(f))),
+    el('div', { class: 'row-margin' }, ...renderNotes(statusNotes(f)), marginMark(statusNotes(f))),
     el('div', { class: 'row-main' },
       el('p', { class: 'row-title' }, svg(kindIcon(f.kind)), el('span', {}, f.title || 'Untitled')),
       el('p', { class: 'row-preview' }, where || f.preview || (f.appName ? `Empty ${f.appName.toLowerCase()}` : ''))),
@@ -223,7 +226,7 @@ function renderGrid (list, files, folders, searching) {
     unsynced ? { text: `${plural(unsynced, 'file')} with edits only on this computer`, cls: 'warn' } : null
   ].filter(Boolean)
   const grid = el('div', { class: 'tiles', role: 'list' })
-  list.append(el('div', { class: 'grid-wrap' }, el('aside', { class: 'grid-margin' }, renderNotes(summary)), grid))
+  list.append(el('div', { class: 'grid-wrap' }, el('aside', { class: 'grid-margin' }, ...renderNotes(summary), marginMark(summary)), grid))
 
   for (const f of folders) {
     const stats = folderStats(f.id)

@@ -112,3 +112,12 @@ export function statusNotes (file, { detailed = false } = {}) {
 export function renderNotes (notes) {
   return notes.map((n) => el('span', { class: `note ${n.cls || ''}` }, n.text, n.dot ? el('span', { class: 'dot', 'aria-hidden': 'true' }) : null))
 }
+
+// What a folded margin shows instead of its notes: one dot for the note
+// that matters most, with all of them in its tooltip. `urgent` marks it
+// even without a warning note (conflicts or requests waiting).
+export function marginMark (notes, { urgent = false } = {}) {
+  const kind = urgent || notes.some((n) => n.cls === 'warn') ? 'warn' : notes.some((n) => n.cls === 'live') ? 'live' : ''
+  const summary = notes.map((n) => n.text).join('\n')
+  return el('span', { class: `margin-mark ${kind}`, title: summary, role: 'img', 'aria-label': summary })
+}

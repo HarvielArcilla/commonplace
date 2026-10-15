@@ -12,6 +12,7 @@
   <!-- commonDrive -->
   <section id="drive-view" class="view view-drive" aria-label="commonDrive">
     <header class="bar">
+      <span class="brand-mark" title="commonplace"><svg viewBox="10 10 80 80" aria-hidden="true"><rect x="10" y="10" width="80" height="80" rx="18" fill="#24407a"/><path d="M 50 26 A 24 24 0 0 0 29.2 62" fill="none" stroke="#fff" stroke-width="7" stroke-linecap="round"/><path d="M 50 74 A 24 24 0 0 0 70.8 38" fill="none" stroke="#9fc0f5" stroke-width="7" stroke-linecap="round"/><circle cx="50" cy="50" r="7" fill="#f2b65a"/></svg></span>
       <nav id="crumbs" class="crumbs" aria-label="Folder"></nav>
       <div class="bar-actions">
         <button type="button" class="btn" data-action="join">Join with invite</button>
@@ -40,6 +41,7 @@
       </div>
     </div>
     <main id="file-list" class="ledger" aria-live="polite"></main>
+    <button type="button" class="margin-fold" data-action="fold" aria-label="Hide notes" title="Hide notes" aria-expanded="true">‹</button>
     <footer class="me">
       <button type="button" class="me-button" data-action="profile" aria-label="Change your name and color">
         <span class="swatch" id="me-swatch"></span><span id="me-name"></span>
@@ -52,7 +54,7 @@
   <!-- commonDocs -->
   <section id="doc-view" class="view view-doc" hidden>
     <header class="bar">
-      <button type="button" class="btn btn-quiet" data-action="back" title="Back to commonDrive" aria-label="Back to commonDrive"><span class="back-label">commonDrive</span><span class="back-arrow" aria-hidden="true">←</span></button>
+      <button type="button" class="btn btn-quiet" data-action="back" title="Back to commonDrive"><span class="back-arrow" aria-hidden="true">‹</span>Drive</button>
       <input id="doc-title" class="title-input" aria-label="Document title" maxlength="200" spellcheck="false">
       <div class="bar-actions">
         <div id="presence" class="presence" aria-label="People in this document"></div>
@@ -64,6 +66,7 @@
       </div>
     </header>
     <div id="toolbar" class="toolbar" role="toolbar" aria-label="Formatting"></div>
+    <button type="button" class="margin-fold" data-action="fold" aria-label="Hide notes" title="Hide notes" aria-expanded="true">‹</button>
     <div class="doc-body">
       <div class="sheet">
         <aside class="margin" id="doc-margin" aria-live="polite"></aside>

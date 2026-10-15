@@ -1,3 +1,5 @@
+<img src="apps/desktop/build/icon.png" width="88" alt="">
+
 # commonplace
 
 **The collaborative part of Google Docs, Sheets and Slides, without a server or an account.** Free and open source.

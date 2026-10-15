@@ -87,6 +87,8 @@ function createWindow () {
     backgroundColor: '#fbfbf9',
     icon: ICON,
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
+    // Centered in the 52px top bar; the bar leaves 84px for them (body.mac).
+    trafficLightPosition: { x: 20, y: 20 },
     webPreferences: {
       preload: path.join(here, 'preload.cjs'),
       contextIsolation: true,

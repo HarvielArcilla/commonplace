@@ -96,7 +96,7 @@ if [ "${COMMONPLACE_NO_SHORTCUT:-}" != "1" ]; then
     mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
     printf '#!/bin/bash\nexec "%s/scripts/start.sh" >"$HOME/Library/Logs/commonplace.log" 2>&1\n' "$DIR" > "$APP/Contents/MacOS/commonplace"
     chmod +x "$APP/Contents/MacOS/commonplace"
-    cp "$DIR/node_modules/electron/dist/Electron.app/Contents/Resources/electron.icns" "$APP/Contents/Resources/commonplace.icns" 2>/dev/null || true
+    cp "$DIR/node_modules/electron/dist/commonplace.app/Contents/Resources/electron.icns" "$APP/Contents/Resources/commonplace.icns" 2>/dev/null || true
     cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

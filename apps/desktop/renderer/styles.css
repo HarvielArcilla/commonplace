@@ -24,6 +24,7 @@
   --mono: ui-monospace, "SF Mono", "Cascadia Mono", Consolas, monospace;
   --margin-w: 184px;
   --bar-h: 52px;
+  --bar-left: 16px;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -54,6 +55,7 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 [hidden] { display: none !important; }
+body.mac { --bar-left: 84px; } /* the window's close, minimize and zoom buttons */
 button, input, textarea, select { font: inherit; color: inherit; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
@@ -66,11 +68,12 @@ button, input, textarea, select { font: inherit; color: inherit; }
   height: 100vh;
   position: relative;
 }
-/* The margin rule runs the full height of every view. */
+/* The margin rule runs down the body of every view, below its toolbars
+   (--rule-top is set from their height). */
 .view::before {
   content: "";
   position: absolute;
-  top: 0; bottom: 0;
+  top: var(--rule-top, 96px); bottom: 0;
   left: var(--margin-w);
   width: 1px;
   background: var(--margin-line);
@@ -83,7 +86,7 @@ button, input, textarea, select { font: inherit; color: inherit; }
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 0 20px 0 calc(var(--margin-w) + 24px);
+  padding: 0 20px 0 var(--bar-left);
   border-bottom: 1px solid var(--rule);
   -webkit-app-region: drag;
   min-width: 0;
@@ -91,6 +94,8 @@ button, input, textarea, select { font: inherit; color: inherit; }
 .bar button, .bar input, .bar .presence, .bar select { -webkit-app-region: no-drag; }
 .bar-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; }
 
+.brand-mark { width: 24px; height: 24px; flex: none; margin-right: 2px; }
+.brand-mark svg { display: block; width: 100%; height: 100%; }
 .crumbs { display: flex; align-items: center; gap: 6px; min-width: 0; -webkit-app-region: no-drag; }
 .crumb {
   font: 500 18px/1.2 var(--serif);
@@ -122,7 +127,7 @@ button.crumb:hover { color: var(--ink); text-decoration: underline; text-underli
 /* ---- secondary toolbars (Drive options, formatting) ------------------- */
 .toolbar {
   display: flex; flex-wrap: wrap; align-items: center; gap: 2px;
-  padding: 6px 20px 6px calc(var(--margin-w) + 18px);
+  padding: 6px 20px 6px 14px;
   border-bottom: 1px solid var(--rule);
   min-width: 0;
 }
@@ -218,7 +223,7 @@ button.crumb:hover { color: var(--ink); text-decoration: underline; text-underli
 
 /* ---- icon view -------------------------------------------------------- */
 .grid-wrap { display: grid; grid-template-columns: var(--margin-w) minmax(0, 1fr); min-height: 100%; }
-.grid-margin { padding: 22px 16px; position: sticky; top: 0; align-self: start; }
+.grid-margin { padding: 40px 16px 22px; position: sticky; top: 0; align-self: start; }
 .tiles {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(164px, 1fr));
@@ -295,14 +300,10 @@ button.crumb:hover { color: var(--ink); text-decoration: underline; text-underli
 .swatch { width: 12px; height: 12px; border-radius: 50%; background: var(--swatch, var(--accent)); flex: none; }
 
 /* ---- document (commonDocs) ------------------------------------------- */
-#doc-view .bar {
-  display: grid;
-  grid-template-columns: var(--margin-w) minmax(0, 1fr) auto;
-  padding: 0 20px 0 0;
-}
-#doc-view .bar [data-action="back"] { justify-self: end; margin-right: 12px; font: 16px/1.2 var(--serif); }
-#doc-view .title-input { margin-left: 16px; min-width: 0; width: calc(100% - 24px); box-sizing: border-box; text-overflow: ellipsis; }
-body.mac #doc-view .bar [data-action="back"] { justify-self: end; }
+#doc-view .bar { gap: 6px; }
+#doc-view .bar [data-action="back"] { flex: none; font: 16px/1.2 var(--serif); padding: 6px 10px 6px 6px; display: inline-flex; align-items: center; gap: 2px; }
+.back-arrow { font-size: 20px; line-height: 16px; margin-top: -2px; }
+#doc-view .title-input { flex: 1; min-width: 0; box-sizing: border-box; text-overflow: ellipsis; }
 .title-input {
   min-width: 120px;
   border: 1px solid transparent;
@@ -353,24 +354,26 @@ body.mac #doc-view .bar [data-action="back"] { justify-self: end; }
 #doc-view.previewing .desk-paged { background: color-mix(in srgb, var(--desk) 85%, var(--warn)); }
 #doc-view.previewing .desk-markdown { background: color-mix(in srgb, var(--paper) 92%, var(--warn)); }
 .margin { position: sticky; left: 0; align-self: stretch; z-index: 1; background: var(--paper); }
-.margin-inner { position: sticky; top: 0; padding: 32px 16px; }
+.margin-inner { position: sticky; top: 0; padding: 40px 16px 32px; }
 .margin .note { margin-bottom: 14px; }
+/* The margin folds to a narrow rail (one choice for every view). */
 .margin-fold {
-  display: block; margin: -22px -8px 10px auto; width: 24px; height: 24px; padding: 0;
+  position: absolute; z-index: 3;
+  top: calc(var(--rule-top, 96px) + 6px); left: calc(var(--margin-w) - 30px);
+  width: 24px; height: 24px; padding: 0;
   border: 0; border-radius: 4px; background: none; color: var(--ink-faint);
   font: 18px/22px var(--serif); cursor: pointer;
 }
 .margin-fold:hover { color: var(--ink); background: var(--select); }
-#doc-view.margin-folded { --margin-w: 44px; }
-#doc-view.margin-folded .margin-inner { padding: 32px 0; display: flex; flex-direction: column; align-items: center; gap: 12px; }
-#doc-view.margin-folded .margin-fold { margin: -22px 0 0; }
-.margin-mark { width: 8px; height: 8px; border-radius: 50%; background: var(--ink-faint); opacity: 0.6; }
+body.margin-folded { --margin-w: 44px; }
+body.margin-folded .margin-fold { left: 10px; }
+.margin-mark { display: none; width: 8px; height: 8px; border-radius: 50%; background: var(--ink-faint); opacity: 0.5; margin: 0 auto; }
 .margin-mark.live { background: var(--live); opacity: 1; }
 .margin-mark.warn { background: var(--warn); opacity: 1; }
-#doc-view .back-arrow { display: none; }
-#doc-view.margin-folded [data-action="back"] { margin-right: 0; justify-self: center; padding: 6px 8px; }
-#doc-view.margin-folded .back-label { display: none; }
-#doc-view.margin-folded .back-arrow { display: inline; }
+body.margin-folded .margin-mark { display: block; }
+body.margin-folded :is(.row-margin, .grid-margin, .margin-inner) > :not(.margin-mark) { display: none; }
+body.margin-folded .row-margin { padding: 20px 0 0; }
+body.margin-folded :is(.grid-margin, .margin-inner) { padding-left: 0; padding-right: 0; }
 .desk { min-width: 0; }
 .desk-markdown .editor { padding: 28px 40px 120px 40px; }
 
@@ -572,7 +575,7 @@ body.mac #doc-view .bar [data-action="back"] { justify-self: end; }
 }
 
 @media (max-width: 980px) {
-  :root { --margin-w: 132px; }
+  body:not(.margin-folded) { --margin-w: 132px; }
   .row, .ledger-head { grid-template-columns: var(--margin-w) minmax(0, 1fr) 0 90px 44px; }
   .row-owner, .ledger-head span:nth-child(3) { visibility: hidden; padding: 0; }
   .me-note, .search { display: none; }
@@ -830,3 +833,5 @@ body.mac #doc-view .bar [data-action="back"] { justify-self: end; }
 }
 .drive-tools { flex-wrap: nowrap; }
 .drive-tools > * { flex: none; }
+body.margin-folded #me-name { display: none; }
+body.margin-folded .me-button { width: auto; }

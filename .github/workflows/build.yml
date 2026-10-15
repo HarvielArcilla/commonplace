@@ -62,6 +62,17 @@ jobs:
           COMMONPLACE_REPO: ${{ github.workspace }}
           COMMONPLACE_DIR: ${{ runner.temp }}/commonplace
           COMMONPLACE_NO_SHORTCUT: '1'
+      - name: renamed to commonplace (macOS)
+        if: runner.os == 'macOS'
+        working-directory: ${{ runner.temp }}/commonplace
+        run: |
+          app=node_modules/electron/dist/commonplace.app
+          test -x "$app/Contents/MacOS/commonplace"
+          test ! -e node_modules/electron/dist/Electron.app
+          test "$(plutil -extract CFBundleName raw "$app/Contents/Info.plist")" = commonplace
+          test "$(plutil -extract CFBundleExecutable raw "$app/Contents/Info.plist")" = commonplace
+          codesign --verify --deep --strict "$app"
+          "$(node -p "require('electron')")" --version
       - name: install.ps1
         if: runner.os == 'Windows'
         shell: powershell
