@@ -119,7 +119,7 @@ PLIST
 [Desktop Entry]
 Type=Application
 Name=commonplace
-Comment=Peer-to-peer documents
+Comment=Collaborative office suite with no server
 Exec="$DIR/scripts/start.sh"
 Icon=$DIR/apps/desktop/build/icon.png
 Terminal=false

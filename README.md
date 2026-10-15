@@ -2,13 +2,13 @@
 
 # commonplace
 
-**The collaborative part of Google Docs, Sheets and Slides, without a server or an account.** Free and open source.
+**A free, open-source office suite you collaborate in like Google Workspace, without a server or an account.** Documents, spreadsheets, presentations and a shared drive, synced directly between the people using them.
 
 ![Two people working on the same document: Sam's suggested edit and reply in the margin, his cursor in the text](docs/images/doc.png)
 
-Write together in real time, leave comments, suggest edits, share with a link, see every earlier version. It works the way you'd expect from an online office suite, except nobody runs it. There is no company in the middle holding your files, no sign-up, no subscription and no ads. Your files live on your computer and on the computers of the people you share them with, and travel directly between you, encrypted end to end.
+Work on the same document, spreadsheet or presentation at the same time, leave comments, suggest edits, share with a link, and go back to any earlier version. It works the way you'd expect from an online office suite, except nobody runs it. There is no company in the middle holding your files, no sign-up, no subscription and no ads. Your files live on your computer and on the computers of the people you share them with, and travel directly between you, encrypted end to end.
 
-- **No account.** Open the app, type your name, start writing. Your identity is a key made on your computer.
+- **No account.** Open the app, type your name, start working. Your identity is a key made on your computer.
 - **No server.** Computers find each other on a peer-to-peer network and connect directly. Nobody can read your files in transit, sell them, lose them in a breach, or lock you out.
 - **Works offline.** Edits are saved on your computer first and merge on their own when you meet again, like a git merge that resolves itself. Where two people changed the same sentence, the owner sees both and picks.
 - **Yours to keep.** Import and export `.docx`, `.xlsx`, `.pptx`, `.csv`, `.md` and PDF. MIT licensed.
