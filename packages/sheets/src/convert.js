@@ -1,4 +1,4 @@
-// .xlsx and .csv import and export for CommonSheets (runs in the background
+// .xlsx and .csv import and export for commonSheets (runs in the background
 // process). Formulas travel as formulas, with their last computed result,
 // so the file opens with numbers in Excel, Numbers and Google Sheets.
 
@@ -14,7 +14,7 @@ const hex = (argbValue) => (typeof argbValue === 'string' && argbValue.length >=
 
 export async function exportXlsx (ydoc) {
   const wb = new ExcelJS.Workbook()
-  wb.creator = 'CommonSheets'
+  wb.creator = 'commonSheets'
   const used = new Set()
   for (const s of sheetList(ydoc)) {
     let name = s.name.replace(/[\\/?*[\]:]/g, ' ').slice(0, 31) || 'Sheet'

@@ -1,4 +1,4 @@
-// CommonDocs editor (runs in the window). The editor edits a local Y.Doc
+// commonDocs editor (runs in the window). The editor edits a local Y.Doc
 // directly; whoever created that Y.Doc is responsible for syncing it.
 // That keeps this file free of any networking or Electron code.
 

@@ -1,4 +1,4 @@
-// CommonSheets window: the grid, formula bar, sheet tabs and formatting.
+// commonSheets window: the grid, formula bar, sheet tabs and formatting.
 // Everything edits the file's Y.Doc through @commonplace/sheets/model, so
 // edits sync like any other file's; this module only draws and listens.
 

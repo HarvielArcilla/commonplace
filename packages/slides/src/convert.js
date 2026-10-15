@@ -1,4 +1,4 @@
-// .pptx export for CommonSlides (runs in the background process), with
+// .pptx export for commonSlides (runs in the background process), with
 // PptxGenJS. Slides are 960 x 540 units, exported at 13.33 x 7.5 inches, so
 // one unit is one point and font sizes carry over as they are.
 
@@ -13,7 +13,7 @@ export async function exportPptx (ydoc, { title = 'Presentation' } = {}) {
   const pptx = new PptxGenJS()
   pptx.layout = 'LAYOUT_WIDE'
   pptx.title = title
-  pptx.author = 'CommonSlides'
+  pptx.author = 'commonSlides'
   const t = theme(ydoc)
   for (const id of slideIds(ydoc)) {
     const s = readSlide(ydoc, id)

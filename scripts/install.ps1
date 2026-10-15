@@ -1,13 +1,13 @@
-# Installs Commonplace on Windows 10 or 11, from nothing.
+# Installs commonplace on Windows 10 or 11, from nothing.
 #
 # In PowerShell:
 #   powershell -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/HarvielArcilla/commonplace/main/scripts/install.ps1 | iex"
 #
 # What it does:
 #   1. Installs Git and Node.js LTS with winget if they're missing or too old
-#   2. Downloads Commonplace to %USERPROFILE%\Commonplace, or updates it
+#   2. Downloads commonplace to %USERPROFILE%\commonplace, or updates it
 #   3. Installs its dependencies
-#   4. Adds a Commonplace shortcut to your Desktop
+#   4. Adds a commonplace shortcut to your Desktop
 #
 # It uses npm.cmd directly, so PowerShell's "running scripts is disabled"
 # setting doesn't get in the way, and it changes no system settings.
@@ -20,7 +20,7 @@
 $ErrorActionPreference = 'Stop'
 
 $Repo = if ($env:COMMONPLACE_REPO) { $env:COMMONPLACE_REPO } else { 'https://github.com/HarvielArcilla/commonplace.git' }
-$Dir = if ($env:COMMONPLACE_DIR) { $env:COMMONPLACE_DIR } else { Join-Path $HOME 'Commonplace' }
+$Dir = if ($env:COMMONPLACE_DIR) { $env:COMMONPLACE_DIR } else { Join-Path $HOME 'commonplace' }
 $NodeMajorMin = 20
 
 function Say($msg) { Write-Host "`n$msg" -ForegroundColor Cyan }
@@ -59,14 +59,14 @@ Say "Using Node $(node -v) and $(git --version)"
 
 # --- 2. Download or update ---------------------------------------------------------
 if (Test-Path (Join-Path $Dir '.git')) {
-  Say "Updating Commonplace in $Dir..."
+  Say "Updating commonplace in $Dir..."
   git -C $Dir pull --ff-only
   if ($LASTEXITCODE -ne 0) { Fail 'Updating failed. If you changed files in that folder, undo those changes and try again.' }
 } else {
   if ((Test-Path $Dir) -and (Get-ChildItem $Dir -Force | Select-Object -First 1)) {
-    Fail "$Dir already exists and isn't a Commonplace folder. Set `$env:COMMONPLACE_DIR to install somewhere else."
+    Fail "$Dir already exists and isn't a commonplace folder. Set `$env:COMMONPLACE_DIR to install somewhere else."
   }
-  Say "Downloading Commonplace to $Dir..."
+  Say "Downloading commonplace to $Dir..."
   git clone --depth 1 $Repo $Dir
   if ($LASTEXITCODE -ne 0) { Fail 'Downloading failed. Check your internet connection and try again.' }
 }
@@ -83,16 +83,16 @@ try {
 if ($env:COMMONPLACE_NO_SHORTCUT -ne '1') {
   $desktop = [Environment]::GetFolderPath('Desktop')
   $shell = New-Object -ComObject WScript.Shell
-  $link = $shell.CreateShortcut((Join-Path $desktop 'Commonplace.lnk'))
+  $link = $shell.CreateShortcut((Join-Path $desktop 'commonplace.lnk'))
   $link.TargetPath = Join-Path $Dir 'scripts\start.cmd'
   $link.WorkingDirectory = $Dir
   $link.WindowStyle = 7 # start minimized; the app opens its own window
-  $link.Description = 'Commonplace: peer-to-peer documents'
+  $link.Description = 'commonplace: peer-to-peer documents'
   $link.IconLocation = Join-Path $Dir 'apps\desktop\build\icon.ico'
   $link.Save()
-  Say 'Added Commonplace to your Desktop. Double-click it to start.'
+  Say 'Added commonplace to your Desktop. Double-click it to start.'
 }
 
-Say 'Done. To start Commonplace any time, run:'
+Say 'Done. To start commonplace any time, run:'
 Write-Host "  $Dir\scripts\start.cmd"
-Write-Host "`nWhen Windows Firewall asks about Commonplace (or Electron), click Allow,`nor other people's computers can't reach yours.`n"
+Write-Host "`nWhen Windows Firewall asks about commonplace (or Electron), click Allow,`nor other people's computers can't reach yours.`n"

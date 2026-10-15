@@ -1,4 +1,4 @@
-// Converts a CommonDocs document (ProseMirror JSON) to a .docx file.
+// Converts a commonDocs document (ProseMirror JSON) to a .docx file.
 // Runs in Node (the background process). Supported: headings, paragraphs,
 // alignment, bold/italic/underline/strike/code, font, size, color, highlight,
 // links, lists, quotes, code blocks, tables, images, rules, page breaks,
@@ -31,7 +31,7 @@ export async function exportDocx (json, pageSetup, { title = '' } = {}) {
 
   const doc = new Document({
     title,
-    creator: 'Commonplace',
+    creator: 'commonplace',
     styles: {
       default: {
         document: { run: { font: BODY_FONT, size: 24 }, paragraph: { spacing: { after: 160, line: 300 } } }

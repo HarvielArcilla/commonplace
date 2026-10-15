@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Runs an always-on helper. Leave it running on any computer that stays on
 // (an old laptop, a Raspberry Pi, a free cloud VM), then paste its address
-// into Commonplace under Share > Always-on helper.
+// into commonplace under Share > Always-on helper.
 //
 //   commonplace-helper [--dir <folder>] [--quota <GB>]
 
@@ -26,11 +26,11 @@ const swarm = !list.length ? {} : process.env.COMMONPLACE_DHT_HOST ? { dht: new 
 
 const helper = new HelperServer({ dir, quotaBytes, swarm })
 const address = await helper.start()
-console.log('Commonplace helper is running.')
+console.log('commonplace helper is running.')
 console.log('')
 console.log(`  Address: ${address}`)
 console.log('')
-console.log('Paste the address into Commonplace (Share > Always-on helper, or your profile).')
+console.log('Paste the address into commonplace (Share > Always-on helper, or your profile).')
 console.log(`Storing encrypted copies in ${dir} (up to ${opt('quota', 4)} GB). It can't read them.`)
 const stop = async () => { await helper.stop(); process.exit(0) }
 process.on('SIGINT', stop)

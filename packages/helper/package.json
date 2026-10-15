@@ -1,7 +1,7 @@
 {
   "name": "@commonplace/helper",
   "version": "0.1.0",
-  "description": "An always-on helper for Commonplace: keeps encrypted copies it can't read, so files sync even when nobody else is online.",
+  "description": "An always-on helper for commonplace: keeps encrypted copies it can't read, so files sync even when nobody else is online.",
   "type": "module",
   "main": "src/server.js",
   "bin": { "commonplace-helper": "bin/commonplace-helper.js" },

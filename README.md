@@ -1,25 +1,41 @@
-# Commonplace
+# commonplace
 
-Free, collaborative documents, spreadsheets and presentations that run entirely on the computers of the people using them. There are no accounts and no servers. CommonDrive keeps your files; CommonDocs, CommonSheets and CommonSlides edit them.
+**The collaborative part of Google Docs, Sheets and Slides, without a server or an account.** Free and open source.
 
-CommonDocs has two kinds of document:
+![Two people working on the same document: Sam's suggested edit and reply in the margin, his cursor in the text](docs/images/doc.png)
 
-- **Markdown documents** for notes and writing that flows, with markdown shortcuts. Import and export `.md`.
-- **Paged documents** for work that needs real pages: paper size, margins, fonts, colors and alignment. Import and export `.docx`, export PDF.
+Write together in real time, leave comments, suggest edits, share with a link, see every earlier version. It works the way you'd expect from an online office suite, except nobody runs it. There is no company in the middle holding your files, no sign-up, no subscription and no ads. Your files live on your computer and on the computers of the people you share them with, and travel directly between you, encrypted end to end.
 
-Both support links, LaTeX math, tables, images, comments, and a suggesting mode whose edits others accept or reject.
+- **No account.** Open the app, type your name, start writing. Your identity is a key made on your computer.
+- **No server.** Computers find each other on a peer-to-peer network and connect directly. Nobody can read your files in transit, sell them, lose them in a breach, or lock you out.
+- **Works offline.** Edits are saved on your computer first and merge on their own when you meet again, like a git merge that resolves itself. Where two people changed the same sentence, the owner sees both and picks.
+- **Yours to keep.** Import and export `.docx`, `.xlsx`, `.pptx`, `.csv`, `.md` and PDF. MIT licensed.
 
-**CommonSheets** has formulas (SUM, AVERAGE, IF, VLOOKUP, SUMIF and more), several sheets per file, number formats and styles. It imports and exports `.xlsx` and `.csv`.
+## The apps
 
-**CommonSlides** has layouts, text boxes, shapes, images, speaker notes and full-screen presenting. It exports `.pptx` and PDF.
+**commonDrive** keeps your files: list or icons, folders, filters, search, and a history of every version.
 
-CommonDrive shows files as a list or as icons, with personal folders, filters, sorting and search. Every file keeps a version history on each computer; any version can be viewed and restored.
+![commonDrive in icon view: a document, a presentation and a spreadsheet](docs/images/drive.png)
 
-Sharing works with roles: invite people to edit or only view, change their role, remove them, or hand ownership to someone else. Invite links expire (after 7 days unless you choose otherwise) and can be limited to one person or need your approval for each person. Removing someone stops sending them anything new; what they already have stays with them.
+**commonDocs** has markdown documents for writing that flows, and paged documents with paper size, margins, fonts and colors. Both have links, LaTeX math, tables, images, comments, and a suggesting mode whose edits others accept or reject.
 
-Use the same Drive on several computers: **Link another computer** in your profile keeps them in sync, files, folders and all. Or move your Drive to a new computer.
+**commonSheets** has formulas (SUM, AVERAGE, IF, VLOOKUP, SUMIF and more), several sheets per file, number formats and styles.
 
-Edits made while people are apart merge on their own, like a git merge. If two people changed the same paragraph (or the title), the file's owner sees both versions side by side and decides what stays.
+![commonSheets: a garden budget with a SUM formula](docs/images/sheet.png)
+
+**commonSlides** has layouts, text boxes, shapes, images, speaker notes and full-screen presenting.
+
+![commonSlides: editing a slide, with the slide strip on the left](docs/images/slides.png)
+
+## Sharing
+
+Invite people to edit or only view, change their role, remove them, or hand ownership to someone else. Invite links expire (after 7 days unless you choose otherwise) and can be limited to one person or need your approval for each person.
+
+![The share dialog: invite link options and the people with access](docs/images/share.png)
+
+Use the same Drive on several computers: **Link another computer** in your profile keeps them in sync. Or move your Drive to a new computer.
+
+**Recovery.** Make a backup in your profile and you get a recovery key. If you lose your computer, a new one plus the backup file and the key becomes you again, with your files. The backup stays up to date once a day.
 
 ## How it works
 
@@ -29,13 +45,13 @@ Edits made while people are apart merge on their own, like a git merge. If two p
 - Your identity is a keypair created on first launch. Your name and cursor color are yours to pick. Each file's owner signs who may read or edit it, and every computer checks those signatures.
 - Computers on the same network find each other directly and sync without internet.
 
-The tradeoff, chosen on purpose: a file syncs only while at least one other person who has it is online. If you'd rather not wait for that, run an always-on helper (below). It's optional and needs nothing but a computer you leave on.
+The tradeoff, chosen on purpose: changes travel only while at least one other person (or computer) that has the file is online. If you'd rather not wait for that, run an always-on helper (below). It's optional and needs nothing but a computer you leave on.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the design and roadmap.
 
 ## Install
 
-One command installs everything it needs (Git and Node.js too, if they're missing) into `Commonplace` in your home folder, and adds a launcher. Run it again later to update.
+One command installs everything it needs (Git and Node.js too, if they're missing) into `commonplace` in your home folder, and adds a launcher. Run it again later to update.
 
 **macOS or Linux** (Terminal):
 
@@ -49,9 +65,9 @@ curl -fsSL https://raw.githubusercontent.com/HarvielArcilla/commonplace/main/scr
 powershell -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/HarvielArcilla/commonplace/main/scripts/install.ps1 | iex"
 ```
 
-Then double-click **Commonplace** on your Desktop (or in the app menu on Linux). When your computer asks whether Commonplace may use the network, allow it (on Windows, for private networks too, for same-network sync), or other people's computers can't reach yours.
+Then double-click **commonplace** on your Desktop (or in the app menu on Linux). When your computer asks whether commonplace may use the network, allow it (on Windows, for private networks too, for same-network sync), or other people's computers can't reach yours.
 
-When a new version is on GitHub, the Drive shows **A new version of Commonplace is available**; choose **Update and restart** to update in place (or run the install command again). The check asks GitHub's public API about this project's commits, and sends nothing about you or your files; set `COMMONPLACE_NO_UPDATE_CHECK=1` to turn it off. Closing the window quits Commonplace, and files stop syncing until you open it again.
+When a new version is on GitHub, the Drive shows **A new version of commonplace is available**; choose **Update and restart** to update in place (or run the install command again). The check asks GitHub's public API about this project's commits, and sends nothing about you or your files; set `COMMONPLACE_NO_UPDATE_CHECK=1` to turn it off. Closing the window quits commonplace, and files stop syncing until you open it again.
 
 The scripts are short and commented: read [install.sh](scripts/install.sh) or [install.ps1](scripts/install.ps1) before running them if you like. Settings: `COMMONPLACE_DIR` (install location), `COMMONPLACE_NO_SHORTCUT=1`.
 
@@ -89,7 +105,7 @@ npm run helper                     # from a clone of this repo, or:
 node packages/helper/bin/commonplace-helper.js --dir ~/helper-data --quota 4
 ```
 
-It prints an address starting with `cph1.`. Paste it into your profile in Commonplace (used for new files and to sync your own computers), or into a file's **Share** dialog. Everyone working on that file then uses it.
+It prints an address starting with `cph1.`. Paste it into your profile in commonplace (used for new files and to sync your own computers), or into a file's **Share** dialog. Everyone working on that file then uses it.
 
 ## Build installers
 
@@ -106,10 +122,10 @@ Builds are unsigned, because signing requires paid certificates. On macOS, right
 
 ```
 packages/core    identity, encryption, storage, sync engine, P2P transport
-packages/drive   CommonDrive: the file index, background syncing, history, linked computers
-packages/docs    CommonDocs: the app descriptor, rich-text editor, comments and suggestions
-packages/sheets  CommonSheets: workbook model, formula engine, .xlsx and .csv
-packages/slides  CommonSlides: deck model, text-box editor, .pptx
+packages/drive   commonDrive: the file index, background syncing, history, linked computers
+packages/docs    commonDocs: the app descriptor, rich-text editor, comments and suggestions
+packages/sheets  commonSheets: workbook model, formula engine, .xlsx and .csv
+packages/slides  commonSlides: deck model, text-box editor, .pptx
 packages/helper  the optional always-on helper
 apps/desktop     Electron shell (background process + window UI)
 scripts/         one-step installers and launchers

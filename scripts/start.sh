@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Starts Commonplace (macOS and Linux). Used by the Desktop / menu launcher.
+# Starts commonplace (macOS and Linux). Used by the Desktop / menu launcher.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 # Started from Finder or a menu, PATH is minimal: look where Node usually is.

@@ -1,4 +1,4 @@
-// CommonSlides app descriptor: what CommonDrive needs to create, preview,
+// commonSlides app descriptor: what commonDrive needs to create, preview,
 // merge and restore presentations. The editor lives in the desktop app.
 
 import * as Y from 'yjs'

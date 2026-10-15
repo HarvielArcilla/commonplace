@@ -1,4 +1,4 @@
-// Electron main process: runs CommonDrive (sync, storage, networking) and
+// Electron main process: runs commonDrive (sync, storage, networking) and
 // hosts the window. The window never touches the network or the disk; it
 // talks to this process over a narrow IPC surface defined in preload.cjs.
 
@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url'
 import * as Y from 'yjs'
 import * as awarenessProtocol from 'y-protocols/awareness'
 import DHT from 'hyperdht'
-import { Drive, sendDrive, receiveDrive, newMoveCode } from '@commonplace/drive'
+import { Drive, sendDrive, receiveDrive, newMoveCode, Backups, readBackupFile, restoreBackup } from '@commonplace/drive'
 import { docsApps } from '@commonplace/docs'
 import { sheetsApp } from '@commonplace/sheets'
 import { exportXlsx, importXlsx, exportCsv, importCsv } from '@commonplace/sheets/convert'
@@ -26,6 +26,9 @@ const here = path.dirname(fileURLToPath(import.meta.url))
 
 // COMMONPLACE_PROFILE=bob lets you run a second, independent copy on the same
 // computer (separate identity and files), which is handy for trying sync.
+// Your files and identity stay in the folder earlier versions used
+// ("Commonplace"), whatever the app is called now.
+if (path.basename(app.getPath('userData')) === 'commonplace') app.setPath('userData', path.join(app.getPath('appData'), 'Commonplace'))
 const profile = process.env.COMMONPLACE_PROFILE
 if (profile) app.setPath('userData', `${app.getPath('userData')}-${profile.replace(/[^a-z0-9-]/gi, '')}`)
 
@@ -34,8 +37,9 @@ if (!profile && !app.requestSingleInstanceLock()) app.quit()
 // Our name and icon, also when running from source (the Electron binary
 // itself is renamed by scripts/brand.mjs at install time).
 const ICON = path.join(here, '..', 'build', 'icon.png')
+app.setName('commonplace')
 if (process.platform === 'win32') app.setAppUserModelId('org.commonplace.desktop')
-app.setAboutPanelOptions?.({ applicationName: 'Commonplace', applicationVersion: app.getVersion(), copyright: 'MIT License' })
+app.setAboutPanelOptions?.({ applicationName: 'commonplace', applicationVersion: app.getVersion(), copyright: 'MIT License' })
 
 let win = null
 let updates = null
@@ -79,7 +83,7 @@ function createWindow () {
     height: 820,
     minWidth: 720,
     minHeight: 520,
-    title: 'Commonplace',
+    title: 'commonplace',
     backgroundColor: '#fbfbf9',
     icon: ICON,
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
@@ -299,11 +303,42 @@ function registerIpc () {
     win?.webContents.reload()
     return result
   })
+  // Recovery: one backup file, kept up to date, opened by a recovery key.
+  ipcMain.handle('backup:status', () => backups.status())
+  ipcMain.handle('backup:create', async () => {
+    const { canceled, filePath } = await dialog.showSaveDialog(win, {
+      title: 'Save your backup',
+      defaultPath: path.join(app.getPath('documents'), 'commonplace backup.cpbackup'),
+      filters: [{ name: 'commonplace backup', extensions: ['cpbackup'] }]
+    })
+    if (canceled || !filePath) return null
+    return backups.create(filePath)
+  })
+  ipcMain.handle('backup:refresh', () => backups.refresh())
+  ipcMain.handle('backup:stop', () => backups.stop())
+  ipcMain.handle('backup:pick', async () => {
+    const { canceled, filePaths } = await dialog.showOpenDialog(win, {
+      title: 'Choose your backup',
+      properties: ['openFile'],
+      filters: [{ name: 'commonplace backup', extensions: ['cpbackup'] }, { name: 'All files', extensions: ['*'] }]
+    })
+    return canceled || !filePaths[0] ? null : filePaths[0]
+  })
+  ipcMain.handle('backup:restore', async (_e, file, recoveryKey) => {
+    if (!drive.isEmpty) throw new Error('This computer already has files. A backup can only be restored on a computer with an empty Drive.')
+    const { payload, lock } = readBackupFile(file, recoveryKey)
+    const result = await restoreBackup({ payload, dataDir: app.getPath('userData'), beforeInstall: () => { openDocs.clear(); return drive.stop() } })
+    await startDrive()
+    backups.adopt(file, lock)
+    win?.webContents.reload()
+    return result
+  })
   ipcMain.on('doc:update', (_e, docId, update) => drive.engine.applyLocalUpdate(docId, update, 'renderer'))
   ipcMain.on('doc:awareness', (_e, docId, update) => drive.engine.applyLocalAwareness(docId, update, 'renderer'))
 }
 
 let move = null
+let backups = null
 
 // COMMONPLACE_BOOTSTRAP=host:port[,host:port] joins a private DHT instead of
 // the public one (for testing, or a group running its own bootstrap node).
@@ -334,6 +369,9 @@ async function startDrive () {
     if (origin !== 'renderer' && openDocs.has(docId)) send('doc:awareness', docId, update)
   })
   await drive.start()
+  backups?.destroy()
+  backups = new Backups({ drive, dataDir: app.getPath('userData') })
+  backups.on('changed', (status) => send('backup:changed', status))
 }
 
 // After a move: this computer no longer holds the identity or any files.
@@ -343,6 +381,7 @@ async function signOutAndWipe () {
   await drive.stop()
   await fs.rm(path.join(dir, 'files'), { recursive: true, force: true })
   await fs.rm(path.join(dir, 'identity.json'), { force: true })
+  backups?.stop() // the backup belongs to the identity that left
   await startDrive() // a fresh, empty Drive with a new identity
   win?.webContents.reload()
 }
@@ -357,7 +396,7 @@ app.whenReady().then(async () => {
     onChange: (state) => send('updates:changed', state)
   })
   const last = updates.takeLastResult()
-  if (last) pendingNotice = last.ok ? 'Commonplace was updated to the newest version.' : `Commonplace couldn’t update itself. Run the install command again, or see ${last.log}.`
+  if (last) pendingNotice = last.ok ? 'commonplace was updated to the newest version.' : `commonplace couldn’t update itself. Run the install command again, or see ${last.log}.`
   registerIpc()
   await startDrive()
   createWindow()
@@ -367,7 +406,7 @@ app.whenReady().then(async () => {
 })
 
 // Closing the window quits, on every platform. Files stop syncing until
-// Commonplace is opened again.
+// commonplace is opened again.
 app.on('window-all-closed', () => app.quit())
 
 let stopping = false

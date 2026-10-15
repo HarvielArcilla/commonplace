@@ -1,4 +1,4 @@
-// Updates a Commonplace installed from source, then starts it again. The app
+// Updates a commonplace installed from source, then starts it again. The app
 // runs this (detached) and quits, so nothing is in use while files change.
 //
 //   node scripts/update.mjs <app pid> <log folder>
@@ -25,7 +25,7 @@ for (const [cmd, args] of [['git', ['pull', '--ff-only']], [win ? 'npm.cmd' : 'n
 }
 fs.writeFileSync(path.join(logDir, 'update-result.json'), JSON.stringify({ ok, at: Date.now(), log: path.join(logDir, 'update.log') }))
 
-// Start Commonplace again, the same way the Desktop launcher does.
+// Start commonplace again, the same way the Desktop launcher does.
 const start = win
   ? spawn('cmd.exe', ['/c', path.join(root, 'scripts', 'start.cmd')], { cwd: root, detached: true, stdio: 'ignore', windowsHide: true })
   : spawn('bash', [path.join(root, 'scripts', 'start.sh')], { cwd: root, detached: true, stdio: ['ignore', log, log] })

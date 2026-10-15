@@ -1,4 +1,4 @@
-// CommonSlides: model, concurrent edits, conflicts and .pptx export.
+// commonSlides: model, concurrent edits, conflicts and .pptx export.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import * as Y from 'yjs'

@@ -1,4 +1,4 @@
-// CommonSheets data model, on top of the file's Y.Doc. No DOM code: the
+// commonSheets data model, on top of the file's Y.Doc. No DOM code: the
 // background process uses it for previews, conflicts and import/export.
 //
 //   ydoc.getArray('sheets')     sheet ids, in tab order

@@ -1,5 +1,5 @@
-// Every file in Commonplace is a container with the same outer shape, so
-// CommonDrive can list, rename and share any file type without understanding
+// Every file in commonplace is a container with the same outer shape, so
+// commonDrive can list, rename and share any file type without understanding
 // its content:
 //
 //   ydoc.getMap('meta')     - type, title, owner, createdAt, schemaVersion

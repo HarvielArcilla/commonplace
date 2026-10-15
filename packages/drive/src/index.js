@@ -1,9 +1,9 @@
-// CommonDrive: the list of files you own or collaborate on, and the glue that
+// commonDrive: the list of files you own or collaborate on, and the glue that
 // keeps every one of them syncing in the background.
 //
 // Drive only ever reads a file's container metadata (type, title, owner,
 // contributors). Content belongs to the app registered for that type, so new
-// apps (CommonSheets, CommonSlides) plug in without changes here.
+// apps (commonSheets, commonSlides) plug in without changes here.
 
 import { EventEmitter } from 'node:events'
 import fs from 'node:fs'
@@ -18,6 +18,7 @@ import {
 } from '@commonplace/core'
 
 export { sendDrive, receiveDrive, newMoveCode, parseMoveCode } from './move.js'
+export { Backups, readBackupFile, restoreBackup, newRecoveryKey, normalizeRecoveryKey } from './backup.js'
 
 // Where the index lived before it synced between computers (still used to
 // hand an index over when moving or linking a Drive).
@@ -282,7 +283,7 @@ export class Drive extends EventEmitter {
   async join (inviteText, { folderId = null } = {}) {
     const parsed = parseInvite(inviteText)
     if (!parsed) throw new Error('That invite code is not valid.')
-    if (!parsed.token) throw new Error('This invite link is from an older version of Commonplace. Ask for a new one.')
+    if (!parsed.token) throw new Error('This invite link is from an older version of commonplace. Ask for a new one.')
     if (parsed.token.x != null && !(Date.now() < parsed.token.x)) throw new Error('This invite link has expired. Ask for a new one.')
     const { docId } = deriveDocKeys(parsed.secret)
     const existing = this.files.get(docId)
@@ -459,7 +460,7 @@ export class Drive extends EventEmitter {
   transferOwnership (docId, userId) { this.engine.transferOwnership(docId, userId) }
   resetInvites (docId) { this.engine.resetInvites(docId) }
 
-  // 'always': sync whenever Commonplace is running (default).
+  // 'always': sync whenever commonplace is running (default).
   // 'open': sync only while the file is open in a window.
   setSyncMode (docId, mode) {
     this._patch(docId, { syncMode: mode === 'open' ? 'open' : 'always' })

@@ -136,18 +136,7 @@ export function receiveDrive ({ code, dataDir, isEmpty, swarm = {}, onStatus = (
             onStatus({ phase: 'receiving', count: docs.length })
           } else if (msg.type === 'done') {
             if (!identity || !index || docs.length !== msg.count) throw new Error('The transfer was incomplete. Try again.')
-            // Write the index as a snapshot, then swap everything into place.
-            const indexStore = new FileStore(path.join(staging, 'files'))
-            const ydoc = new Y.Doc()
-            Y.applyUpdate(ydoc, Buffer.from(index, 'base64'))
-            indexStore.load('drive-index', new Y.Doc())
-            indexStore.compact('drive-index', ydoc)
-            installIdentity(staging, identity)
-            await beforeInstall() // e.g. stop the running (empty) Drive
-            fs.rmSync(path.join(dataDir, 'files'), { recursive: true, force: true })
-            fs.renameSync(path.join(staging, 'files'), path.join(dataDir, 'files'))
-            fs.renameSync(path.join(staging, 'identity.json'), path.join(dataDir, 'identity.json'))
-            fs.rmSync(staging, { recursive: true, force: true })
+            await installStaged({ staging, dataDir, identity, index, beforeInstall })
             send({ type: 'received', count: docs.length })
             onStatus({ phase: 'done', count: docs.length })
             finish(null, { count: docs.length, userId: identity.userId })
@@ -167,4 +156,21 @@ export function receiveDrive ({ code, dataDir, isEmpty, swarm = {}, onStatus = (
     const stop = finish
     finish = async (err, value) => { clearInterval(retry); return stop(err, value) }
   })
+}
+
+// The last step of bringing a Drive here (from another computer or from a
+// backup): the files are already in staging/files; write the identity and
+// the index next to them, then swap everything into place.
+export async function installStaged ({ staging, dataDir, identity, index, beforeInstall = async () => {} }) {
+  const indexStore = new FileStore(path.join(staging, 'files'))
+  const ydoc = new Y.Doc()
+  Y.applyUpdate(ydoc, Buffer.from(index, 'base64'))
+  indexStore.load('drive-index', new Y.Doc())
+  indexStore.compact('drive-index', ydoc)
+  installIdentity(staging, identity)
+  await beforeInstall() // e.g. stop the running (empty) Drive
+  fs.rmSync(path.join(dataDir, 'files'), { recursive: true, force: true })
+  fs.renameSync(path.join(staging, 'files'), path.join(dataDir, 'files'))
+  fs.renameSync(path.join(staging, 'identity.json'), path.join(dataDir, 'identity.json'))
+  fs.rmSync(staging, { recursive: true, force: true })
 }

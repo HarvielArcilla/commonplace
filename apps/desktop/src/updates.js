@@ -1,4 +1,4 @@
-// Tells people when a newer version of Commonplace is on GitHub, and, for
+// Tells people when a newer version of commonplace is on GitHub, and, for
 // copies installed from source (the install scripts), updates them.
 //
 // The only thing sent is an ordinary request to GitHub's public API for the
@@ -92,7 +92,7 @@ export class Updates {
 
 function github (endpoint) {
   return fetch(`https://api.github.com/repos/${REPO}/${endpoint}`, {
-    headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'Commonplace' },
+    headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'commonplace' },
     signal: AbortSignal.timeout(10000)
   }).then((r) => {
     if (!r.ok) throw new Error(`GitHub said ${r.status}`)

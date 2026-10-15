@@ -4,13 +4,13 @@
   <meta charset="utf-8">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'none'">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Commonplace</title>
+  <title>commonplace</title>
   <link rel="stylesheet" href="dist/vendor.css">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <!-- CommonDrive -->
-  <section id="drive-view" class="view view-drive" aria-label="CommonDrive">
+  <!-- commonDrive -->
+  <section id="drive-view" class="view view-drive" aria-label="commonDrive">
     <header class="bar">
       <nav id="crumbs" class="crumbs" aria-label="Folder"></nav>
       <div class="bar-actions">
@@ -49,10 +49,10 @@
     </footer>
   </section>
 
-  <!-- CommonDocs -->
+  <!-- commonDocs -->
   <section id="doc-view" class="view view-doc" hidden>
     <header class="bar">
-      <button type="button" class="btn btn-quiet" data-action="back">Drive</button>
+      <button type="button" class="btn btn-quiet" data-action="back" title="Back to commonDrive" aria-label="Back to commonDrive"><span class="back-label">commonDrive</span><span class="back-arrow" aria-hidden="true">←</span></button>
       <input id="doc-title" class="title-input" aria-label="Document title" maxlength="200" spellcheck="false">
       <div class="bar-actions">
         <div id="presence" class="presence" aria-label="People in this document"></div>
@@ -90,7 +90,8 @@
     <form method="dialog" id="profile-form" novalidate>
       <h2>What should collaborators call you?</h2>
       <p>Your name and color appear next to your cursor. You can change them any time.</p>
-      <label class="field">Name<input id="profile-name" maxlength="40" required autocomplete="name"></label>
+      <p class="first-run-restore" id="first-run-restore">Used commonplace before? <button type="button" class="link-button" id="restore-first">Restore from a backup</button></p>
+      <label class="field">Name<input id="profile-name" maxlength="40" required autocomplete="name" autofocus></label>
       <fieldset class="colors" id="profile-colors"><legend>Cursor color</legend></fieldset>
       <section id="profile-computers" class="computers" hidden>
         <h3>Your computers</h3>
@@ -99,6 +100,10 @@
           <button type="button" class="btn" id="link-out">Link another computer…</button>
           <button type="button" class="btn btn-quiet" id="move-out">Move to another computer…</button>
         </div>
+      </section>
+      <section id="profile-recovery" class="computers" hidden>
+        <h3>Recovery</h3>
+        <div id="profile-recovery-body"></div>
       </section>
       <section id="profile-helpers" class="computers" hidden>
         <h3>Always-on helper</h3>

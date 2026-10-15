@@ -200,7 +200,7 @@ async function resetLinks (docId) {
 
 export async function setSyncMode (docId, mode) {
   await cp.setSyncMode(docId, mode)
-  toast(mode === 'open' ? 'This file now syncs only while it’s open' : 'This file now syncs whenever Commonplace is running')
+  toast(mode === 'open' ? 'This file now syncs only while it’s open' : 'This file now syncs whenever commonplace is running')
 }
 
 // ---- moving the Drive -----------------------------------------------------
@@ -217,7 +217,7 @@ export async function moveOutDialog ({ keep = false } = {}) {
       ? 'The other computer gets your identity, folders and every file, and from then on both stay in sync, including files you add or remove. Both computers need to be online now.'
       : 'Your identity, folders and every file move to the other computer. When it confirms it has everything, this computer signs out and deletes its copies. Both computers need to be online.'),
     el('ol', { class: 'move-steps' },
-      el('li', {}, 'On the other computer, install Commonplace and open it.'),
+      el('li', {}, 'On the other computer, install commonplace and open it.'),
       el('li', {}, 'Choose “Bring my Drive here” and paste this code.')),
     el('div', { class: 'move-code-row' }, codeBox, copy),
     el('p', { class: 'fineprint-plain' }, 'Anyone with this code can take your Drive while this window is open. Only paste it on your own computer. It expires in 15 minutes.'),

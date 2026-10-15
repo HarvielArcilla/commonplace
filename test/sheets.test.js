@@ -1,4 +1,4 @@
-// CommonSheets: formulas, ids that survive concurrent edits, conflicts, xlsx/csv.
+// commonSheets: formulas, ids that survive concurrent edits, conflicts, xlsx/csv.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import * as Y from 'yjs'

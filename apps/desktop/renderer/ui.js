@@ -134,7 +134,8 @@ export function openMenu (anchor, items, { align = 'start', label } = {}) {
 // ---- dialogs ----------------------------------------------------------------
 // Each returns a promise that resolves when the dialog closes.
 
-export function dialog ({ title, body, fields = [], confirm = 'Save', cancel = 'Cancel', danger = false, extraActions = [], validate, wide = false }) {
+// required: Escape doesn't close it (for something that must be read).
+export function dialog ({ title, body, fields = [], confirm = 'Save', cancel = 'Cancel', danger = false, extraActions = [], validate, wide = false, required = false }) {
   return new Promise((resolve) => {
     const error = el('p', { class: 'error', role: 'alert' })
     const form = el('form', { method: 'dialog', novalidate: true },
@@ -159,7 +160,12 @@ export function dialog ({ title, body, fields = [], confirm = 'Save', cancel = '
       d.close()
     })
     form.addEventListener('input', () => { error.textContent = '' })
-    d.addEventListener('close', () => { d.remove(); resolve(result) })
+    if (required) d.addEventListener('cancel', (e) => e.preventDefault())
+    d.addEventListener('close', () => {
+      if (required && !result) { d.showModal(); return } // the browser may let Escape through anyway
+      d.remove()
+      resolve(result)
+    })
     document.body.append(d)
     d.showModal()
     form.querySelector('input:not([type=hidden]):not([type=radio]), textarea, select')?.focus()

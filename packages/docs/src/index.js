@@ -1,4 +1,4 @@
-// CommonDocs app descriptors. No DOM code here: CommonDrive loads this in the
+// commonDocs app descriptors. No DOM code here: commonDrive loads this in the
 // background process to create files and render previews. The editor lives in
 // ./editor.js and runs in the window.
 //

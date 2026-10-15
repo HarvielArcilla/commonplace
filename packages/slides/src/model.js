@@ -1,4 +1,4 @@
-// CommonSlides data model, on top of the file's Y.Doc. No DOM code.
+// commonSlides data model, on top of the file's Y.Doc. No DOM code.
 //
 //   ydoc.getArray('slides')     slide ids, in order
 //   ydoc.getMap('slideData')    slideId -> Y.Map {
@@ -32,6 +32,8 @@ export const SLIDE_DATA = 'slideData'
 export const DECK = 'deck'
 export const WIDTH = 960
 export const HEIGHT = 540
+// New decks start in Georgia; decks made before that (no font saved) keep Arial.
+export const NEW_DECK_FONT = 'Georgia, serif'
 export const DEFAULT_THEME = { font: 'Arial, Helvetica, sans-serif', fg: '#1f2430', accent: '#284b8c' }
 
 const newId = () => Math.random().toString(36).slice(2, 8) + Math.random().toString(36).slice(2, 6)
@@ -44,7 +46,10 @@ export const LAYOUTS = {
 }
 
 export function initSlides (ydoc) {
-  ydoc.transact(() => { addSlide(ydoc, { layout: 'title' }) })
+  ydoc.transact(() => {
+    ydoc.getMap(DECK).set('font', NEW_DECK_FONT)
+    addSlide(ydoc, { layout: 'title' })
+  })
 }
 
 // Adds a slide from a layout, after `after` (or at the end). Returns its id.
@@ -234,7 +239,8 @@ export function thumbnail (ydoc) {
   if (!s) return null
   return {
     bg: s.bg,
+    font: theme(ydoc).font,
     count: slideIds(ydoc).length,
-    boxes: s.elements.slice(0, 8).map((e) => ({ type: e.type, x: e.x, y: e.y, w: e.w, h: e.h, fill: e.fill || null, text: e.text ? plainText(e.text).slice(0, 80) : '', size: e.size || 20, align: e.align || 'left' }))
+    boxes: s.elements.slice(0, 8).map((e) => ({ type: e.type, x: e.x, y: e.y, w: e.w, h: e.h, fill: e.fill || null, text: e.text ? plainText(e.text).slice(0, 80) : '', size: e.size || 20, align: e.align || 'left', bold: Boolean(e.bold) }))
   }
 }

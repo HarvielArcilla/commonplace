@@ -1,4 +1,4 @@
-// CommonSlides window: the slide strip, the slide being edited, speaker
+// commonSlides window: the slide strip, the slide being edited, speaker
 // notes, presenting and printing. Slides are 960 x 540 units, drawn scaled
 // to fit; boxes move and resize by dragging, and their text is edited in
 // place. Everything edits the file's Y.Doc through @commonplace/slides/model.

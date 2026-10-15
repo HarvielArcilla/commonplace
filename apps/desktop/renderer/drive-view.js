@@ -1,9 +1,10 @@
-// CommonDrive: list and icon views, personal folders, filters and sorting.
+// commonDrive: list and icon views, personal folders, filters and sorting.
 
 import { $, el, svg, ago, listNames, plural, toast, openMenu, dialog, promptText, confirmAction, cleanError } from './ui.js'
 import { icons, kindIcon } from './icons.js'
 import { state, cp, statusNotes, renderNotes, savePrefs } from './state.js'
 import { shareDialog, setSyncMode, moveInDialog } from './share.js'
+import { restoreDialog } from './recovery-view.js'
 import { conflictsDialog } from './conflicts.js'
 
 let handlers = { openDocument: async () => {}, openJoinDialog: () => {} }
@@ -110,7 +111,7 @@ function renderCrumbs () {
   const nav = $('#crumbs')
   nav.replaceChildren()
   const path = folderPath(state.folderId)
-  const crumbs = [{ id: null, name: 'CommonDrive' }, ...path]
+  const crumbs = [{ id: null, name: 'commonDrive' }, ...path]
   crumbs.forEach((c, i) => {
     const last = i === crumbs.length - 1
     if (i > 0) nav.append(el('span', { class: 'crumb-sep', 'aria-hidden': 'true' }, '/'))
@@ -148,7 +149,9 @@ function emptyState () {
       el('button', { class: 'btn', onclick: importFile }, 'Import a file'),
       el('button', { class: 'btn btn-quiet', onclick: () => handlers.openJoinDialog() }, 'Join with invite')),
     el('p', { class: 'empty-move' }, 'Moving from another computer? ',
-      el('button', { type: 'button', class: 'link-button', onclick: moveInDialog }, 'Bring your Drive here')))
+      el('button', { type: 'button', class: 'link-button', onclick: moveInDialog }, 'Bring your Drive here'),
+      ' or ',
+      el('button', { type: 'button', class: 'link-button', onclick: restoreDialog }, 'restore from a backup'), '.'))
 }
 
 // ---- list view ----------------------------------------------------------------
@@ -281,10 +284,10 @@ function thumbnail (f) {
     const t = f.thumb
     const k = 168 / 960
     return el('div', { class: 'thumb thumb-slides', 'aria-hidden': 'true' },
-      el('div', { class: 'thumb-slide', style: `background:${t?.bg || '#fff'}` },
+      el('div', { class: 'thumb-slide', style: `background:${t?.bg || '#fff'};font-family:${t?.font || 'inherit'}` },
         ...(t?.boxes || []).map((b) => el('div', {
           class: `thumb-box thumb-box-${b.type}`,
-          style: `left:${b.x * k}px;top:${b.y * k}px;width:${b.w * k}px;height:${b.h * k}px;font-size:${Math.max(4, b.size * k)}px;text-align:${b.align};${b.fill ? `background:${b.fill};` : ''}`
+          style: `left:${b.x * k}px;top:${b.y * k}px;width:${b.w * k}px;height:${b.h * k}px;font-size:${Math.max(4, b.size * k)}px;text-align:${b.align};${b.bold ? 'font-weight:700;' : ''}${b.fill ? `background:${b.fill};` : ''}`
         }, b.text))),
       t?.count > 1 ? el('span', { class: 'thumb-count-badge' }, `${t.count} slides`) : null)
   }
@@ -321,10 +324,10 @@ function dropTarget (node, folderId) {
     const item = JSON.parse(raw)
     if (item.kind === 'file') {
       await cp.moveFile(item.id, folderId)
-      toast(`Moved to ${folderById(folderId)?.name || 'CommonDrive'}`)
+      toast(`Moved to ${folderById(folderId)?.name || 'commonDrive'}`)
     } else if (item.id !== folderId) {
       const ok = await cp.moveFolder(item.id, folderId)
-      toast(ok ? `Moved to ${folderById(folderId)?.name || 'CommonDrive'}` : 'A folder can’t go inside itself.')
+      toast(ok ? `Moved to ${folderById(folderId)?.name || 'commonDrive'}` : 'A folder can’t go inside itself.')
     }
   })
 }
@@ -380,7 +383,7 @@ function folderMenu (anchor, f) {
       label: 'Delete folder…',
       danger: true,
       onSelect: async () => {
-        const parent = folderById(f.parentId)?.name || 'CommonDrive'
+        const parent = folderById(f.parentId)?.name || 'commonDrive'
         if (await confirmAction({ title: `Delete “${f.name}”?`, body: `Only the folder is deleted. Everything inside it moves to ${parent}.`, confirm: 'Delete folder' })) {
           if (state.folderId === f.id) state.folderId = f.parentId || null
           await cp.deleteFolder(f.id)
@@ -395,7 +398,7 @@ function fileMenu (anchor, f) {
   openMenu(anchor, [
     { label: 'Open', disabled: !openable, onSelect: () => handlers.openDocument(f.docId) },
     { label: 'Share\u2026', icon: icons.invite, disabled: f.waitingForPeer, onSelect: () => shareDialog(f.docId) },
-    { label: 'Sync in the background', hint: f.syncMode === 'open' ? 'Off: syncs only while the file is open' : 'On: syncs whenever Commonplace is running', checked: f.syncMode !== 'open', onSelect: () => setSyncMode(f.docId, f.syncMode === 'open' ? 'always' : 'open') },
+    { label: 'Sync in the background', hint: f.syncMode === 'open' ? 'Off: syncs only while the file is open' : 'On: syncs whenever commonplace is running', checked: f.syncMode !== 'open', onSelect: () => setSyncMode(f.docId, f.syncMode === 'open' ? 'always' : 'open') },
     { label: 'Move to…', icon: icons.folder, onSelect: () => moveDialog({ kind: 'file', id: f.docId, name: f.title, current: f.folderId }) },
     f.conflicts?.length ? { label: f.role === 'owner' ? 'Review conflicts\u2026' : 'See conflicts\u2026', onSelect: () => conflictsDialog(f.docId) } : null,
     { label: 'Details', onSelect: () => detailsDialog(f) },
@@ -422,7 +425,7 @@ function detailsDialog (f) {
     ['Owner', f.role === 'owner' ? 'You' : (f.owner?.name || 'Unknown')],
     ['Your access', { owner: 'Owner', editor: 'Can edit', viewer: 'Can view' }[f.role] || (f.access.removed ? 'Removed' : 'Not yet confirmed')],
     ['Written by', f.contributors.length ? listNames(f.contributors) : 'Nobody yet'],
-    ['Folder', f.folderId ? folderPath(f.folderId).map((p) => p.name).join(' / ') : 'CommonDrive'],
+    ['Folder', f.folderId ? folderPath(f.folderId).map((p) => p.name).join(' / ') : 'commonDrive'],
     ['Last change', [ago(f.lastChangeAt || f.addedAt), f.lastChangedBy ? `by ${f.lastChangedBy}` : null].filter(Boolean).join(' ') || '—'],
     ['Sync', statusNotes(f).map((n) => n.text).join('. ')]
   ]
@@ -431,7 +434,7 @@ function detailsDialog (f) {
 
 async function moveDialog ({ kind, id, name, current }) {
   const blocked = kind === 'folder' ? descendantIds(id) : new Set()
-  const options = [{ id: '', label: 'CommonDrive', depth: 0 }]
+  const options = [{ id: '', label: 'commonDrive', depth: 0 }]
   const walk = (parentId, depth) => {
     for (const f of state.folders.filter((x) => (x.parentId || null) === parentId).sort((a, b) => a.name.localeCompare(b.name))) {
       if (blocked.has(f.id)) continue
@@ -449,5 +452,5 @@ async function moveDialog ({ kind, id, name, current }) {
   const target = res.data.target || null
   if (kind === 'file') await cp.moveFile(id, target)
   else if (!(await cp.moveFolder(id, target))) { toast('A folder can’t go inside itself.'); return }
-  toast(`Moved to ${folderById(target)?.name || 'CommonDrive'}`)
+  toast(`Moved to ${folderById(target)?.name || 'commonDrive'}`)
 }

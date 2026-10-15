@@ -59,7 +59,7 @@ export function statusNotes (file, { detailed = false } = {}) {
     return notes
   }
   if (!file.supported) {
-    notes.push({ text: 'Made with a newer version of Commonplace', cls: 'warn' })
+    notes.push({ text: 'Made with a newer version of commonplace', cls: 'warn' })
     return notes
   }
   const conflicts = file.conflicts?.length || 0

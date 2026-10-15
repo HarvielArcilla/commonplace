@@ -1,4 +1,4 @@
-// CommonSheets app descriptor: what CommonDrive needs to create, preview,
+// commonSheets app descriptor: what commonDrive needs to create, preview,
 // merge and restore spreadsheets. The grid UI lives in the desktop app.
 
 import { initSheets, preview, previewGrid, sheetList, sheetMap, context, SHEETS, SHEET_DATA } from './model.js'

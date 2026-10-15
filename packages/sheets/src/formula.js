@@ -1,4 +1,4 @@
-// CommonSheets formulas: tokenizer, parser and evaluator.
+// commonSheets formulas: tokenizer, parser and evaluator.
 //
 // People type formulas with A1 references (=SUM(A1:B3), ='Q1 numbers'!C4).
 // They're stored with references to row and column *ids* instead, written

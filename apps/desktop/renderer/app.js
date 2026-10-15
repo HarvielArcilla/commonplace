@@ -1,4 +1,4 @@
-// Window entry point: wires CommonDrive and CommonDocs to the background process.
+// Window entry point: wires commonDrive and commonDocs to the background process.
 // Bundled by build.mjs into renderer/dist/app.js.
 
 import { $, el, ago, toast, confirmAction, cleanError } from './ui.js'
@@ -6,6 +6,7 @@ import { state, cp } from './state.js'
 import { initDrive, renderDrive } from './drive-view.js'
 import { initDocView, openDocument, renderDocMargin } from './doc-view.js'
 import { moveOutDialog, helperStatus } from './share.js'
+import { renderRecovery, restoreDialog } from './recovery-view.js'
 
 const COLORS = ['#b4532a', '#2f6f5e', '#4a5aa8', '#8a4f8c', '#a2741b', '#2d6f8f', '#9b3d4f', '#55703a']
 
@@ -67,7 +68,9 @@ function openProfileDialog () {
   $('#profile-id').textContent = `Your ID: ${state.me.userId}`
   $('#profile-computers').hidden = !state.me.hasChosenName // not during first-run setup
   $('#profile-helpers').hidden = !state.me.hasChosenName
-  if (state.me.hasChosenName) { renderComputers(); renderMyHelpers() }
+  $('#profile-recovery').hidden = !state.me.hasChosenName
+  $('#first-run-restore').hidden = state.me.hasChosenName
+  if (state.me.hasChosenName) { renderComputers(); renderMyHelpers(); renderRecovery() }
   d.showModal()
 }
 
@@ -128,6 +131,11 @@ $('#link-out').addEventListener('click', () => {
   $('#profile-dialog').close()
   moveOutDialog({ keep: true })
 })
+$('#restore-first').addEventListener('click', () => {
+  $('#profile-dialog').close()
+  restoreDialog().finally(() => { if (!state.me?.hasChosenName && !$('#profile-dialog').open) openProfileDialog() })
+})
+cp.onBackup(() => { if ($('#profile-dialog').open && !$('#profile-recovery').hidden) renderRecovery() })
 cp.onNotice((text) => toast(text))
 
 // ---- updates -------------------------------------------------------------------
@@ -139,17 +147,17 @@ function showUpdate (u) {
   const what = u.behind ? `${u.behind} change${u.behind === 1 ? '' : 's'}` : u.changes[0] || 'A new version'
   note.title = u.changes.length ? `What's new:\n${u.changes.join('\n')}` : ''
   note.replaceChildren(
-    el('span', {}, u.installing ? 'Updating Commonplace…' : `A new version of Commonplace is available (${what}).`),
+    el('span', {}, u.installing ? 'Updating commonplace…' : `A new version of commonplace is available (${what}).`),
     u.installing ? null : u.canInstall
       ? el('button', { type: 'button', class: 'btn btn-primary', onclick: confirmUpdate }, 'Update and restart')
       : el('button', { type: 'button', class: 'btn', onclick: () => cp.openUpdatePage() }, 'See what’s new'))
   note.hidden = false
-  if (!toldAboutUpdate && !u.installing) { toldAboutUpdate = true; toast('A new version of Commonplace is available.') }
+  if (!toldAboutUpdate && !u.installing) { toldAboutUpdate = true; toast('A new version of commonplace is available.') }
 }
 async function confirmUpdate () {
   const ok = await confirmAction({
     title: 'Update and restart?',
-    body: 'Commonplace closes, downloads the new version, and opens again in a minute or two. Your files stay where they are.',
+    body: 'commonplace closes, downloads the new version, and opens again in a minute or two. Your files stay where they are.',
     confirm: 'Update and restart',
     danger: false
   })

@@ -1,4 +1,4 @@
-// CommonDocs: the editor for markdown and paged documents, their toolbar,
+// commonDocs: the editor for markdown and paged documents, their toolbar,
 // links, math, tables, images and page setup. The document window
 // (doc-view.js) hosts it through the view interface returned by mountDocs.
 
