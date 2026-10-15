@@ -20,7 +20,20 @@ async function until (fn, ms = 15000, what = 'condition') {
 // A port of its own, so this test never meets anything else on the network.
 const lan = { port: 47000 + Math.floor(Math.random() * 900), intervalMs: 300 }
 
+// Some machines (a few CI runners) can't multicast even to themselves.
+async function multicastWorks () {
+  const sock = dgram.createSocket({ type: 'udp4', reuseAddr: true })
+  await new Promise((r) => sock.bind(lan.port + 1, r))
+  try { sock.addMembership('239.255.77.17'); sock.setMulticastLoopback(true) } catch { sock.close(); return false }
+  const heard = new Promise((resolve) => { sock.once('message', () => resolve(true)); setTimeout(() => resolve(false), 1000) })
+  sock.send('ping', lan.port + 1, '239.255.77.17')
+  const ok = await heard
+  sock.close()
+  return ok
+}
+
 test('two computers on one network sync with no internet at all', async (t) => {
+  if (!(await multicastWorks())) { t.skip('multicast is not available on this machine'); return }
   const alice = new Drive({ dataDir: tmp(), apps: [docsApp], transport: false, lan })
   const bob = new Drive({ dataDir: tmp(), apps: [docsApp], transport: false, lan })
   alice.setProfile({ name: 'Alice' })
