@@ -7,7 +7,7 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawnSync } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 
@@ -18,7 +18,18 @@ const ico = path.join(here, '..', 'build', 'icon.ico')
 
 const electronDir = path.dirname(createRequire(import.meta.url).resolve('electron/package.json'))
 
+// Electron downloads its binary the first time it's needed, not at npm
+// install, so fetch it now (with its own installer) to have something to
+// rename. Already there (renamed or not): nothing to do.
+function ensureElectron () {
+  const pointed = (() => { try { return fs.readFileSync(path.join(electronDir, 'path.txt'), 'utf8') } catch { return '' } })()
+  if (pointed && fs.existsSync(path.join(electronDir, 'dist', pointed))) return
+  const r = spawnSync(process.execPath, [path.join(electronDir, 'install.js')], { stdio: 'inherit' })
+  if (r.status !== 0) throw new Error('Electron didn’t download')
+}
+
 try {
+  if (process.platform === 'darwin' || process.platform === 'win32') ensureElectron()
   if (process.platform === 'darwin') brandMac()
   else if (process.platform === 'win32') await brandWindows(path.join(electronDir, 'dist', 'electron.exe'))
 } catch (err) {
