@@ -12,7 +12,7 @@ import path from 'node:path'
 import { randomBytes } from 'node:crypto'
 import * as Y from 'yjs'
 import {
-  FileStore, SyncEngine, SwarmTransport, loadOrCreateIdentity, canEdit,
+  FileStore, SyncEngine, SwarmTransport, LanTransport, loadOrCreateIdentity, canEdit,
   newDocSecret, deriveDocKeys, encodeInvite, parseInvite, initContainer, readMeta, updatePerson,
   findConflicts, conflictId, docFrom, History, restoreContent
 } from '@commonplace/core'
@@ -28,7 +28,9 @@ export const INDEX_ID = 'drive-index'
 const HISTORY = { idleMs: 60e3, maxMs: 10 * 60e3 }
 
 export class Drive extends EventEmitter {
-  constructor ({ dataDir, apps = [], swarm = {}, transport = true, history = {}, deviceName = defaultDeviceName() }) {
+  // transport: sync over the internet (Hyperswarm). lan: also find computers
+  // on the same network directly, with or without internet (options for tests).
+  constructor ({ dataDir, apps = [], swarm = {}, transport = true, lan = true, history = {}, deviceName = defaultDeviceName() }) {
     super()
     this.dataDir = dataDir
     this.swarmOpts = swarm
@@ -50,6 +52,13 @@ export class Drive extends EventEmitter {
           const status = this.engine.status(this._topicToDoc.get(topicHex))
           return !status || (status.peers.length === 0 && status.devices.length === 0)
         }
+      })
+      : null
+    this.lan = lan
+      ? new LanTransport(this.engine, {
+        ...(typeof lan === 'object' ? lan : {}),
+        ...(this.transport ? { keyPair: this.transport.swarm.keyPair } : {}),
+        topics: () => [...this._joined.values()].flatMap((set) => [...set].map((hex) => Buffer.from(hex, 'hex')))
       })
       : null
 
@@ -93,6 +102,7 @@ export class Drive extends EventEmitter {
 
   async start () {
     this._joinTopics(this.indexId)
+    if (this.lan) await this.lan.start().catch((err) => { this.lan = null; this.emit('error', err) })
     for (const entry of this.files.values()) this._attach(entry)
     this._seen()
     this._checkUnlinked()
@@ -112,6 +122,7 @@ export class Drive extends EventEmitter {
     }
     this._persistTimers.clear()
     this.engine.destroy()
+    if (this.lan) await this.lan.destroy()
     if (this.transport) await this.transport.destroy()
   }
 

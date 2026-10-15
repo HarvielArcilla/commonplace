@@ -7,6 +7,7 @@
     ".": "./src/index.js"
   },
   "dependencies": {
+    "@hyperswarm/secret-stream": "^6.9.2",
     "b4a": "^1.9.0",
     "hyperswarm": "^4.17.2",
     "lib0": "^0.2.119",

@@ -100,7 +100,7 @@ test('a linked computer shares the Drive: new files, edits, removals and unlinki
 
 test('owner changes made on two computers at once are both kept', async (t) => {
   const aDir = tmp()
-  const a = new Drive({ dataDir: aDir, apps: [docsApp], transport: false, deviceName: 'A' })
+  const a = new Drive({ dataDir: aDir, apps: [docsApp], transport: false, lan: false, deviceName: 'A' })
   await a.start()
   const docId = await a.create('docs', 'Shared')
   const bob = loadOrCreateIdentity(path.join(tmp(), 'bob'))
@@ -113,7 +113,7 @@ test('owner changes made on two computers at once are both kept', async (t) => {
   const bDir = tmp()
   fs.cpSync(aDir, bDir, { recursive: true })
   fs.rmSync(path.join(bDir, 'device.json'))
-  const b = new Drive({ dataDir: bDir, apps: [docsApp], transport: false, deviceName: 'B' })
+  const b = new Drive({ dataDir: bDir, apps: [docsApp], transport: false, lan: false, deviceName: 'B' })
   t.after(async () => { await a.stop(); await b.stop() })
   await b.start()
 
