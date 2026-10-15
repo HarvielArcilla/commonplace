@@ -184,7 +184,8 @@ function fitPaper () {
   if (!o?.paper) return false
   const g = pageGeometry(readPage(o.ydoc))
   const pref = loadZoom()
-  const room = $('#desk').clientWidth - 64
+  // The visible width, not the desk's: the desk grows with the page.
+  const room = $('.sheet').clientWidth - $('#doc-margin').offsetWidth - 64
   const zoom = pref === 'fit' ? Math.max(0.3, Math.min(1, room / g.width)) : Number(pref) / 100
   syncZoomControl(pref, zoom)
   if (Math.abs(zoom - o.zoom) < 0.005) return false

@@ -32,6 +32,17 @@ export const PAGED_DEFAULTS = {
   size: { p: 12, h1: 20, h2: 16, h3: 13, code: 10 } // points
 }
 
+function applyImageSize (view, node) {
+  const img = view.element
+  if (!img) return
+  const { width, height } = node.attrs
+  const w = width ? `${width}px` : ''
+  const h = height ? `${height}px` : ''
+  if (img.style.width !== w) img.style.width = w
+  if (img.style.height !== h) img.style.height = h
+  if (width && height) view.aspectRatio = width / height
+}
+
 // Images can be resized by dragging their corners. The width never exceeds
 // the text column (getMaxWidth), and the aspect ratio is kept.
 function resizableImage (getMaxWidth) {
@@ -41,8 +52,18 @@ function resizableImage (getMaxWidth) {
       if (!make) return null
       return (props) => {
         const view = make(props)
+        if (!view) return view
         const max = getMaxWidth?.()
-        if (max && view) view.maxSize = { width: max, height: Infinity }
+        if (max) view.maxSize = { width: max, height: Infinity }
+        // TipTap only applies width/height when the view is created, so a
+        // resize made by someone else (or undone) wouldn't show until the
+        // file was reopened. Apply them on every update too.
+        const update = view.update.bind(view)
+        view.update = (node, decorations, inner) => {
+          const ok = update(node, decorations, inner)
+          if (ok !== false && !view.isResizing) applyImageSize(view, node)
+          return ok
+        }
         return view
       }
     }
