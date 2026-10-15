@@ -69,6 +69,11 @@ export function statusNotes (file, { detailed = false } = {}) {
       ? { text: `${what} from edits made while apart. Your decision is needed.`, cls: 'warn', conflict: true }
       : { text: `${what} from edits made while apart, waiting for ${file.owner?.name || 'the owner'} to decide`, cls: 'warn', conflict: true })
   }
+  const review = [
+    file.review?.comments ? `${file.review.comments} open comment${file.review.comments === 1 ? '' : 's'}` : null,
+    file.review?.suggestions ? `${file.review.suggestions} suggestion${file.review.suggestions === 1 ? '' : 's'}` : null
+  ].filter(Boolean)
+  if (review.length && !detailed) notes.push({ text: review.join(', ') })
   if (here.length) notes.push({ text: `${listNames(here)} ${here.length === 1 ? 'is' : 'are'} here`, cls: 'live', dot: true })
   if (syncing.length) {
     notes.push({ text: `Syncing with ${listNames(syncing)}`, cls: here.length ? '' : 'live' })

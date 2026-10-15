@@ -578,6 +578,10 @@ body.mac #doc-view .bar [data-action="back"] { justify-self: end; }
   .cp-page [data-resize-handle] { display: none !important; }
   .cp-manual-break { display: none !important; }
   .cp-page th { background: #f1f2f5 !important; }
+  /* Suggestions nobody has accepted yet, and comment highlights, stay out. */
+  .cp-page ins.cp-insertion, .cp-page [data-node-insertion] { display: none !important; }
+  .cp-page del.cp-deletion { text-decoration: none !important; color: inherit !important; background: none !important; }
+  .cp-page .cp-comment { background: none !important; border: 0 !important; }
 }
 
 /* ---- sharing ---------------------------------------------------------- */
@@ -631,3 +635,32 @@ body.mac #doc-view .bar [data-action="back"] { justify-self: end; }
 .version-base .version-label { display: inline; }
 .conflict-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
 @media (max-width: 760px) { .versions { grid-template-columns: 1fr; } }
+
+/* ---- comments and suggestions ----------------------------------------- */
+:root { --comment: rgba(214, 160, 30, 0.18); --comment-strong: rgba(214, 160, 30, 0.42); --comment-line: rgba(176, 125, 10, 0.7); }
+.cp-comment { background: var(--comment); border-bottom: 2px solid var(--comment-line); }
+.cp-page ins.cp-insertion { text-decoration: none; color: #2f6b4f; background: rgba(47, 107, 79, 0.12); border-bottom: 1px solid rgba(47, 107, 79, 0.6); }
+.cp-page del.cp-deletion { color: #9b2c2c; text-decoration: line-through; text-decoration-thickness: 1px; }
+.cp-page [data-node-insertion] { box-shadow: -3px 0 0 rgba(47, 107, 79, 0.6); }
+.cp-page [data-node-deletion] { box-shadow: -3px 0 0 rgba(155, 44, 44, 0.6); }
+.count-badge { display: inline-block; min-width: 18px; margin-left: 6px; padding: 0 5px; border-radius: 9px; background: var(--accent); color: var(--accent-ink); font-size: 11px; line-height: 18px; text-align: center; }
+.tool-mode { margin-right: 8px; }
+.review-card { margin: 8px 12px; padding: 10px 12px; border: 1px solid var(--rule); border-radius: 8px; background: var(--paper-raised); cursor: pointer; }
+.review-card.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.review-card.resolved { opacity: 0.75; }
+.review-card.composer { cursor: default; }
+.review-card textarea { width: 100%; box-sizing: border-box; margin-top: 8px; font: 14px/1.45 var(--ui); border: 1px solid var(--rule); border-radius: 6px; padding: 6px 8px; resize: vertical; background: var(--paper); color: var(--ink); }
+.review-quote { margin: 0 0 6px; font: italic 13px/1.4 var(--serif); color: var(--ink-soft); border-left: 2px solid var(--comment-line); padding-left: 8px; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
+.message + .message { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--rule); }
+.message-head { display: flex; align-items: center; gap: 6px; margin: 0; font-size: 13px; }
+.message-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--c); flex: none; }
+.message-time { color: var(--ink-faint); font-size: 12px; }
+.message-text { margin: 4px 0 0; font-size: 14px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
+.message-tools { display: flex; gap: 12px; margin-top: 4px; font-size: 12px; }
+.review-actions { display: flex; gap: 6px; margin-top: 8px; }
+.review-note { margin: 8px 0 0; font: italic 12px var(--serif); color: var(--ink-faint); }
+.suggest-line { margin: 6px 0 0; font-size: 14px; line-height: 1.45; overflow-wrap: anywhere; }
+.suggest-kind { display: inline-block; min-width: 46px; font-size: 12px; color: var(--ink-faint); margin-right: 6px; }
+.suggest-line ins { text-decoration: none; color: var(--live); background: color-mix(in srgb, var(--live) 12%, transparent); }
+.suggest-line del { color: var(--danger); }
+.panel-toggle { display: block; margin: 12px 16px; border: 0; background: none; padding: 0; color: var(--accent); cursor: pointer; font: 13px var(--ui); }

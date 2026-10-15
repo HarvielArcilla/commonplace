@@ -4,13 +4,14 @@
 import * as Y from 'yjs'
 import * as awarenessProtocol from 'y-protocols/awareness'
 import katex from 'katex'
-import { createDocsEditor, activeFormats, setBlock, pageGeometry, readPage, normalizePage, PAGE_SIZES } from '@commonplace/docs/editor'
+import { createDocsEditor, activeFormats, setBlock, pageGeometry, readPage, normalizePage, PAGE_SIZES, isSuggesting, withoutSuggestions, suggestionList } from '@commonplace/docs/editor'
 import { $, el, svg, toast, openMenu, closeMenu, dialog, selectField, cleanError } from './ui.js'
 import { icons } from './icons.js'
 import { state, cp, statusNotes, renderNotes } from './state.js'
 import { shareDialog } from './share.js'
 import { conflictsDialog } from './conflicts.js'
 import { toggleHistory, closePanel } from './history-view.js'
+import { attachReview, recordMySuggestions, toggleComments, newComment } from './comments-view.js'
 
 // Fonts that ship with both macOS and Windows (plus Office's), so a document
 // looks the same on everyone's computer.
@@ -45,6 +46,10 @@ export function initDocView ({ onBack }) {
   $('[data-action="export"]').addEventListener('click', (e) => exportMenu(e.currentTarget))
   $('[data-action="page-setup"]').addEventListener('click', () => pageSetupDialog())
   $('[data-action="history"]').addEventListener('click', () => toggleHistory())
+  $('[data-action="comments"]').addEventListener('click', () => toggleComments())
+  document.addEventListener('keydown', (e) => {
+    if (state.open && (e.metaKey || e.ctrlKey) && e.altKey && e.code === 'KeyM') { e.preventDefault(); newComment() }
+  })
 }
 
 // ---- open / close ---------------------------------------------------------------
@@ -108,8 +113,10 @@ export async function openDocument (docId, { focusTitle = false, initialContent 
     getPageSetup: () => readPage(ydoc),
     getZoom: () => o.zoom || 1,
     getMaxImageWidth: () => (kind === 'paged' ? pageGeometry(readPage(ydoc)).contentWidth : 680),
-    onLayout: ({ pages, geometry }) => { if (state.open !== o) return; o.pages = pages; drawSheets(o.paper, pages, geometry); renderDocMargin() }
+    onLayout: ({ pages, geometry }) => { if (state.open !== o) return; o.pages = pages; drawSheets(o.paper, pages, geometry); renderDocMargin() },
+    onNewSuggestion: (ids) => { if (state.open === o) recordMySuggestions(o, ids) }
   })
+  attachReview(o)
 
   if (kind === 'paged') {
     applyPageGeometry()
@@ -344,14 +351,25 @@ function renderToolbar () {
     paged ? toolButton('pageBreak', 'Page break', icons.pageBreak, (e) => e.chain().focus().setPageBreak().run(), { key: 'Mod-Enter' }) : null
   ].filter(Boolean))
   groups.push([
+    toolButton('comment', 'Comment on the selection', icons.comment, () => newComment(), { key: 'Mod-Alt-M' })
+  ])
+  groups.push([
     toolButton('undo', 'Undo your last change', icons.undo, (e) => e.chain().focus().undo().run(), { key: 'Mod-Z' }),
     toolButton('redo', 'Redo', icons.redo, (e) => e.chain().focus().redo().run(), { key: 'Mod-Shift-Z' })
   ])
 
   const children = []
   groups.forEach((g, i) => { if (i) children.push(sep()); children.push(...g) })
+  children.push(el('span', { class: 'tool-spacer' }),
+    el('select', {
+      class: 'tool-select tool-mode',
+      'data-cmd': 'mode',
+      'aria-label': 'Editing or suggesting',
+      title: 'Suggesting turns your edits into suggestions others can accept or reject',
+      onchange: (e) => { o.editor.chain().focus().setSuggesting(e.target.value === 'suggesting').run(); renderDocMargin() }
+    }, el('option', { value: 'editing' }, 'Editing'), el('option', { value: 'suggesting' }, 'Suggesting')))
   if (paged) {
-    children.push(el('span', { class: 'tool-spacer' }),
+    children.push(
       el('select', {
         class: 'tool-select tool-zoom',
         'data-cmd': 'zoom',
@@ -399,6 +417,8 @@ function syncToolbar () {
   if (size && document.activeElement !== size) showValue(size, String(f.size), f.size === 'mixed' ? 'Mixed' : String(f.size))
   const zoomSel = $('[data-cmd="zoom"]')
   if (zoomSel) syncZoomControl(loadZoom(), o.zoom || 1)
+  const mode = $('[data-cmd="mode"]')
+  if (mode && document.activeElement !== mode) mode.value = isSuggesting(o.editor) ? 'suggesting' : 'editing'
 }
 
 function swatchMenu (anchor, label, colors, apply, clear, clearLabel) {
@@ -602,10 +622,13 @@ function exportMenu (anchor) {
 async function exportAs (format) {
   const o = state.open
   try {
-    const payload = format === 'md' ? { markdown: o.editor.getMarkdown() } : format === 'docx' ? { json: o.editor.getJSON() } : {}
+    // Exports leave out suggestions nobody has accepted yet.
+    const json = withoutSuggestions(o.editor)
+    const payload = format === 'md' ? { markdown: o.editor.storage.markdown.manager.serialize(json) } : format === 'docx' ? { json } : {}
+    const pending = suggestionList(o.editor).length
     if (format === 'pdf') document.body.classList.add('printing')
     const saved = await cp.exportFile(o.docId, format, payload)
-    if (saved) toast(`Saved ${saved}`)
+    if (saved) toast(pending ? `Saved ${saved}, without suggestions that haven\u2019t been accepted` : `Saved ${saved}`)
   } catch (err) {
     toast(`Couldn’t export: ${cleanError(err)}`)
   } finally {
@@ -648,6 +671,7 @@ export function renderDocMargin () {
   const notes = file ? statusNotes(file, { detailed: true }) : []
   if (o.kind === 'paged' && !o.closePreview) notes.unshift({ text: o.pages === 1 ? '1 page' : `${o.pages} pages` })
   if (o.closePreview) notes.unshift({ text: 'Showing an earlier version. Nothing here changes unless you restore it.', cls: 'warn' })
+  else if (o.editor && isSuggesting(o.editor)) notes.unshift({ text: 'Suggesting: your edits show as suggestions for others to accept.', cls: 'live' })
   const conflicts = file?.conflicts || []
   const review = conflicts.length
     ? el('button', { type: 'button', class: 'btn margin-action', onclick: () => conflictsDialog(o.docId) }, file.role === 'owner' ? 'Review conflicts' : 'See conflicts')

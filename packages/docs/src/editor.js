@@ -21,6 +21,9 @@ import { ySyncPluginKey } from '@tiptap/y-tiptap'
 import { Pagination, PageBreak } from './pagination.js'
 import { blockKey } from './index.js'
 import { Indent } from './indent.js'
+import { CommentMark, Suggestions, ReviewDocument } from './review.js'
+
+export { commentAnchors, suggestionList, isSuggesting, withoutSuggestions } from './review.js'
 
 export { pageGeometry, readPage, normalizePage, PAGE_SIZES, DEFAULT_PAGE } from './page.js'
 
@@ -115,15 +118,17 @@ const ConflictHighlight = Extension.create({
 })
 
 // kind: 'markdown' | 'paged'
-export function createDocsEditor ({ kind, element, ydoc, awareness, user, editable = true, onUpdate = () => {}, onEditMath, onOpenLink, getPageSetup, getZoom, getMaxImageWidth, onLayout }) {
+export function createDocsEditor ({ kind, element, ydoc, awareness, user, editable = true, onUpdate = () => {}, onEditMath, onOpenLink, getPageSetup, getZoom, getMaxImageWidth, onLayout, onNewSuggestion }) {
   const paged = kind === 'paged'
   const extensions = [
     // The CRDT keeps its own undo history (per user), so disable the default one.
     StarterKit.configure({
       undoRedo: false,
+      document: false,
       heading: { levels: [1, 2, 3] },
       link: { openOnClick: false, autolink: true, linkOnPaste: true, defaultProtocol: 'https', HTMLAttributes: { rel: 'noopener noreferrer', target: null } }
     }),
+    ReviewDocument,
     Collaboration.configure({ document: ydoc, field: CONTENT_FIELD }),
     CollaborationCaret.configure({
       provider: { awareness },
@@ -151,6 +156,8 @@ export function createDocsEditor ({ kind, element, ydoc, awareness, user, editab
     resizableImage(getMaxImageWidth),
     Indent,
     ConflictHighlight,
+    CommentMark,
+    Suggestions.configure({ onNewSuggestion: onNewSuggestion || (() => {}) }),
     Markdown,
     PageBreak
   ]

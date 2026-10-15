@@ -31,5 +31,7 @@ export const icons = {
   share: i('<path d="M10.5 4.5 8 2 5.5 4.5M8 2v8.5"/><path d="M4.5 7.25H3.25v6.5h9.5v-6.5H11.5"/>'),
   plus: i('<path d="M8 3v10M3 8h10"/>'),
   import: i('<path d="M8 10.25v-8M4.75 5.5 8 2.25 11.25 5.5M2.5 13.75h11"/>'),
+  comment: i('<path d="M2.25 3.25h11.5v7.5H7l-3.25 2.5v-2.5h-1.5z"/>'),
+  suggest: i('<path d="m10.5 2.5 3 3-7.5 7.5H3v-3z"/><path d="M9 4l3 3"/>'),
   invite: i('<path d="M2 4.25h12v8.5H2z"/><path d="m2.25 4.5 5.75 4.5 5.75-4.5"/>')
 }

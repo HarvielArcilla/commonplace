@@ -174,6 +174,8 @@ export class Drive extends EventEmitter {
       exports: app?.exports || [],
       folderId: this.folders.has(entry.folderId) ? entry.folderId : null,
       preview: app && doc ? safePreview(app, doc.ydoc) : '',
+      // Open comments and pending suggestions.
+      review: app?.review && doc ? safeCall(() => app.review(doc.ydoc), { comments: 0, suggestions: 0 }) : { comments: 0, suggestions: 0 },
       syncMode: entry.syncMode === 'open' ? 'open' : 'always',
       conflicts: doc ? openConflicts(doc.ydoc).map((c) => ({ id: c.id, kind: c.kind, unit: c.unit, names: c.versions.map((v) => nameOf(v.userId, v.name)) })) : [],
       sync: {
@@ -645,6 +647,10 @@ export class Drive extends EventEmitter {
 
 function openConflicts (ydoc) {
   return [...ydoc.getMap('conflicts').values()].filter((c) => c?.status === 'open').sort((a, b) => a.at - b.at)
+}
+
+function safeCall (fn, fallback) {
+  try { return fn() } catch { return fallback }
 }
 
 function safePreview (app, ydoc) {

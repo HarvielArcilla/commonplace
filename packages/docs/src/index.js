@@ -9,6 +9,7 @@
 
 import * as Y from 'yjs'
 import { DEFAULT_PAGE } from './page.js'
+import { reviewCounts } from './comments.js'
 
 export const CONTENT_FIELD = 'content'
 
@@ -107,6 +108,7 @@ export const markdownApp = {
   units,
   resolve,
   snapshotBlock,
+  review: reviewCounts,
   // What restoring an old version puts back (the title always comes back).
   history: { roots: [{ name: CONTENT_FIELD, type: 'xml' }] }
 }
@@ -126,6 +128,7 @@ export const pagedApp = {
   units,
   resolve,
   snapshotBlock,
+  review: reviewCounts,
   history: { roots: [{ name: CONTENT_FIELD, type: 'xml' }, { name: 'page', type: 'map' }] }
 }
 

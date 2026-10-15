@@ -7,12 +7,15 @@
     "./editor": "./src/editor.js",
     "./page": "./src/page.js",
     "./convert": "./src/convert/index.js",
-    "./pagination": "./src/pagination.js"
+    "./pagination": "./src/pagination.js",
+    "./comments": "./src/comments.js"
   },
   "dependencies": {
+    "@handlewithcare/prosemirror-suggest-changes": "^0.1.8",
     "@tiptap/core": "^3.32.0",
     "@tiptap/extension-collaboration": "^3.32.0",
     "@tiptap/extension-collaboration-caret": "^3.32.0",
+    "@tiptap/extension-document": "^3.32.0",
     "@tiptap/extension-highlight": "^3.32.0",
     "@tiptap/extension-image": "^3.32.0",
     "@tiptap/extension-mathematics": "^3.32.0",
