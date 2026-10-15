@@ -227,6 +227,8 @@ export class Drive extends EventEmitter {
       exports: app?.exports || [],
       folderId: this.folders.has(entry.folderId) ? entry.folderId : null,
       preview: app && doc ? safePreview(app, doc.ydoc) : '',
+      // A small picture of the start of the file, for the icon view.
+      thumb: app?.thumbnail && doc ? safeCall(() => app.thumbnail(doc.ydoc), null) : null,
       // Open comments and pending suggestions.
       review: app?.review && doc ? safeCall(() => app.review(doc.ydoc), { comments: 0, suggestions: 0 }) : { comments: 0, suggestions: 0 },
       syncMode: entry.syncMode === 'open' ? 'open' : 'always',
@@ -653,7 +655,7 @@ export class Drive extends EventEmitter {
       name: who.name,
       exists: Boolean(u),
       text: u ? u.text : '',
-      snapshot: u?.el && app.snapshotBlock ? app.snapshotBlock(u.el) : null
+      snapshot: !u ? null : app.snapshotUnit ? app.snapshotUnit(u) : (u.el && app.snapshotBlock ? app.snapshotBlock(u.el) : null)
     })
     doc.ydoc.transact(() => {
       for (const c of found) {

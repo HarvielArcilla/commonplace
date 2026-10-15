@@ -1,7 +1,7 @@
 // CommonDrive: list and icon views, personal folders, filters and sorting.
 
 import { $, el, svg, ago, listNames, plural, toast, openMenu, dialog, promptText, confirmAction, cleanError } from './ui.js'
-import { icons } from './icons.js'
+import { icons, kindIcon } from './icons.js'
 import { state, cp, statusNotes, renderNotes, savePrefs } from './state.js'
 import { shareDialog, setSyncMode, moveInDialog } from './share.js'
 import { conflictsDialog } from './conflicts.js'
@@ -195,7 +195,7 @@ function renderList (list, files, folders, searching) {
     },
     el('div', { class: 'row-margin' }, renderNotes(statusNotes(f))),
     el('div', { class: 'row-main' },
-      el('p', { class: 'row-title' }, svg(f.kind === 'paged' ? icons.paged : icons.markdown), el('span', {}, f.title || 'Untitled')),
+      el('p', { class: 'row-title' }, svg(kindIcon(f.kind)), el('span', {}, f.title || 'Untitled')),
       el('p', { class: 'row-preview' }, where || f.preview || (f.appName ? `Empty ${f.appName.toLowerCase()}` : ''))),
     el('div', { class: 'row-owner' }, ownerName),
     el('div', { class: 'row-time', title: f.lastChangedBy ? `Changed by ${f.lastChangedBy}` : null },
@@ -255,7 +255,7 @@ function renderGrid (list, files, folders, searching) {
     },
     thumbnail(f),
     el('div', { class: 'tile-meta' },
-      el('p', { class: 'tile-title' }, svg(f.kind === 'paged' ? icons.paged : icons.markdown), el('span', {}, f.title || 'Untitled')),
+      el('p', { class: 'tile-title' }, svg(kindIcon(f.kind)), el('span', {}, f.title || 'Untitled')),
       el('button', { type: 'button', class: 'btn btn-quiet btn-icon tile-menu', 'aria-label': `Options for ${f.title}`, onclick: (e) => fileMenu(e.currentTarget, f) }, svg(icons.more))),
     first ? el('span', { class: `note tile-note ${first.cls || ''}` }, first.text, first.dot ? el('span', { class: 'dot', 'aria-hidden': 'true' }) : null) : null,
     searching && f.folderId ? el('span', { class: 'tile-where' }, `In ${folderById(f.folderId)?.name}`) : null)
@@ -271,6 +271,22 @@ function thumbnail (f) {
   if (f.kind === 'paged') {
     return el('div', { class: 'thumb thumb-paged', 'aria-hidden': 'true' },
       el('div', { class: 'thumb-sheet' }, el('p', {}, text.slice(0, 380) || ' ')))
+  }
+  if (f.kind === 'sheet') {
+    const grid = f.thumb?.grid || []
+    return el('div', { class: 'thumb thumb-grid', 'aria-hidden': 'true' },
+      el('table', {}, el('tbody', {}, ...Array.from({ length: 6 }, (_, r) => el('tr', {}, ...Array.from({ length: 4 }, (_, c) => el('td', {}, grid[r]?.[c] || '')))))))
+  }
+  if (f.kind === 'slides') {
+    const t = f.thumb
+    const k = 168 / 960
+    return el('div', { class: 'thumb thumb-slides', 'aria-hidden': 'true' },
+      el('div', { class: 'thumb-slide', style: `background:${t?.bg || '#fff'}` },
+        ...(t?.boxes || []).map((b) => el('div', {
+          class: `thumb-box thumb-box-${b.type}`,
+          style: `left:${b.x * k}px;top:${b.y * k}px;width:${b.w * k}px;height:${b.h * k}px;font-size:${Math.max(4, b.size * k)}px;text-align:${b.align};${b.fill ? `background:${b.fill};` : ''}`
+        }, b.text))),
+      t?.count > 1 ? el('span', { class: 'thumb-count-badge' }, `${t.count} slides`) : null)
   }
   return el('div', { class: 'thumb thumb-markdown', 'aria-hidden': 'true' }, el('p', {}, text.slice(0, 300) || ' '))
 }
@@ -324,16 +340,17 @@ export function goTo (folderId) {
 
 function openNewMenu (anchor) {
   openMenu(anchor, [
-    ...state.apps.map((a) => ({ label: a.name, hint: a.description, icon: a.kind === 'paged' ? icons.paged : icons.markdown, onSelect: () => newDocument(a.type) })),
+    ...state.apps.map((a) => ({ label: a.name, hint: a.description, icon: kindIcon(a.kind), onSelect: () => newDocument(a.type) })),
     { sep: true },
     { label: 'Folder', icon: icons.folder, onSelect: newFolder },
-    { label: 'Import a file…', hint: '.md opens as markdown, .docx as a paged document', icon: icons.import, onSelect: importFile }
+    { label: 'Import a file…', hint: '.md, .docx, .xlsx or .csv', icon: icons.import, onSelect: importFile }
   ], { align: 'end', label: 'Create' })
 }
 
 async function newDocument (type) {
   const app = state.apps.find((a) => a.type === type)
-  const docId = await cp.createFile(type, app?.kind === 'paged' ? 'Untitled document' : 'Untitled notes', state.folderId)
+  const title = { paged: 'Untitled document', sheet: 'Untitled spreadsheet', slides: 'Untitled presentation' }[app?.kind] || 'Untitled notes'
+  const docId = await cp.createFile(type, title, state.folderId)
   await handlers.openDocument(docId, { focusTitle: true })
 }
 

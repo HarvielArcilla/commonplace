@@ -137,7 +137,7 @@ export function suggestionList (editor) {
       if (m.type !== insertion && m.type !== deletion && m.type !== modification) continue
       const s = out.get(m.attrs.id) || { id: m.attrs.id, kinds: new Set(), inserted: '', deleted: '', from: pos }
       s.kinds.add(m.type.name)
-      const text = node.isText ? node.text.replace(/​/g, '') : (node.isBlock ? '\n' : '')
+      const text = node.isText ? node.text.replace(/\u200B/g, '') : (node.isBlock ? '\n' : '')
       if (m.type === insertion) s.inserted += text
       if (m.type === deletion) s.deleted += text
       out.set(m.attrs.id, s)

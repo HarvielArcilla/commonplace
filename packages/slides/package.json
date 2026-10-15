@@ -1,0 +1,22 @@
+{
+  "name": "@commonplace/slides",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.js",
+    "./model": "./src/model.js",
+    "./convert": "./src/convert.js",
+    "./editor": "./src/editor.js"
+  },
+  "dependencies": {
+    "@tiptap/core": "^3.32.0",
+    "@tiptap/extension-collaboration": "^3.32.0",
+    "@tiptap/extension-text-style": "^3.32.0",
+    "@tiptap/extensions": "^3.32.0",
+    "@tiptap/pm": "^3.32.0",
+    "@tiptap/starter-kit": "^3.32.0",
+    "pptxgenjs": "^4.0.1",
+    "yjs": "^13.6.33"
+  },
+  "license": "MIT"
+}

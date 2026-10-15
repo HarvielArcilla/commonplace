@@ -31,7 +31,15 @@ export const icons = {
   share: i('<path d="M10.5 4.5 8 2 5.5 4.5M8 2v8.5"/><path d="M4.5 7.25H3.25v6.5h9.5v-6.5H11.5"/>'),
   plus: i('<path d="M8 3v10M3 8h10"/>'),
   import: i('<path d="M8 10.25v-8M4.75 5.5 8 2.25 11.25 5.5M2.5 13.75h11"/>'),
+  shape: i('<rect x="1.75" y="5.25" width="7.5" height="7.5" rx=".75"/><circle cx="10.75" cy="5.25" r="3.5"/>'),
+  front: i('<rect x="5.25" y="5.25" width="8" height="8" rx=".75" fill="currentColor" fill-opacity=".18"/><path d="M2.75 10.25V3.75a1 1 0 0 1 1-1h6.5"/>'),
+  back: i('<rect x="2.75" y="2.75" width="8" height="8" rx=".75"/><path d="M13.25 5.75v6.5a1 1 0 0 1-1 1h-6.5"/>'),
+  sheet: i('<rect x="1.75" y="2.25" width="12.5" height="11.5" rx="1"/><path d="M1.75 5.75h12.5M1.75 9.25h12.5M5.75 2.25v11.5M10 2.25v11.5"/>'),
+  slides: i('<rect x="1.75" y="2.75" width="12.5" height="8.5" rx="1"/><path d="M8 11.25v2M5.5 13.75h5"/><path d="M4.5 5.75h5M4.5 8h3"/>'),
   comment: i('<path d="M2.25 3.25h11.5v7.5H7l-3.25 2.5v-2.5h-1.5z"/>'),
   suggest: i('<path d="m10.5 2.5 3 3-7.5 7.5H3v-3z"/><path d="M9 4l3 3"/>'),
   invite: i('<path d="M2 4.25h12v8.5H2z"/><path d="m2.25 4.5 5.75 4.5 5.75-4.5"/>')
 }
+
+// The icon for a kind of file.
+export const kindIcon = (kind) => ({ paged: icons.paged, sheet: icons.sheet, slides: icons.slides }[kind] || icons.markdown)

@@ -11,6 +11,10 @@ import * as awarenessProtocol from 'y-protocols/awareness'
 import DHT from 'hyperdht'
 import { Drive, sendDrive, receiveDrive, newMoveCode } from '@commonplace/drive'
 import { docsApps } from '@commonplace/docs'
+import { sheetsApp } from '@commonplace/sheets'
+import { exportXlsx, importXlsx, exportCsv, importCsv } from '@commonplace/sheets/convert'
+import { slidesApp } from '@commonplace/slides'
+import { exportPptx } from '@commonplace/slides/convert'
 import { readPage, PAGE_SIZES, DEFAULT_PAGE } from '@commonplace/docs/page'
 import { exportDocx, importDocx } from '@commonplace/docs/convert'
 
@@ -129,13 +133,20 @@ function registerIpc () {
   ipcMain.handle('file:import', async (_e, folderId) => {
     const { canceled, filePaths } = await dialog.showOpenDialog(win, {
       properties: ['openFile'],
-      filters: [{ name: 'Documents', extensions: ['docx', 'md', 'markdown', 'txt'] }]
+      filters: [{ name: 'Documents and spreadsheets', extensions: ['docx', 'md', 'markdown', 'txt', 'xlsx', 'csv', 'tsv'] }]
     })
     if (canceled || !filePaths[0]) return null
     const file = filePaths[0]
     const ext = path.extname(file).toLowerCase()
     const title = path.basename(file, path.extname(file))
     const bytes = await fs.readFile(file)
+    if (ext === '.xlsx' || ext === '.csv' || ext === '.tsv') {
+      // Spreadsheets are filled in here; the window just opens them.
+      const docId = await drive.create('sheet', title, { folderId })
+      const ydoc = drive.getDoc(docId).ydoc
+      const { warnings } = ext === '.xlsx' ? await importXlsx(ydoc, bytes) : importCsv(ydoc, bytes.toString('utf8'), { name: title.slice(0, 80) })
+      return { docId, content: null, warnings }
+    }
     if (ext === '.docx') {
       const { html, page, warnings } = await importDocx(bytes)
       const docId = await drive.create('paged', title, { folderId })
@@ -154,6 +165,14 @@ function registerIpc () {
     if (format === 'docx') {
       const setup = file.kind === 'paged' ? readPage(doc.ydoc) : { ...DEFAULT_PAGE, pageNumbers: false }
       return saveAs(file.title, 'docx', await exportDocx(payload.json, setup, { title: file.title }), 'Word document')
+    }
+    if (format === 'xlsx') return saveAs(file.title, 'xlsx', await exportXlsx(doc.ydoc), 'Excel workbook')
+    if (format === 'csv') return saveAs(file.title, 'csv', '\uFEFF' + exportCsv(doc.ydoc, payload.sheetId), 'CSV')
+    if (format === 'pptx') return saveAs(file.title, 'pptx', await exportPptx(doc.ydoc, { title: file.title }), 'PowerPoint presentation')
+    if (format === 'pdf' && file.kind === 'slides') {
+      // The window has laid out one page per slide (13.33 x 7.5 in).
+      const pdf = await win.webContents.printToPDF({ pageSize: { width: 13.333, height: 7.5 }, margins: { top: 0, right: 0, bottom: 0, left: 0 }, printBackground: true })
+      return saveAs(file.title, 'pdf', pdf, 'PDF')
     }
     if (format === 'pdf') {
       const setup = readPage(doc.ydoc)
@@ -288,7 +307,7 @@ function swarmOptions () {
 async function startDrive () {
   // COMMONPLACE_CHECKPOINT_SECONDS shortens the pause before a version is saved (for testing).
   const pause = Number(process.env.COMMONPLACE_CHECKPOINT_SECONDS) * 1000
-  drive = new Drive({ dataDir: app.getPath('userData'), apps: docsApps, swarm: swarmOptions(), history: pause ? { idleMs: pause } : {} })
+  drive = new Drive({ dataDir: app.getPath('userData'), apps: [...docsApps, sheetsApp, slidesApp], swarm: swarmOptions(), history: pause ? { idleMs: pause } : {} })
   drive.on('error', (err) => console.error('[commonplace]', err))
   // Another of my computers unlinked this one: sign out and delete it all here.
   drive.on('unlinked', () => {

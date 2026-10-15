@@ -2,7 +2,7 @@
   "name": "@commonplace/desktop",
   "productName": "Commonplace",
   "version": "0.1.0",
-  "description": "CommonDrive and CommonDocs — peer-to-peer, no servers.",
+  "description": "CommonDrive and CommonDocs \u2014 peer-to-peer, no servers.",
   "author": "Harviel Arcilla",
   "license": "MIT",
   "type": "module",
@@ -18,9 +18,11 @@
     "@commonplace/core": "0.1.0",
     "@commonplace/docs": "0.1.0",
     "@commonplace/drive": "0.1.0",
-    "yjs": "^13.6.33",
+    "@commonplace/sheets": "0.1.0",
+    "@commonplace/slides": "0.1.0",
+    "hyperdht": "^6.34.1",
     "y-protocols": "^1.0.7",
-    "hyperdht": "^6.34.1"
+    "yjs": "^13.6.33"
   },
   "devDependencies": {
     "electron": "44.7.2",
