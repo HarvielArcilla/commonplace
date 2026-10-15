@@ -244,7 +244,9 @@ export class Membership {
 
   // options: { expiresAt (ms), once, ask }. The owner's name rides along so
   // the person joining knows whose file it is before anything arrives.
-  createInvite (identity, role, { expiresAt = null, once = false, ask = false } = {}) {
+  // helpers: always-on helpers the file uses, so a joiner can fetch it from
+  // one even when nobody who has it is online.
+  createInvite (identity, role, { expiresAt = null, once = false, ask = false, helpers = [] } = {}) {
     if (identity.userId !== this.state.owner) throw new Error('Only the owner can invite people.')
     const body = {
       d: this.docId,
@@ -255,7 +257,8 @@ export class Membership {
       n: identity.name,
       x: expiresAt ? Math.floor(expiresAt) : undefined,
       once: once || undefined,
-      ask: ask || undefined
+      ask: ask || undefined,
+      h: helpers.length ? helpers.slice(0, 4) : undefined
     }
     return { ...body, sig: signWith(identity, body) }
   }

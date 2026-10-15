@@ -12,7 +12,7 @@ import path from 'node:path'
 import { randomBytes } from 'node:crypto'
 import * as Y from 'yjs'
 import {
-  FileStore, SyncEngine, SwarmTransport, LanTransport, loadOrCreateIdentity, canEdit,
+  FileStore, SyncEngine, SwarmTransport, LanTransport, HelperClient, formatHelperAddress, parseHelperAddress, loadOrCreateIdentity, canEdit,
   newDocSecret, deriveDocKeys, encodeInvite, parseInvite, initContainer, readMeta, updatePerson,
   findConflicts, conflictId, docFrom, History, restoreContent
 } from '@commonplace/core'
@@ -51,9 +51,19 @@ export class Drive extends EventEmitter {
         isLonely: (topicHex) => {
           const status = this.engine.status(this._topicToDoc.get(topicHex))
           return !status || (status.peers.length === 0 && status.devices.length === 0)
+        },
+        // Connections to always-on helpers go to the helper client.
+        route: (socket, remote) => {
+          if (!this.helpers?.isHelper(remote)) return false
+          this.helpers.addConnection(socket, remote)
+          return true
         }
       })
       : null
+    this.helpers = this.transport
+      ? new HelperClient(this.engine, { connect: (key) => this.transport.joinPeer(key), disconnect: (key) => this.transport.leavePeer(key) })
+      : null
+    this.helpers?.on('status', () => this._changed())
     this.lan = lan
       ? new LanTransport(this.engine, {
         ...(typeof lan === 'object' ? lan : {}),
@@ -74,6 +84,10 @@ export class Drive extends EventEmitter {
     this.folders = this.index.getMap('folders')
     // My computers: deviceId -> { name, platform, linkedAt, lastSeenAt, unlinked }
     this.devicesMap = this.index.getMap('devices')
+    // My always-on helpers: key -> { addedAt }. They keep my Drive index (so
+    // my computers sync through them) and new files I make.
+    this.myHelpersMap = this.index.getMap('helpers')
+    this.myHelpersMap.observe(() => { this._applyHelpers(this.indexId); this._changed() })
     this._attached = new Set()
     // Files added or removed on my other computers.
     this.files.observe((event, tr) => {
@@ -102,6 +116,7 @@ export class Drive extends EventEmitter {
 
   async start () {
     this._joinTopics(this.indexId)
+    this._applyHelpers(this.indexId)
     if (this.lan) await this.lan.start().catch((err) => { this.lan = null; this.emit('error', err) })
     for (const entry of this.files.values()) this._attach(entry)
     this._seen()
@@ -228,6 +243,8 @@ export class Drive extends EventEmitter {
         lastSyncedDevice: status.lastSyncedDevice || null,
         // My own other computers connected for this file.
         devices: status.devices || [],
+        // Always-on helpers keeping a copy: [{ key, online, lastSyncedAt }].
+        helpers: (this.helpers?.status(docId) || []).map((h) => ({ ...h, address: formatHelperAddress(h.key) })),
         pending: status.pending
       }
     }
@@ -243,6 +260,7 @@ export class Drive extends EventEmitter {
     const doc = this.engine.openDoc(secret)
     initContainer(doc.ydoc, { type, title, owner: this.identity, schemaVersion: app.schemaVersion })
     app.initContent?.(doc.ydoc)
+    doc.ydoc.transact(() => { for (const key of this.myHelpersMap.keys()) doc.ydoc.getMap('helpers').set(key, { addedBy: this.identity.userId, at: Date.now() }) }, 'local')
     this.engine.ensureMembership(docId)
     this.files.set(docId, {
       docId,
@@ -279,6 +297,7 @@ export class Drive extends EventEmitter {
       docId,
       secret: parsed.secret.toString('base64'),
       invite: parsed.token,
+      inviteHelpers: Array.isArray(parsed.token.h) ? parsed.token.h.filter((k) => /^[0-9a-f]{64}$/.test(k)).slice(0, 4) : [],
       type: null,
       title: 'Waiting for a peer…',
       owner: { userId: parsed.token.by, name: typeof parsed.token.n === 'string' ? parsed.token.n.slice(0, 40) : null },
@@ -301,7 +320,45 @@ export class Drive extends EventEmitter {
     if (!doc.members.exists && readMeta(doc.ydoc)?.owner?.userId === this.identity.userId) this.engine.ensureMembership(docId)
     if (doc.members.owner !== this.identity.userId) throw new Error('Only the owner can invite people to this file.')
     const expiresAt = expiresIn ? Date.now() + expiresIn : null
-    return encodeInvite(Buffer.from(entry.secret, 'base64'), this.engine.createInvite(docId, role, { expiresAt, once, ask }))
+    const helpers = [...doc.ydoc.getMap('helpers').keys()]
+    return encodeInvite(Buffer.from(entry.secret, 'base64'), this.engine.createInvite(docId, role, { expiresAt, once, ask, helpers }))
+  }
+
+  // ---- always-on helpers ------------------------------------------------------
+
+  myHelpers () {
+    return [...this.myHelpersMap.keys()].map((key) => ({ key, address: formatHelperAddress(key), ...(this.helpers?.status(this.indexId).find((h) => h.key === key) || {}) }))
+  }
+
+  // Adds a helper for my computers' Drive and for new files. `everywhere`
+  // also adds it to every file I own now.
+  addMyHelper (address, { everywhere = false } = {}) {
+    const key = parseHelperAddress(address)
+    if (!key) throw new Error('That isn\u2019t a helper address. It starts with cph1.')
+    this.myHelpersMap.set(key, { addedAt: Date.now() })
+    if (everywhere) for (const f of this.list()) if (f.role === 'owner') this.addHelper(f.docId, address)
+    return key
+  }
+
+  removeMyHelper (key) {
+    this.myHelpersMap.delete(key)
+  }
+
+  // Helpers for one file are part of the file, so everyone working on it
+  // uses them.
+  addHelper (docId, address) {
+    const key = parseHelperAddress(address)
+    if (!key) throw new Error('That isn\u2019t a helper address. It starts with cph1.')
+    const doc = this.engine.getDoc(docId)
+    if (!doc || !canEdit(this.engine.access(docId)?.role)) throw new Error('Only people who can edit can add a helper.')
+    doc.ydoc.transact(() => doc.ydoc.getMap('helpers').set(key, { addedBy: this.identity.userId, at: Date.now() }), 'local')
+    return key
+  }
+
+  removeHelper (docId, key) {
+    const doc = this.engine.getDoc(docId)
+    if (!doc || !canEdit(this.engine.access(docId)?.role)) throw new Error('Only people who can edit can remove a helper.')
+    doc.ydoc.transact(() => doc.ydoc.getMap('helpers').delete(key), 'local')
   }
 
   approveRequest (docId, userId, role) { this.engine.approveRequest(docId, userId, role) }
@@ -558,6 +615,7 @@ export class Drive extends EventEmitter {
 
   // A file was removed on another of my computers: remove it here too.
   async _forget (docId) {
+    this.helpers?.setHelpers(docId, [])
     clearTimeout(this._checkpoints.get(docId)?.timer)
     this._checkpoints.delete(docId)
     this._attached.delete(docId)
@@ -684,8 +742,21 @@ export class Drive extends EventEmitter {
     doc.meta.observe(refresh)
     doc.ydoc.getMap('authors').observe(refresh)
     doc.ydoc.getMap('people').observe(refresh)
+    doc.ydoc.getMap('helpers').observe(() => this._applyHelpers(entry.docId))
     refresh()
     this._syncTopics(entry.docId)
+    this._applyHelpers(entry.docId)
+  }
+
+  // Tells the helper client which helpers a file (or my index) uses.
+  _applyHelpers (docId) {
+    if (!this.helpers) return
+    if (docId === this.indexId) { this.helpers.setHelpers(docId, [...this.myHelpersMap.keys()]); return }
+    const entry = this.files.get(docId)
+    const doc = this.engine.getDoc(docId)
+    if (!entry || !doc) return
+    const keys = new Set([...doc.ydoc.getMap('helpers').keys(), ...(entry.inviteHelpers || [])])
+    this.helpers.setHelpers(docId, this._shouldSync(entry) ? [...keys] : [])
   }
 
   _shouldSync (entry) {
@@ -697,6 +768,7 @@ export class Drive extends EventEmitter {
     if (!entry) return
     const active = this._shouldSync(entry)
     this.engine.setActive(docId, active)
+    this._applyHelpers(docId)
     if (active) this._syncTopics(docId)
     else this._leaveTopics(docId)
     this._changed()

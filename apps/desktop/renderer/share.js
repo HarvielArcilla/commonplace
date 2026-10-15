@@ -1,7 +1,7 @@
 // Sharing (who has access, with which role) and moving your Drive to
 // another computer.
 
-import { $, el, toast, dialog, confirmAction, cleanError, listNames } from './ui.js'
+import { $, el, ago, toast, dialog, confirmAction, cleanError, listNames } from './ui.js'
 import { state, cp } from './state.js'
 
 const ROLE_LABEL = { owner: 'Owner', editor: 'Can edit', viewer: 'Can view' }
@@ -34,7 +34,7 @@ export function shareDialog (docId) {
   }
   render()
   document.body.append(d)
-  const off = cp.onDriveChanged(() => setTimeout(() => { if (d.open && !live.querySelector('select:focus')) render() }, 0))
+  const off = cp.onDriveChanged(() => setTimeout(() => { if (d.open && !live.querySelector('select:focus, input:focus')) render() }, 0))
   d.addEventListener('close', () => { off(); d.remove() })
   d.showModal()
 }
@@ -64,12 +64,40 @@ function shareLists (docId, f) {
       controls))
   }
   out.push(el('h3', {}, 'People with access'), list)
+  out.push(...helperSection(docId, f))
   if (isOwner && f.access.managed) {
     out.push(el('div', { class: 'share-footer' },
       el('button', { type: 'button', class: 'btn btn-quiet', onclick: () => resetLinks(docId) }, 'Stop all invite links…'),
       el('span', { class: 'fineprint-plain' }, 'Removing someone stops sending them changes. Anything they already have stays on their computer.')))
   }
   return out
+}
+
+// ---- always-on helpers ---------------------------------------------------------
+
+export function helperStatus (h) {
+  return h.online ? 'Connected' : h.lastSyncedAt ? `Last reached ${ago(h.lastSyncedAt)}` : 'Not reached yet'
+}
+
+function helperSection (docId, f) {
+  const writable = f.role === 'owner' || f.role === 'editor'
+  const helpers = f.sync.helpers || []
+  if (!writable && !helpers.length) return []
+  const list = el('ul', { class: 'people', 'aria-label': 'Always-on helpers' }, ...helpers.map((h) => el('li', { class: 'person' },
+    el('span', { class: `presence-dot${h.online ? ' on' : ''}`, 'aria-hidden': 'true' }),
+    el('span', { class: 'person-name' }, el('code', { class: 'helper-key', title: h.address }, `${h.address.slice(0, 18)}…`), el('span', { class: 'person-note' }, helperStatus(h))),
+    writable ? el('button', { type: 'button', class: 'btn btn-quiet btn-danger', onclick: () => act(() => cp.removeHelper(docId, h.key)) }, 'Remove') : null)))
+  const input = el('input', { class: 'helper-input', placeholder: 'Paste a helper address (cph1.…)', 'aria-label': 'Helper address', spellcheck: 'false' })
+  const add = async () => {
+    try { await cp.addHelper(docId, input.value); input.value = ''; toast('Helper added. It keeps an encrypted copy from now on.') } catch (err) { toast(cleanError(err)) }
+  }
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); add() } })
+  return [
+    el('h3', {}, 'Always-on helper'),
+    el('p', { class: 'fineprint-plain' }, 'A computer that stays on and keeps an encrypted copy it can\u2019t read, so this file syncs even when nobody else who has it is online. Anyone can run one; see the README.'),
+    helpers.length ? list : null,
+    writable ? el('div', { class: 'invite-row' }, input, el('button', { type: 'button', class: 'btn', onclick: add }, 'Add helper')) : null
+  ].filter(Boolean)
 }
 
 // ---- invite links ------------------------------------------------------------

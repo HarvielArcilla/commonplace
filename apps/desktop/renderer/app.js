@@ -5,7 +5,7 @@ import { $, el, ago, toast, confirmAction, cleanError } from './ui.js'
 import { state, cp } from './state.js'
 import { initDrive, renderDrive } from './drive-view.js'
 import { initDocView, openDocument, renderDocMargin } from './doc-view.js'
-import { moveOutDialog } from './share.js'
+import { moveOutDialog, helperStatus } from './share.js'
 
 const COLORS = ['#b4532a', '#2f6f5e', '#4a5aa8', '#8a4f8c', '#a2741b', '#2d6f8f', '#9b3d4f', '#55703a']
 
@@ -66,7 +66,8 @@ function openProfileDialog () {
   }
   $('#profile-id').textContent = `Your ID: ${state.me.userId}`
   $('#profile-computers').hidden = !state.me.hasChosenName // not during first-run setup
-  if (state.me.hasChosenName) renderComputers()
+  $('#profile-helpers').hidden = !state.me.hasChosenName
+  if (state.me.hasChosenName) { renderComputers(); renderMyHelpers() }
   d.showModal()
 }
 
@@ -78,6 +79,24 @@ async function renderComputers () {
       el('span', { class: 'person-note' }, dv.thisComputer ? 'This computer' : dv.online ? 'Online now' : `Last seen ${ago(dv.lastSeenAt)}`)),
     dv.thisComputer ? null : el('button', { type: 'button', class: 'btn btn-quiet btn-danger', onclick: () => unlink(dv) }, 'Unlink'))))
 }
+
+async function renderMyHelpers () {
+  const helpers = await cp.myHelpers()
+  $('#profile-helper-list').hidden = !helpers.length
+  $('#profile-helper-list').replaceChildren(...helpers.map((h) => el('li', { class: 'person' },
+    el('span', { class: `presence-dot${h.online ? ' on' : ''}`, 'aria-hidden': 'true' }),
+    el('span', { class: 'person-name' }, el('code', { class: 'helper-key', title: h.address }, `${h.address.slice(0, 18)}…`), el('span', { class: 'person-note' }, helperStatus(h))),
+    el('button', { type: 'button', class: 'btn btn-quiet btn-danger', onclick: async () => { await cp.removeMyHelper(h.key); renderMyHelpers() } }, 'Remove'))))
+}
+
+$('#profile-helper-add').addEventListener('click', async () => {
+  try {
+    await cp.addMyHelper($('#profile-helper-input').value, { everywhere: $('#profile-helper-all').checked })
+    $('#profile-helper-input').value = ''
+    toast('Helper added')
+    renderMyHelpers()
+  } catch (err) { toast(cleanError(err)) }
+})
 
 async function unlink (dv) {
   const ok = await confirmAction({
@@ -117,7 +136,7 @@ cp.onDriveChanged((files, me, folders) => {
   state.files = files
   state.me = me
   if (folders) state.folders = folders
-  if ($('#profile-dialog').open && !$('#profile-computers').hidden) renderComputers()
+  if ($('#profile-dialog').open && !$('#profile-computers').hidden) { renderComputers(); renderMyHelpers() }
   if (state.open) renderDocMargin()
   else renderDrive()
 })

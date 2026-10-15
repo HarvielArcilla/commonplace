@@ -11,7 +11,9 @@ export class SwarmTransport {
   // opts.isLonely(topicHex) -> true if that doc currently has no peers.
   // Lonely topics are re-looked-up periodically: two peers that join at
   // nearly the same moment can miss each other's announcements otherwise.
-  constructor (engine, { isLonely = () => true, refreshMs = 15000, ...swarmOpts } = {}) {
+  // route(socket, remoteKeyHex): return true to take a connection for
+  // something other than the sync engine (an always-on helper).
+  constructor (engine, { isLonely = () => true, refreshMs = 15000, route = () => false, ...swarmOpts } = {}) {
     this.engine = engine
     this.swarm = new Hyperswarm(swarmOpts)
     this.topics = new Map()
@@ -20,9 +22,15 @@ export class SwarmTransport {
     this._timer.unref?.()
     this.swarm.on('connection', (socket) => {
       socket.on('error', () => {})
-      engine.addConnection(socket, { remoteId: socket.remotePublicKey?.toString('hex'), localId: socket.publicKey?.toString('hex') })
+      const remote = socket.remotePublicKey?.toString('hex')
+      if (route(socket, remote)) return
+      engine.addConnection(socket, { remoteId: remote, localId: socket.publicKey?.toString('hex') })
     })
   }
+
+  // Keeps a direct connection to one peer by its key (a helper).
+  joinPeer (key) { this.swarm.joinPeer(key) }
+  leavePeer (key) { this.swarm.leavePeer(key) }
 
   async join (topic) {
     const key = topic.toString('hex')

@@ -320,6 +320,16 @@ export class SyncEngine extends EventEmitter {
     this._ownerAction(docId, (doc) => [doc.members.rotate(this.identity, crypto.randomBytes(32))])
   }
 
+  // Adopts a copy of a file's membership log from anywhere (a peer, a
+  // helper). The log checks its own signatures.
+  mergeMembers (docId, entries) {
+    const doc = this.docs.get(docId)
+    if (!doc || !doc.members.merge(entries)) return false
+    this._membersChanged(doc)
+    this._redoDropped(doc, doc.members.dropped)
+    return true
+  }
+
   // Two of my computers changed who has access at the same moment and the
   // other one's change won: make mine again on top of it, if it still applies.
   _redoDropped (doc, dropped = []) {
@@ -490,10 +500,7 @@ export class SyncEngine extends EventEmitter {
     if (type === MSG.MEMBERS) {
       let entries
       try { entries = JSON.parse(plain.toString('utf8')) } catch { return }
-      if (doc.members.merge(entries)) {
-        this._membersChanged(doc)
-        this._redoDropped(doc, doc.members.dropped)
-      }
+      this.mergeMembers(docId, entries)
       return
     }
 

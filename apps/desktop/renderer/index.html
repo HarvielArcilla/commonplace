@@ -99,6 +99,16 @@
           <button type="button" class="btn btn-quiet" id="move-out">Move to another computer…</button>
         </div>
       </section>
+      <section id="profile-helpers" class="computers" hidden>
+        <h3>Always-on helper</h3>
+        <p class="fineprint-plain">A computer you leave on keeps encrypted copies it can’t read, so your files and your computers sync even when nothing else is online. New files you make use it.</p>
+        <ul class="people" id="profile-helper-list" aria-label="Your helpers"></ul>
+        <div class="invite-row">
+          <input id="profile-helper-input" class="helper-input" placeholder="Paste a helper address (cph1.…)" aria-label="Helper address" spellcheck="false">
+          <button type="button" class="btn" id="profile-helper-add">Add helper</button>
+        </div>
+        <label class="check"><input type="checkbox" id="profile-helper-all"> Also use it for every file I own now</label>
+      </section>
       <p class="fineprint" id="profile-id"></p>
       <p class="error" id="profile-error" role="alert"></p>
       <div class="dialog-actions">

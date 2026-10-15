@@ -80,6 +80,8 @@ export function statusNotes (file, { detailed = false } = {}) {
     notes.push({ text: `Syncing with ${listNames(syncing)}`, cls: here.length ? '' : 'live' })
   } else if (devices.length && !here.length) {
     notes.push({ text: `Syncing with your computer ${devices.map((d) => `“${d.name}”`).join(' and ')}`, cls: 'live' })
+  } else if (!here.length && (file.sync.helpers || []).some((h) => h.online)) {
+    notes.push({ text: 'Syncing through an always-on helper', cls: 'live' })
   } else if (!here.length) {
     if (file.syncMode === 'open' && !file.sync.active) notes.push({ text: 'Syncs only while open' })
     else if (file.sync.lastSyncedAt) {
@@ -97,7 +99,11 @@ export function statusNotes (file, { detailed = false } = {}) {
     notes.push({ text: 'Some of your edits are only on this computer', cls: 'warn' })
   }
   if (detailed && !here.length && !syncing.length && file.role !== 'viewer') {
-    notes.push({ text: 'You can keep writing. Edits are saved here and reach the others when anyone with this file is online at the same time as you.' })
+    notes.push({
+      text: (file.sync.helpers || []).length
+        ? 'You can keep writing. Edits are saved here and reach the others through the helper, even when nobody else is online.'
+        : 'You can keep writing. Edits are saved here and reach the others when anyone with this file is online at the same time as you.'
+    })
     if (file.sync.lastSyncedAt) notes.push({ text: 'Newer edits may exist on a computer that is offline right now.' })
   }
   return notes

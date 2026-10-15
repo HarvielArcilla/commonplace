@@ -4,7 +4,8 @@
   "type": "module",
   "main": "src/index.js",
   "exports": {
-    ".": "./src/index.js"
+    ".": "./src/index.js",
+    "./helper-protocol": "./src/helper-protocol.js"
   },
   "dependencies": {
     "@hyperswarm/secret-stream": "^6.9.2",

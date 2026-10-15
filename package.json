@@ -13,7 +13,8 @@
     "build": "npm run build -w @commonplace/desktop",
     "dist": "npm run dist -w @commonplace/desktop",
     "test": "node --test --test-concurrency=1 test/*.test.js",
-    "start": "npm run dev -w @commonplace/desktop"
+    "start": "npm run dev -w @commonplace/desktop",
+    "helper": "node packages/helper/bin/commonplace-helper.js"
   },
   "engines": {
     "node": ">=20"

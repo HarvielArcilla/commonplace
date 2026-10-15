@@ -248,6 +248,11 @@ function registerIpc () {
   })
   ipcMain.handle('move:cancel', () => { move?.abort(); move = null })
   ipcMain.handle('devices:list', () => drive.devices())
+  ipcMain.handle('helpers:mine', () => drive.myHelpers())
+  ipcMain.handle('helpers:addMine', (_e, address, options) => drive.addMyHelper(address, options || {}))
+  ipcMain.handle('helpers:removeMine', (_e, key) => drive.removeMyHelper(key))
+  ipcMain.handle('helpers:add', (_e, docId, address) => drive.addHelper(docId, address))
+  ipcMain.handle('helpers:remove', (_e, docId, key) => drive.removeHelper(docId, key))
   ipcMain.handle('devices:unlink', (_e, id) => drive.unlinkDevice(id))
   ipcMain.handle('move:receive', async (_e, code) => {
     if (!drive.isEmpty) throw new Error('This computer already has files. A Drive can only be moved to a computer with an empty Drive.')

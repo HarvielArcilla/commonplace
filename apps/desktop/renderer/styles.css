@@ -668,3 +668,5 @@ body.mac #doc-view .bar [data-action="back"] { justify-self: end; }
 /* ---- your computers ------------------------------------------------------ */
 .computers h3 { font: 500 15px/1.3 var(--serif); margin: 16px 0 6px; }
 .computer-actions { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+.helper-input { flex: 1; min-width: 220px; font: 13px var(--mono); border: 1px solid var(--rule); border-radius: 6px; padding: 6px 8px; background: var(--paper); color: var(--ink); }
+.helper-key { font: 12px var(--mono); }
