@@ -18,7 +18,8 @@
 //                                 }
 //                                 notes:    Y.Text (speaker notes)
 //                               }
-//   ydoc.getMap('deck')         { font, fg, accent }: the deck's theme
+//                                 transition: 'fade' | 'push' | 'zoom' (optional, when presenting)
+//   ydoc.getMap('deck')         { font, fg, title, accent, theme }: the deck's theme
 //
 // Each element is its own map and each text its own fragment, so two
 // people moving different boxes, or typing in different boxes, never
@@ -173,7 +174,46 @@ export function duplicateSlide (ydoc, id) {
 
 export function theme (ydoc) {
   const deck = ydoc.getMap(DECK)
-  return { font: deck.get('font') || DEFAULT_THEME.font, fg: deck.get('fg') || DEFAULT_THEME.fg, accent: deck.get('accent') || DEFAULT_THEME.accent }
+  const fg = deck.get('fg') || DEFAULT_THEME.fg
+  return { font: deck.get('font') || DEFAULT_THEME.font, fg, title: deck.get('title') || fg, accent: deck.get('accent') || DEFAULT_THEME.accent, name: deck.get('theme') || null }
+}
+
+// Ready-made looks: a font, text and title colors, and a background for
+// every slide. Boxes with their own colors keep them.
+export const THEMES = {
+  paper: { name: 'Paper', font: 'Georgia, serif', fg: '#1f2430', title: '#284b8c', bg: '#fbfbf9' },
+  plain: { name: 'Plain', font: 'Arial, Helvetica, sans-serif', fg: '#1f2430', title: '#1f2430', bg: '#ffffff' },
+  sage: { name: 'Sage', font: 'Georgia, serif', fg: '#22312a', title: '#2f6b4f', bg: '#e3ece4' },
+  sand: { name: 'Sand', font: '"Times New Roman", Times, serif', fg: '#3b2f22', title: '#b4532a', bg: '#f3e6cf' },
+  ink: { name: 'Ink', font: 'Georgia, serif', fg: '#e6e7ea', title: '#8fb0ec', bg: '#1f2430' },
+  navy: { name: 'Navy', font: 'Verdana, sans-serif', fg: '#f3f4f7', title: '#f3c969', bg: '#1d2c4d' }
+}
+
+export function applyTheme (ydoc, key) {
+  const t = THEMES[key]
+  if (!t) return
+  ydoc.transact(() => {
+    const deck = ydoc.getMap(DECK)
+    deck.set('theme', key)
+    deck.set('font', t.font)
+    deck.set('fg', t.fg)
+    deck.set('title', t.title)
+    for (const id of slideIds(ydoc)) slideMap(ydoc, id).set('bg', t.bg)
+  })
+}
+
+// How a slide arrives when presenting.
+export const TRANSITIONS = { none: 'None', fade: 'Fade', push: 'Push', zoom: 'Zoom' }
+
+export function setTransition (ydoc, ids, kind) {
+  ydoc.transact(() => {
+    for (const id of ids) {
+      const slide = slideMap(ydoc, id)
+      if (!slide) continue
+      if (!kind || kind === 'none') slide.delete('transition')
+      else if (TRANSITIONS[kind]) slide.set('transition', kind)
+    }
+  })
 }
 
 // ---- reading -------------------------------------------------------------------
@@ -187,7 +227,7 @@ export function readSlide (ydoc, id) {
     for (const [k, v] of m.entries()) if (!(v instanceof Y.AbstractType)) props[k] = v
     return { id: elId, ...props, text: m.get('text') || null }
   }).sort((a, b) => (a.z || 0) - (b.z || 0))
-  return { id, bg: slide.get('bg') || '#ffffff', elements, notes: slide.get('notes')?.toString() || '' }
+  return { id, bg: slide.get('bg') || '#ffffff', elements, notes: slide.get('notes')?.toString() || '', transition: slide.get('transition') || 'none' }
 }
 
 // Text of a rich-text fragment, one line per paragraph.

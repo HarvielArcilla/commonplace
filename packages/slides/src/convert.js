@@ -31,7 +31,7 @@ export async function exportPptx (ydoc, { title = 'Presentation' } = {}) {
         ...box,
         fontFace: firstFont(t.font),
         fontSize: el.size || 20,
-        color: color(el.color || t.fg),
+        color: color(el.color || (el.role === 'title' ? t.title : t.fg)),
         align: el.align || 'left',
         valign: el.valign === 'middle' ? 'middle' : el.valign === 'bottom' ? 'bottom' : 'top',
         bold: el.bold || undefined,

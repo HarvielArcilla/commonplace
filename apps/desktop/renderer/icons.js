@@ -55,6 +55,8 @@ export const icons = {
   dropdown: i('<rect x="1.75" y="3.75" width="12.5" height="8.5" rx="1"/><path d="m9.5 7 1.5 1.5L12.5 7"/><path d="M4 8h3"/>'),
   chart: i('<path d="M2 1.75v12.5h12.25"/><path d="M5 11.5V8.25M8 11.5V5M11 11.5V7" stroke-width="2"/>'),
   summary: i('<rect x="1.75" y="1.75" width="12.5" height="12.5" rx="1"/><path d="M1.75 5.25h12.5M6.25 5.25v9"/><path d="M8.75 8h3M8.75 11h3"/>'),
+  theme: i('<path d="M8 1.75a6.25 6.25 0 1 0 0 12.5c1 0 1.5-.6 1.5-1.35 0-.9-.75-1.15-.75-1.9 0-.7.55-1.25 1.3-1.25h1.45a2.75 2.75 0 0 0 2.75-2.75C14.25 4.2 11.45 1.75 8 1.75z"/><circle cx="4.75" cy="7.25" r=".8" fill="currentColor"/><circle cx="7" cy="4.5" r=".8" fill="currentColor"/><circle cx="10.25" cy="4.75" r=".8" fill="currentColor"/>'),
+  transition: i('<rect x="1.75" y="3.75" width="7" height="8.5" rx="1"/><path d="M11 3.75h2.25a1 1 0 0 1 1 1v6.5a1 1 0 0 1-1 1H11" stroke-dasharray="1.5 1.5"/><path d="m9.75 8h3.5M11.75 6.5 13.25 8l-1.5 1.5"/>'),
   upload: i('<path d="M8 10.75v-8M4.75 6 8 2.75 11.25 6"/><path d="M2.5 10.5v3.25h11V10.5"/>')
 }
 

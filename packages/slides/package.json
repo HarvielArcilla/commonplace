@@ -6,7 +6,8 @@
     ".": "./src/index.js",
     "./model": "./src/model.js",
     "./convert": "./src/convert.js",
-    "./editor": "./src/editor.js"
+    "./editor": "./src/editor.js",
+    "./pptx-import": "./src/pptx-import.js"
   },
   "dependencies": {
     "@tiptap/core": "^3.32.0",
@@ -15,6 +16,8 @@
     "@tiptap/extensions": "^3.32.0",
     "@tiptap/pm": "^3.32.0",
     "@tiptap/starter-kit": "^3.32.0",
+    "@xmldom/xmldom": "^0.8.15",
+    "jszip": "^3.10.2",
     "pptxgenjs": "^4.0.1",
     "yjs": "^13.6.33"
   },

@@ -26,9 +26,11 @@ Work on the same file at the same time, see each other's cursors, leave comments
 
 ![commonSheets: a budget with checkboxes, a dropdown, highlighted overspending and a chart](docs/images/sheet.png)
 
-**commonSlides** has layouts, text boxes, shapes, images, speaker notes and full-screen presenting.
+**commonSlides** has layouts, themes, text boxes, shapes, images, speaker notes, transitions and full-screen presenting. Presenter view puts the slides on a second display and keeps your notes, the next slide and a timer on yours. Imports and exports `.pptx`.
 
 ![commonSlides: editing a slide, with the slide strip on the left](docs/images/slides.png)
+
+![Presenter view: the current slide, the next one, speaker notes and a timer](docs/images/presenter.png)
 
 **commonTasks** is a task board: lists of cards you drag between, with due dates, notes and the person it's assigned to, as a board or a checklist. Exports `.csv` and Markdown.
 
@@ -172,7 +174,7 @@ packages/core    identity, encryption, storage, sync engine, P2P transport
 packages/drive   commonDrive: the file index, background syncing, history, linked computers
 packages/docs    commonDocs: the app descriptor, rich-text editor, comments and suggestions
 packages/sheets  commonSheets: workbook model, formula engine, .xlsx and .csv
-packages/slides  commonSlides: deck model, text-box editor, .pptx
+packages/slides  commonSlides: deck model, text-box editor, .pptx import and export
 packages/tasks   commonTasks: lists and cards, .csv and Markdown
 packages/calendar commonCalendar: events, repeats, .ics
 packages/whiteboard commonBoard: shapes, drawing them as SVG

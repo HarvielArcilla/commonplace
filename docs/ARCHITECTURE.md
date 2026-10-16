@@ -73,6 +73,8 @@ Both have links (Ctrl/Cmd+click opens them in the browser), LaTeX math rendered 
 
 **commonSlides (`packages/slides`).** A deck is `slides` (order), `slideData` (per slide: background, notes as `Y.Text`, elements) and `deck` (theme font and colors). Each element is its own map (`type`, position on a 960 × 540 slide, size, style) and each text box its own `XmlFragment` edited by TipTap, so people working on different boxes never touch each other's data. Moves and resizes are written once, on release. `.pptx` goes through PptxGenJS at 13.33 × 7.5 in (one slide unit is one point); PDF prints one page per slide from the same renderer used for presenting.
 
+  `.pptx` import reads the slide XML itself (JSZip and xmldom, in the background process): text boxes and placeholders, with positions inherited from the slide layout and master; bullets, runs and theme colors; shapes colored directly or by their style; pictures (PNG, JPEG, GIF, WebP); tables as text; solid backgrounds; notes; and the theme's body font. Slides of another shape are scaled and centered. The file is untrusted, so it's capped at 200 MB, 400 MB unpacked, 500 slides, 8 MB a picture and 60 MB of pictures in all; whatever can't come over is counted and reported. Themes set the deck's font, text and title colors and every slide's background; transitions are a per-slide property used when presenting. Presenter view opens the audience's window from the renderer (`window.open`, allowed for that one frame name), full screen on another display when there is one, and draws into it directly; every other window the app's pages might try to open or navigate is refused.
+
 **commonTasks (`packages/tasks`).** A board is `lists` (order), `listData` (names) and `cards`, one map per card (`title`, `notes`, `list`, `pos`, `done`, `due`, `assignee`). A card's place in its list is a number between its neighbors', so moving a card sets two fields: people moving different cards never collide, and two moves of one card end wherever the last one put it. Cards whose list was deleted on another computer show in the first list. Conflicts are per card (ignoring its exact position) and per list name.
 
 **commonCalendar (`packages/calendar`).** Each event is its own map in `events`. Timed events store their start and end as UTC instants, so collaborators in different time zones see the same moment; all-day events store dates. Repeats (daily, weekdays, weekly, monthly, yearly, with an optional last date and skipped occurrences) are expanded on the fly for the range being shown, stepping in local time so a 9am meeting stays at 9am across daylight-saving changes; a monthly event on the 31st skips months without one. `.ics` export writes UTC times, RRULEs, EXDATEs and VALARMs; import also reads dates, floating times and DURATION. Times with a named time zone (TZID) are read as the computer's own time zone, and rules this model can't hold (every other week, several weekdays) come in as one-off events, with a count shown. Reminders are notifications from the background process, which looks through every calendar in the Drive twice a minute while the app runs and remembers what it has announced.
@@ -131,7 +133,7 @@ Both have links (Ctrl/Cmd+click opens them in the browser), LaTeX math rendered 
 - commonBoard: no connectors that stay attached to shapes, no images yet, and no grouping.
 - commonTasks: no labels, subtasks or recurring tasks yet.
 - commonSheets: no merged cells yet; charts don't travel in .xlsx (the writer can't draw them) and conditional formats aren't read back from .xlsx; .xlsx import drops shared formulas (keeping their values).
-- commonSlides: no .pptx import, transitions or animations; images are stored inside the file.
+- commonSlides: no animations within a slide; transitions aren't written to .pptx; .pptx import leaves out charts, SmartArt, video and pictures in other formats (EMF, SVG); images are stored inside the file.
 - A single table, image or code block taller than a page isn't split across pages on screen (PDF export does split it). Paragraphs do split.
 - In justified text, the line just before a page break isn't stretched to full width.
 - Math is exported to .docx as its LaTeX source in Cambria Math, not as Word equations.
@@ -142,5 +144,5 @@ Both have links (Ctrl/Cmd+click opens them in the browser), LaTeX math rendered 
 
 1. **Per-computer keys.** Device keys certified by your identity, so a lost computer can be cut off for real.
 2. **A "can comment" role**, enforced by checking that a commenter's updates touch only comments.
-3. **commonSheets:** merged cells. **commonSlides:** .pptx import, transitions, images as shared blobs.
+3. **commonSheets:** merged cells. **commonSlides:** animations, images as shared blobs.
 4. **Docs features.** Headers and footers, Word equations in .docx, and images as content-addressed blobs instead of inline data.

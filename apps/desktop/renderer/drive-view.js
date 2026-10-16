@@ -424,7 +424,7 @@ function openNewMenu (anchor) {
     { sep: true },
     { label: 'Folder', hint: 'Just for organizing your Drive', icon: icons.folder, onSelect: newFolder },
     { label: 'Shared folder', hint: 'Everyone in it gets what’s inside', icon: icons.sharedFolder, onSelect: newSharedFolder },
-    { label: 'Import a file…', hint: '.md, .docx, .xlsx, .csv or .ics', icon: icons.import, onSelect: importFile },
+    { label: 'Import a file…', hint: '.docx, .md, .xlsx, .csv, .pptx or .ics', icon: icons.import, onSelect: importFile },
     { label: 'Upload files…', hint: 'Any kind, up to 100 MB each', icon: icons.upload, onSelect: () => uploadFiles() }
   ], { align: 'end', label: 'Create' })
 }
@@ -497,7 +497,7 @@ async function importFile () {
     const res = await cp.importFile(state.folderId)
     if (!res) return
     await handlers.openDocument(res.docId, { initialContent: res.content })
-    toast(res.note ? `Imported ${res.note}${res.warnings ? `. ${res.warnings} repeating event${res.warnings === 1 ? '' : 's'} became one-off events.` : ''}` : res.warnings ? 'Imported. Some formatting couldn’t be carried over.' : 'Imported')
+    toast(`Imported${res.note ? ` ${res.note}` : ''}${res.warningText ? `. ${res.warningText}` : res.warnings ? '. Some formatting couldn’t be carried over.' : ''}`)
   } catch (err) {
     toast(`Couldn’t import that file: ${cleanError(err)}`)
   }

@@ -3,7 +3,7 @@
 // talks to this process over a narrow IPC surface defined in preload.cjs.
 
 import fsSync from 'node:fs'
-import { app, BrowserWindow, ipcMain, clipboard, shell, dialog, Notification, nativeImage, Menu } from 'electron'
+import { app, BrowserWindow, ipcMain, clipboard, shell, dialog, Notification, nativeImage, Menu, screen } from 'electron'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -21,6 +21,7 @@ import { tasksApp } from '@commonplace/tasks'
 import { exportCsv as tasksCsv, exportMarkdown as tasksMarkdown } from '@commonplace/tasks/convert'
 import { calendarApp } from '@commonplace/calendar'
 import { exportIcs, importIcs } from '@commonplace/calendar/ics'
+import { importPptx, MAX_PPTX_BYTES } from '@commonplace/slides/pptx-import'
 import { whiteboardApp } from '@commonplace/whiteboard'
 import { formServices } from './forms.js'
 import { Reminders } from './reminders.js'
@@ -146,7 +147,9 @@ function createWindow () {
     if (pendingNotice) { send('notice', pendingNotice); pendingNotice = null }
   })
   // Links inside documents open in the system browser, never in the app.
-  win.webContents.setWindowOpenHandler(({ url }) => {
+  // The one window the app opens itself is the audience's while presenting.
+  win.webContents.setWindowOpenHandler(({ url, frameName }) => {
+    if (url === 'about:blank' && frameName === 'commonplace-audience') return { action: 'allow', overrideBrowserWindowOptions: audienceWindow() }
     openExternal(url)
     return { action: 'deny' }
   })
@@ -154,6 +157,16 @@ function createWindow () {
   win.webContents.session.setSpellCheckerEnabled(readSettings().spellcheck !== false)
   win.webContents.on('context-menu', (_e, p) => editMenu(p))
   win.on('closed', () => { win = null; openDocs.clear() })
+}
+
+// Full screen on another display when there is one, otherwise a window
+// that can be dragged to a projector (F makes it full screen).
+function audienceWindow () {
+  const here = screen.getDisplayMatching(win.getBounds())
+  const other = screen.getAllDisplays().find((d) => d.id !== here.id)
+  const base = { backgroundColor: '#000000', autoHideMenuBar: true, title: 'commonplace: presenting', icon: ICON }
+  if (other) return { ...base, x: other.bounds.x, y: other.bounds.y, width: other.bounds.width, height: other.bounds.height, fullscreen: true }
+  return { ...base, width: 1024, height: 576 }
 }
 
 function openExternal (url) {
@@ -204,12 +217,13 @@ function registerIpc () {
   ipcMain.handle('file:import', async (_e, folderId) => {
     const { canceled, filePaths } = await dialog.showOpenDialog(win, {
       properties: ['openFile'],
-      filters: [{ name: 'Documents, spreadsheets and calendars', extensions: ['docx', 'md', 'markdown', 'txt', 'xlsx', 'csv', 'tsv', 'ics'] }]
+      filters: [{ name: 'Documents, spreadsheets, presentations and calendars', extensions: ['docx', 'md', 'markdown', 'txt', 'xlsx', 'csv', 'tsv', 'pptx', 'ics'] }]
     })
     if (canceled || !filePaths[0]) return null
     const file = filePaths[0]
     const ext = path.extname(file).toLowerCase()
     const title = path.basename(file, path.extname(file))
+    if ((await fs.stat(file)).size > MAX_PPTX_BYTES) throw new Error('That file is over 200 MB, too large to import.')
     const bytes = await fs.readFile(file)
     if (ext === '.xlsx' || ext === '.csv' || ext === '.tsv') {
       // Spreadsheets are filled in here; the window just opens them.
@@ -218,10 +232,21 @@ function registerIpc () {
       const { warnings } = ext === '.xlsx' ? await importXlsx(ydoc, bytes) : importCsv(ydoc, bytes.toString('utf8'), { name: title.slice(0, 80) })
       return { docId, content: null, warnings }
     }
+    if (ext === '.pptx') {
+      const docId = await drive.create('slides', title, { folderId })
+      try {
+        const { slides, warnings } = await importPptx(drive.getDoc(docId).ydoc, bytes)
+        const lost = warnings ? `${warnings} item${warnings === 1 ? '' : 's'} (charts, video, tables or pictures in other formats) came over as text or were left out.` : ''
+        return { docId, content: null, warnings, note: `${slides} slide${slides === 1 ? '' : 's'}`, warningText: lost }
+      } catch (err) {
+        await drive.remove(docId)
+        throw err
+      }
+    }
     if (ext === '.ics') {
       const docId = await drive.create('calendar', title, { folderId })
       const { added, simplified } = importIcs(drive.getDoc(docId).ydoc, bytes.toString('utf8'))
-      return { docId, content: null, warnings: simplified, note: `${added} event${added === 1 ? '' : 's'}` }
+      return { docId, content: null, warnings: simplified, note: `${added} event${added === 1 ? '' : 's'}`, warningText: simplified ? `${simplified} repeating event${simplified === 1 ? '' : 's'} became one-off events.` : '' }
     }
     if (ext === '.docx') {
       const { html, page, warnings } = await importDocx(bytes)
@@ -553,6 +578,13 @@ async function signOutAndWipe () {
   await startDrive() // a fresh, empty Drive with a new identity
   win?.webContents.reload()
 }
+
+// Anything that isn't the main window (the audience's window while
+// presenting) never navigates or opens windows of its own.
+app.on('web-contents-created', (_e, contents) => {
+  contents.on('will-navigate', (e) => e.preventDefault())
+  contents.setWindowOpenHandler(() => ({ action: 'deny' }))
+})
 
 app.whenReady().then(async () => {
   if (process.platform === 'darwin' && !app.isPackaged) app.dock?.setIcon(ICON)

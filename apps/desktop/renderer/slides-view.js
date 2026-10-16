@@ -6,7 +6,7 @@
 import * as Y from 'yjs'
 import {
   slideIds, readSlide, addSlide, addText, addShape, addImage, updateElement, deleteElement, restack,
-  deleteSlide, moveSlide, duplicateSlide, theme, slideMap, LAYOUTS, WIDTH, HEIGHT, SLIDES, SLIDE_DATA, DECK
+  deleteSlide, moveSlide, duplicateSlide, theme, slideMap, applyTheme, setTransition, LAYOUTS, THEMES, TRANSITIONS, WIDTH, HEIGHT, SLIDES, SLIDE_DATA, DECK
 } from '@commonplace/slides/model'
 import { createTextEditor } from '@commonplace/slides/editor'
 import { $, el, toast, openMenu, cleanError } from './ui.js'
@@ -14,6 +14,8 @@ import { icons } from './icons.js'
 import { state, cp } from './state.js'
 import { toolButton, toolbarGroups, setToolbar, press, swatchMenu, showValue, TEXT_COLORS, FILL_COLORS } from './toolbar.js'
 import { countBy, badges } from './comment-marks.js'
+import { scaled, renderSlide, textColor } from './slide-render.js'
+import { present } from './slides-present.js'
 
 const SIZES = [12, 14, 16, 18, 20, 24, 28, 32, 36, 44, 54, 66, 80]
 const BACKGROUNDS = [['White', '#ffffff'], ['Paper', '#fbfbf9'], ['Mist', '#eef1f6'], ['Sand', '#f3e6cf'], ['Sage', '#e3ece4'], ['Ink', '#1f2430'], ['Navy', '#1d2c4d'], ['Forest', '#1f3a2e']]
@@ -129,13 +131,6 @@ function render (v) {
   badges(v.root, '.slide-thumb[data-slide]', 'data-slide', v.commentCounts)
 }
 
-// A slide drawn at `k` times its size.
-function scaled (node, k) {
-  node.style.transform = `scale(${k})`
-  node.style.transformOrigin = '0 0'
-  return el('div', { class: 'slide-scaled', style: `width:${WIDTH * k}px;height:${HEIGHT * k}px` }, node)
-}
-
 function drawStrip (v, ids) {
   const keep = new Set(ids)
   for (const [id, t] of v.thumbs) if (!keep.has(id)) { t.node.remove(); v.thumbs.delete(id) }
@@ -222,7 +217,7 @@ function drawStage (v) {
       fontSize: `${e.size || 20}px`,
       textAlign: e.align || 'left',
       fontWeight: e.bold ? '700' : '',
-      color: e.color || '',
+      color: textColor(e, t),
       background: e.type === 'shape' ? (e.fill || 'transparent') : '',
       borderColor: e.stroke || ''
     })
@@ -245,53 +240,6 @@ function fitStage (v) {
   v.canvas.style.transform = `scale(${k})`
   v.canvas.style.left = `${Math.max(24, (room.width - WIDTH * k) / 2)}px`
   v.canvas.style.top = `${Math.max(16, (room.height - HEIGHT * k) / 2)}px`
-}
-
-// A read-only slide (thumbnails, presenting, printing, history).
-export function renderSlide (ydoc, slideId) {
-  const s = readSlide(ydoc, slideId)
-  const t = theme(ydoc)
-  const node = el('div', { class: 'slide-static', style: `background:${s?.bg || '#fff'};font-family:${t.font};color:${t.fg}` })
-  for (const e of s?.elements || []) {
-    const box = el('div', {
-      class: `slide-el slide-${e.type}`,
-      'data-valign': e.valign || 'top',
-      'data-shape': e.shape || '',
-      style: `left:${e.x}px;top:${e.y}px;width:${e.w}px;height:${e.h}px;z-index:${e.z || 0};font-size:${e.size || 20}px;text-align:${e.align || 'left'};${e.bold ? 'font-weight:700;' : ''}${e.color ? `color:${e.color};` : ''}${e.type === 'shape' ? `background:${e.fill || 'transparent'};${e.stroke ? `border-color:${e.stroke};` : ''}` : ''}`
-    })
-    if (e.type === 'image') box.append(el('img', { src: e.src, alt: e.alt || '', draggable: 'false' }))
-    if (e.text) box.append(el('div', { class: 'slide-el-text' }, el('div', { class: 'slide-text' }, ...fragmentToDom(e.text))))
-    node.append(box)
-  }
-  return node
-}
-
-// Rich text from a fragment as DOM nodes (text is set as text, never HTML).
-function fragmentToDom (frag) {
-  const tags = { paragraph: 'p', bulletList: 'ul', orderedList: 'ol', listItem: 'li', hardBreak: 'br' }
-  const walk = (node) => {
-    if (node instanceof Y.XmlText) {
-      return node.toDelta().map((d) => {
-        if (typeof d.insert !== 'string') return null
-        let out = document.createTextNode(d.insert)
-        const a = d.attributes || {}
-        const wrap = (tag, style) => { const w = document.createElement(tag); if (style) w.style.cssText = style; w.append(out); out = w }
-        if (a.bold) wrap('strong')
-        if (a.italic) wrap('em')
-        if (a.underline) wrap('u')
-        if (a.strike) wrap('s')
-        if (a.textStyle) wrap('span', `${a.textStyle.color ? `color:${a.textStyle.color};` : ''}${a.textStyle.fontSize ? `font-size:${a.textStyle.fontSize};` : ''}`)
-        return out
-      }).filter(Boolean)
-    }
-    const tag = tags[node.nodeName]
-    if (!tag) return node.toArray().flatMap(walk)
-    const n = document.createElement(tag)
-    for (const c of node.toArray().flatMap(walk)) n.append(c)
-    if (tag === 'p' && !n.childNodes.length) n.append(document.createElement('br'))
-    return [n]
-  }
-  return frag.toArray().flatMap(walk)
 }
 
 // Who is on which slide, and which box they've selected.
@@ -555,8 +503,14 @@ function renderToolbar (v) {
     [
       tool('undo', 'Undo', icons.undo, () => { const e = editorOf(v); if (e) e.commands.undo?.(); else v.undo.undo() }, { key: 'Mod-Z' }),
       tool('redo', 'Redo', icons.redo, () => { const e = editorOf(v); if (e) e.commands.redo?.(); else v.undo.redo() }, { key: 'Mod-Shift-Z' })
+    ],
+    [
+      tool('theme', 'Theme', icons.theme, (b) => themeMenu(v, b)),
+      tool('transition', 'Transition', icons.transition, (b) => transitionMenu(v, b))
     ]
-  ]), el('span', { class: 'tool-spacer' }), el('button', { type: 'button', class: 'btn btn-primary tool-present', onclick: () => present(v) }, 'Present')])
+  ]), el('span', { class: 'tool-spacer' }),
+  el('button', { type: 'button', class: 'btn tool-presenter', title: 'Show the slides in another window (on a second display, if there is one), with your notes and a timer here', onclick: () => startPresenting(v, true) }, 'Presenter view'),
+  el('button', { type: 'button', class: 'btn btn-primary tool-present', onclick: () => startPresenting(v, false) }, 'Present')])
   syncToolbar(v)
 }
 
@@ -578,38 +532,34 @@ function syncToolbar (v) {
   if (font && document.activeElement !== font) showValue(font, theme(v.ydoc).font, FONTS.find(([, f]) => f === theme(v.ydoc).font)?.[0] || 'Font')
 }
 
-// ---- presenting -------------------------------------------------------------------------
+// ---- themes, transitions and presenting -------------------------------------------------
 
-function present (v) {
-  const ids = slideIds(v.ydoc)
-  let i = Math.max(0, ids.indexOf(v.slideId))
-  const frame = el('div', { class: 'present-frame' })
-  const counter = el('div', { class: 'present-counter', 'aria-live': 'polite' })
-  const overlay = el('div', { class: 'present', role: 'dialog', 'aria-label': 'Presenting', tabindex: '0' }, frame, counter)
-  const show = () => {
-    const k = Math.min(window.innerWidth / WIDTH, window.innerHeight / HEIGHT)
-    frame.replaceChildren(scaled(renderSlide(v.ydoc, ids[i]), k))
-    counter.textContent = `${i + 1} / ${ids.length}`
-  }
-  const next = (d) => { i = Math.max(0, Math.min(ids.length - 1, i + d)); show() }
-  const onKey = (e) => {
-    if (['ArrowRight', 'ArrowDown', 'PageDown', ' ', 'Enter'].includes(e.key)) { e.preventDefault(); next(1) } else if (['ArrowLeft', 'ArrowUp', 'PageUp', 'Backspace'].includes(e.key)) { e.preventDefault(); next(-1) } else if (e.key === 'Home') { i = 0; show() } else if (e.key === 'End') { i = ids.length - 1; show() } else if (e.key === 'Escape') stop()
-  }
-  const stop = () => {
-    v.presenting = false
-    document.removeEventListener('keydown', onKey, true)
-    window.removeEventListener('resize', show)
-    if (document.fullscreenElement) document.exitFullscreen().catch(() => {})
-    overlay.remove()
-    goTo(v, ids[i])
-  }
-  overlay.addEventListener('click', (e) => next(e.clientX < window.innerWidth / 3 ? -1 : 1))
-  document.addEventListener('keydown', onKey, true)
-  window.addEventListener('resize', show)
-  document.addEventListener('fullscreenchange', () => { if (!document.fullscreenElement && v.presenting) stop() }, { once: true })
-  v.presenting = true
-  document.body.append(overlay)
-  overlay.requestFullscreen?.().catch(() => {})
-  overlay.focus()
-  show()
+function themeMenu (v, anchor) {
+  const current = theme(v.ydoc).name
+  openMenu(anchor, [
+    { heading: 'Theme for every slide' },
+    ...Object.entries(THEMES).map(([key, t]) => ({
+      label: t.name,
+      checked: current === key,
+      icon: `<svg viewBox="0 0 16 16" width="16" height="16"><rect x="1" y="2" width="14" height="12" rx="2" fill="${t.bg}" stroke="#8a8f9b" stroke-width=".8"/><rect x="3.5" y="5" width="7" height="2" rx=".6" fill="${t.title}"/><rect x="3.5" y="9" width="9" height="1.4" rx=".6" fill="${t.fg}"/></svg>`,
+      onSelect: () => applyTheme(v.ydoc, key)
+    }))
+  ], { label: 'Theme' })
+}
+
+function transitionMenu (v, anchor) {
+  const current = readSlide(v.ydoc, v.slideId)?.transition || 'none'
+  let all = false
+  const box = el('label', { class: 'check menu-check' }, el('input', { type: 'checkbox', onchange: (e) => { all = e.target.checked } }), 'Apply to every slide')
+  openMenu(anchor, [
+    { heading: 'How this slide arrives' },
+    ...Object.entries(TRANSITIONS).map(([key, label]) => ({ label, checked: current === key, onSelect: () => setTransition(v.ydoc, all ? slideIds(v.ydoc) : [v.slideId], key) })),
+    { sep: true },
+    { custom: box }
+  ], { label: 'Transition' })
+}
+
+function startPresenting (v, presenter) {
+  if (v.presenting) return
+  present(v, { presenter, onEnd: (id) => goTo(v, id) })
 }

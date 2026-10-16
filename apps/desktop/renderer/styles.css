@@ -833,6 +833,34 @@ body.margin-folded :is(.grid-margin, .margin-inner) { padding-left: 0; padding-r
 .handle-w { left: -6px; top: calc(50% - 5px); cursor: ew-resize; }
 .slide-notes { height: 84px; flex: none; resize: vertical; margin: 0; border: 0; border-top: 1px solid var(--rule); padding: 10px 16px; font: 15px/1.5 var(--serif); background: var(--paper); color: var(--ink); outline: none; }
 .tool-present { margin-left: 8px; }
+.tool-presenter { margin-left: 8px; }
+.menu-check { margin: 4px 10px; font-size: 13px; }
+
+/* slides arriving while presenting */
+.present-frame > .enter-fade { animation: slide-fade 0.45s ease both; }
+.present-frame > .enter-push { animation: slide-push 0.45s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+.present-frame > .enter-zoom { animation: slide-zoom 0.45s ease both; }
+@keyframes slide-fade { from { opacity: 0; } }
+@keyframes slide-push { from { transform: translateX(calc(var(--dir, 1) * 100%)); } }
+@keyframes slide-zoom { from { opacity: 0; transform: scale(0.88); } }
+@media (prefers-reduced-motion: reduce) { .present-frame > [class*="enter-"] { animation: none; } }
+body.audience { margin: 0; background: #000; overflow: hidden; }
+body.audience .present { cursor: none; }
+
+/* presenter view */
+.presenter { position: fixed; inset: 0; z-index: 100; background: var(--desk); display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(260px, 1fr); grid-template-rows: auto minmax(0, 1fr); gap: 16px 20px; padding: 14px 20px 20px; color: var(--ink); }
+.presenter-bar { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; }
+.presenter-bar .spacer { flex: 1; }
+.presenter-timer { font: 600 28px/1 var(--serif); font-variant-numeric: tabular-nums; margin-right: 4px; }
+.presenter-clock, .presenter-count { font: 14px var(--serif); color: var(--ink-soft); margin: 0 8px; }
+.presenter-now { min-height: 0; display: grid; place-items: center; }
+.presenter-now .slide-scaled, .presenter-next .slide-scaled { box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12), 0 8px 24px rgba(0, 0, 0, 0.06); }
+.presenter-side { display: grid; grid-template-rows: auto auto auto minmax(0, 1fr); gap: 8px; min-height: 0; }
+.presenter-side h2 { font: 600 13px var(--serif); color: var(--ink-soft); margin: 4px 0 0; letter-spacing: 0.02em; }
+.presenter-next { aspect-ratio: 16 / 9; display: grid; place-items: center; }
+.presenter-notes { overflow-y: auto; font: 20px/1.5 var(--serif); white-space: pre-wrap; background: var(--paper-raised); border: 1px solid var(--rule); border-radius: 8px; padding: 14px 16px; }
+.presenter-notes.empty { color: var(--ink-faint); font-style: italic; }
+.presenter-end { font: italic 15px var(--serif); color: var(--ink-faint); }
 .slides-preview { display: flex; flex-wrap: wrap; gap: 16px; padding: 24px; overflow: auto; align-content: flex-start; }
 .slides-preview .slide-scaled { box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15); }
 .present { position: fixed; inset: 0; z-index: 100; background: #000; display: grid; place-items: center; cursor: none; outline: none; }
