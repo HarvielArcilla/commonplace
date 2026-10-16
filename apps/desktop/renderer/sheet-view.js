@@ -8,10 +8,15 @@ import {
   setWidth, addSheet, renameSheet, deleteSheet, moveSheet, context, cellAt, SHEETS, SHEET_DATA
 } from '@commonplace/sheets/model'
 import { shiftFormula, a1, colName } from '@commonplace/sheets/formula'
+import { RULES, describeRule } from '@commonplace/sheets/rules'
+import { CHARTS } from '@commonplace/sheets/charts'
+import { summaryOf, writeSummary, describeSummary } from '@commonplace/sheets/summary'
 import { $, el, toast, openMenu, promptText, confirmAction } from './ui.js'
 import { icons } from './icons.js'
 import { state } from './state.js'
 import { toolButton, toolbarGroups, setToolbar, press, swatchMenu, TEXT_COLORS, FILL_COLORS } from './toolbar.js'
+import { sortMenu, freezeMenu, filterDialog, hiddenRows, filterNote, formatRulesDialog, checksDialog, pickMenu, summaryDialog, tableRange, usedRange, selRange } from './sheet-tools.js'
+import { drawCharts, insertChart } from './sheet-charts.js'
 
 const CLIP_TYPE = 'application/x-commonplace-cells'
 const FORMATS = [['', 'Automatic'], ['number', 'Number'], ['percent', 'Percent'], ['currency', 'Currency'], ['date', 'Date'], ['text', 'Plain text']]
@@ -107,8 +112,10 @@ function createGrid ({ ydoc, awareness = null, host, readonly, sheetId = null, o
     drawn: new Map(), // 'r:c' -> td that currently shows something
     marked: [],
     peers: [],
+    filters: new Map(), // yours only: colId -> Set of hidden texts
+    hidden: new Set(),
     onSelect: () => {},
-    undo: readonly ? null : new Y.UndoManager([ydoc.getArray(SHEETS), ydoc.getMap(SHEET_DATA)], { trackedOrigins: new Set([null]) })
+    undo: readonly ? null : new Y.UndoManager([ydoc.getArray(SHEETS), ydoc.getMap(SHEET_DATA), ydoc.getMap(RULES), ydoc.getMap(CHARTS)], { trackedOrigins: new Set([null]) })
   }
   v.nameBox = el('input', { class: 'name-box', 'aria-label': 'Selected cell', spellcheck: 'false' })
   v.formula = el('input', { class: 'formula-input', 'aria-label': 'Cell contents', spellcheck: 'false', readonly: readonly || null })
@@ -117,9 +124,10 @@ function createGrid ({ ydoc, awareness = null, host, readonly, sheetId = null, o
   v.scroll = el('div', { class: 'grid-scroll', tabindex: '0', 'aria-label': 'Spreadsheet' }, v.table, v.editor)
   v.more = el('button', { type: 'button', class: 'btn btn-quiet grid-more', onclick: () => { insertRows(ydoc, v.sheetId, v.sheet.rows.length, 100) } }, 'Add 100 more rows')
   v.tabs = el('div', { class: 'sheet-tabs', role: 'tablist', 'aria-label': 'Sheets' })
+  v.notice = el('div', { class: 'sheet-notice', role: 'status', hidden: true })
   v.root = el('div', { class: `sheet-app${readonly ? ' readonly' : ''}` },
     el('div', { class: 'formula-bar' }, v.nameBox, el('span', { class: 'fx', 'aria-hidden': 'true' }, 'fx'), v.formula),
-    v.scroll, v.tabs)
+    v.notice, v.scroll, v.tabs)
   host.replaceChildren(v.root)
 
   v.focus = () => v.scroll.focus({ preventScroll: true })
@@ -134,10 +142,17 @@ function createGrid ({ ydoc, awareness = null, host, readonly, sheetId = null, o
   // Redraw on any change, at most once a frame.
   let frame = 0
   const schedule = () => { if (!frame) frame = requestAnimationFrame(() => { frame = 0; render(v); onChange() }) }
+  v.refresh = schedule
   const data = ydoc.getMap(SHEET_DATA)
   const order = ydoc.getArray(SHEETS)
+  const rules = ydoc.getMap(RULES)
+  const charts = ydoc.getMap(CHARTS)
   data.observeDeep(schedule)
   order.observe(schedule)
+  rules.observe(schedule)
+  charts.observe(schedule)
+  const theme = window.matchMedia('(prefers-color-scheme: dark)')
+  theme.addEventListener('change', schedule)
   const onAwareness = () => drawPeers(v)
   awareness?.on('change', onAwareness)
   wire(v)
@@ -145,6 +160,9 @@ function createGrid ({ ydoc, awareness = null, host, readonly, sheetId = null, o
     cancelAnimationFrame(frame)
     data.unobserveDeep(schedule)
     order.unobserve(schedule)
+    rules.unobserve(schedule)
+    charts.unobserve(schedule)
+    theme.removeEventListener('change', schedule)
     awareness?.off('change', onAwareness)
     v.unwire?.()
     v.undo?.destroy()
@@ -154,7 +172,7 @@ function createGrid ({ ydoc, awareness = null, host, readonly, sheetId = null, o
 }
 
 const inSel = (s, r, c) => r >= Math.min(s.r, s.r2) && r <= Math.max(s.r, s.r2) && c >= Math.min(s.c, s.c2) && c <= Math.max(s.c, s.c2)
-const range = (s) => ({ r0: Math.min(s.r, s.r2), c0: Math.min(s.c, s.c2), r1: Math.max(s.r, s.r2), c1: Math.max(s.c, s.c2) })
+const range = selRange
 const td = (v, r, c) => v.table.tBodies[0]?.rows[r]?.cells[c + 1] || null
 
 function render (v) {
@@ -162,21 +180,36 @@ function render (v) {
   const sheet = readSheet(v.ydoc, v.sheetId)
   if (!sheet) return
   v.sheet = sheet
-  const shape = `${sheet.id}|${sheet.rows.length}|${sheet.cols.length}|${sheet.widths.join(',')}`
-  if (shape !== v.shape) { buildTable(v, sheet); v.shape = shape; v.drawn.clear() }
+  const shape = `${sheet.id}|${sheet.rows.length}|${sheet.cols.length}|${sheet.widths.join(',')}|${sheet.freeze.rows},${sheet.freeze.cols}`
+  if (shape !== v.shape) { buildTable(v, sheet); v.shape = shape; v.drawn.clear(); v.hidden = new Set() }
   // Cell contents: everything filled now, and anything that was filled before.
   const now = new Set()
   for (const [r, c] of sheet.filled()) {
     now.add(`${r}:${c}`)
     paintCell(td(v, r, c), sheet.get(r, c))
   }
+  // Empty cells that should still show a checkbox or a dropdown.
+  for (const { rule, at } of sheet.checks) {
+    if (rule.check === 'number') continue
+    for (let r = at.r0; r <= at.r1; r++) {
+      for (let c = at.c0; c <= at.c1; c++) {
+        const key = `${r}:${c}`
+        if (now.has(key)) continue
+        now.add(key)
+        paintCell(td(v, r, c), null, sheet.checkAt(r, c)?.rule)
+      }
+    }
+  }
   for (const [key, cell] of v.drawn) if (!now.has(key)) paintCell(cell, null)
   v.drawn = new Map([...now].map((k) => { const [r, c] = k.split(':').map(Number); return [k, td(v, r, c)] }))
+  drawFilter(v)
   v.sel = clampSel(v.sel, sheet)
   drawSelection(v)
   drawTabs(v)
   drawPeers(v)
   drawCommentMarks(v)
+  drawNotice(v)
+  drawCharts(v)
   v.more.hidden = !v.writable
   if (!v.more.isConnected) v.scroll.append(v.more)
 }
@@ -189,6 +222,7 @@ function clampSel (s, sheet) {
 }
 
 function buildTable (v, sheet) {
+  v.chartCache?.clear()
   const colgroup = el('colgroup', {}, el('col', { style: 'width:46px' }), ...sheet.widths.map((w) => el('col', { style: `width:${w}px` })))
   const head = el('tr', {}, el('th', { class: 'corner', 'aria-hidden': 'true' }),
     ...sheet.cols.map((_, c) => el('th', { class: 'col-head', 'data-c': String(c), scope: 'col' }, colName(c), el('span', { class: 'col-resize', 'data-c': String(c), 'aria-hidden': 'true' }))))
@@ -197,18 +231,89 @@ function buildTable (v, sheet) {
   body.innerHTML = sheet.rows.map((_, r) => `<tr><th class="row-head" scope="row" data-r="${r}">${r + 1}</th>${cells}</tr>`).join('')
   v.table.replaceChildren(colgroup, el('thead', {}, head), body)
   v.table.style.width = `${46 + sheet.widths.reduce((a, b) => a + b, 0)}px`
+  freezePanes(v, sheet)
 }
 
-function paintCell (cell, data) {
+// Frozen rows and columns stick below the column letters and beside the
+// row numbers while the rest scrolls under them.
+function freezePanes (v, sheet) {
+  const { rows: fr, cols: fc } = sheet.freeze
+  const lefts = [46]
+  for (let c = 0; c < fc; c++) lefts.push(lefts[c] + sheet.widths[c])
+  const body = v.table.tBodies[0]
+  for (let r = 0; r < fr; r++) {
+    const tr = body.rows[r]
+    tr.classList.add('frozen-row')
+    if (r === fr - 1) tr.classList.add('freeze-edge')
+    for (const cell of tr.cells) cell.style.setProperty('--top', `${ROW_H * (r + 1)}px`)
+  }
+  for (let c = 0; c < fc; c++) {
+    const head = v.table.tHead.rows[0].cells[c + 1]
+    head.classList.add('frozen-col')
+    head.style.setProperty('--left', `${lefts[c]}px`)
+    for (const tr of body.rows) {
+      const cell = tr.cells[c + 1]
+      cell.classList.add('frozen-col')
+      if (c === fc - 1) cell.classList.add('freeze-edge')
+      cell.style.setProperty('--left', `${lefts[c]}px`)
+    }
+    if (c === fc - 1) head.classList.add('freeze-edge')
+  }
+}
+
+// check: the validation rule on the cell, for empty cells (filled cells carry theirs).
+function paintCell (cell, data, check = data?.check) {
   if (!cell) return
-  const text = data?.text ?? ''
+  const box = check?.check === 'checkbox'
+  const text = box ? '' : data?.text ?? ''
   if (cell.textContent !== text) cell.textContent = text
-  const s = data?.style || {}
+  const s = data?.look || {}
   const kind = typeof data?.value
-  const align = s.al || (data?.value?.code ? 'center' : kind === 'number' ? 'right' : kind === 'boolean' ? 'center' : 'left')
-  const css = `text-align:${align};${s.b ? 'font-weight:600;' : ''}${s.i ? 'font-style:italic;' : ''}${s.u ? 'text-decoration:underline;' : ''}${s.fg ? `color:${s.fg};` : ''}${s.bg ? `background:${s.bg};` : ''}`
-  if (cell.style.cssText !== css) cell.style.cssText = css
+  const st = cell.style
+  st.textAlign = s.al || (data?.value?.code ? 'center' : kind === 'number' ? 'right' : kind === 'boolean' || box ? 'center' : 'left')
+  st.fontWeight = s.b ? '600' : ''
+  st.fontStyle = s.i ? 'italic' : ''
+  st.textDecoration = s.u ? 'underline' : ''
+  st.color = s.fg || ''
+  st.backgroundColor = s.bg || ''
   cell.classList.toggle('err', Boolean(data?.value?.code))
+  cell.classList.toggle('checkbox', box)
+  cell.classList.toggle('checked', box && data?.value === true)
+  cell.classList.toggle('dropdown', check?.check === 'list')
+  cell.classList.toggle('invalid', Boolean(data?.invalid))
+  const tip = data?.invalid ? `Not allowed here: ${describeRule(check)}` : ''
+  if (cell.title !== tip) cell.title = tip
+}
+
+// Rows your filter hides, and the mark on filtered column letters.
+function drawFilter (v) {
+  const next = hiddenRows(v)
+  const body = v.table.tBodies[0]
+  for (const r of v.hidden) if (!next.has(r) && body.rows[r]) body.rows[r].hidden = false
+  for (const r of next) if (body.rows[r]) body.rows[r].hidden = true
+  v.hidden = next
+  const heads = v.table.tHead?.rows[0].cells
+  if (heads) for (let c = 0; c < v.sheet.cols.length; c++) heads[c + 1]?.classList.toggle('filtered', v.filters.has(v.sheet.cols[c]))
+}
+
+// The line above the grid: your filter, or what a summary sheet comes from.
+function drawNotice (v) {
+  const filter = filterNote(v, v.hidden)
+  const summary = summaryOf(v.ydoc, v.sheetId)
+  const key = `${filter}|${summary ? describeSummary(v.ydoc, v.sheetId) : ''}|${v.writable}`
+  if (v.notice.dataset.key === key) return
+  v.notice.dataset.key = key
+  const parts = []
+  if (summary) {
+    parts.push(el('span', {}, describeSummary(v.ydoc, v.sheetId)))
+    if (v.writable) parts.push(el('button', { type: 'button', class: 'btn btn-quiet btn-small', onclick: () => { if (!writeSummary(v.ydoc, v.sheetId)) toast('The cells this summary came from are gone.') } }, 'Update groups'))
+  }
+  if (filter) {
+    parts.push(el('span', {}, filter))
+    parts.push(el('button', { type: 'button', class: 'btn btn-quiet btn-small', onclick: () => { v.filters.clear(); v.refresh() } }, 'Show all rows'))
+  }
+  v.notice.replaceChildren(...parts)
+  v.notice.hidden = !parts.length
 }
 
 function drawSelection (v) {
@@ -304,9 +409,12 @@ function tabMenu (v, anchor, s, i, count) {
 
 // ---- moving and selecting ------------------------------------------------------------
 
-function select (v, r, c, extend = false) {
+function select (v, r, c, extend = false, dr = 0) {
   const s = v.sheet
   r = Math.max(0, Math.min(s.rows.length - 1, r))
+  // Moving up or down steps over rows your filter hides.
+  const inside = (n) => n >= 0 && n < s.rows.length
+  if (dr) while (v.hidden.has(r) && inside(r + dr)) r += dr
   c = Math.max(0, Math.min(s.cols.length - 1, c))
   v.sel = extend ? { ...v.sel, r2: r, c2: c } : { r, c, r2: r, c2: c }
   drawSelection(v)
@@ -344,7 +452,7 @@ function commitEdit (v, move = null) {
   const value = v.editor.value
   v.editor.hidden = true
   if (value !== e.original) setCell(v.ydoc, v.sheetId, e.r, e.c, value, context(v.ydoc, v.sheetId))
-  if (move) select(v, e.r + move[0], e.c + move[1])
+  if (move) select(v, e.r + move[0], e.c + move[1], false, move[0])
   v.focus()
 }
 
@@ -439,9 +547,11 @@ function wire (v) {
       if (box) { e.preventDefault(); insertRef(box, a1(r, c)); return }
       commitEdit(v)
       select(v, r, c, e.shiftKey)
-      dragging = true
       e.preventDefault()
       v.focus()
+      if (!e.shiftKey && v.writable && cell.classList.contains('checkbox')) { toggleCheck(v, r, c); return }
+      if (!e.shiftKey && cell.classList.contains('dropdown') && e.clientX > cell.getBoundingClientRect().right - 20) { openPick(v, r, c); return }
+      dragging = true
     } else if (colHead) {
       commitEdit(v)
       const c = Number(colHead.dataset.c)
@@ -463,7 +573,12 @@ function wire (v) {
   })
   const stopDrag = () => { dragging = false }
   window.addEventListener('mouseup', stopDrag)
-  table.addEventListener('dblclick', (e) => { if (e.target.closest('td')) startEdit(v) })
+  table.addEventListener('dblclick', (e) => {
+    const cell = e.target.closest('td')
+    if (!cell || cell.classList.contains('checkbox')) return
+    if (cell.classList.contains('dropdown')) openPick(v, v.sel.r2, v.sel.c2)
+    else startEdit(v)
+  })
   table.addEventListener('contextmenu', (e) => {
     const target = e.target.closest('td, .col-head, .row-head')
     if (!target || !v.writable) return
@@ -481,8 +596,9 @@ function wire (v) {
       e.preventDefault()
       const [dr, dc] = moves[e.key]
       if (mod) select(v, dr ? (dr < 0 ? 0 : v.sheet.rows.length - 1) : r2, dc ? (dc < 0 ? 0 : v.sheet.cols.length - 1) : c2, e.shiftKey)
-      else select(v, r2 + dr, c2 + dc, e.shiftKey)
-    } else if (e.key === 'Tab') { e.preventDefault(); select(v, r2, c2 + (e.shiftKey ? -1 : 1)) } else if (e.key === 'Enter' || e.key === 'F2') { e.preventDefault(); startEdit(v) } else if ((e.key === 'Delete' || e.key === 'Backspace') && v.writable) { e.preventDefault(); clearRange(v.ydoc, v.sheetId, range(v.sel)) } else if (mod && e.key.toLowerCase() === 'z' && v.undo) { e.preventDefault(); e.shiftKey ? v.undo.redo() : v.undo.undo() } else if (mod && e.key.toLowerCase() === 'y' && v.undo) { e.preventDefault(); v.undo.redo() } else if (mod && ['b', 'i', 'u'].includes(e.key.toLowerCase()) && v.writable) { e.preventDefault(); toggleStyle(v, e.key.toLowerCase()) } else if (mod && e.key.toLowerCase() === 'a') { e.preventDefault(); v.sel = { r: 0, c: 0, r2: v.sheet.rows.length - 1, c2: v.sheet.cols.length - 1 }; drawSelection(v) } else if (e.key.length === 1 && !mod && !e.altKey && v.writable) { e.preventDefault(); startEdit(v, e.key) }
+      else if (e.altKey && dr > 0 && v.sheet.checkAt(r2, c2)?.rule.check === 'list') openPick(v, r2, c2)
+      else select(v, r2 + dr, c2 + dc, e.shiftKey, dr)
+    } else if (e.key === 'Tab') { e.preventDefault(); select(v, r2, c2 + (e.shiftKey ? -1 : 1)) } else if (e.key === ' ' && v.writable && td(v, r2, c2)?.classList.contains('checkbox')) { e.preventDefault(); toggleCheck(v, r2, c2) } else if (e.key === 'Enter' || e.key === 'F2') { e.preventDefault(); startEdit(v) } else if ((e.key === 'Delete' || e.key === 'Backspace') && v.writable) { e.preventDefault(); clearRange(v.ydoc, v.sheetId, range(v.sel)) } else if (mod && e.key.toLowerCase() === 'z' && v.undo) { e.preventDefault(); e.shiftKey ? v.undo.redo() : v.undo.undo() } else if (mod && e.key.toLowerCase() === 'y' && v.undo) { e.preventDefault(); v.undo.redo() } else if (mod && ['b', 'i', 'u'].includes(e.key.toLowerCase()) && v.writable) { e.preventDefault(); toggleStyle(v, e.key.toLowerCase()) } else if (mod && e.key.toLowerCase() === 'a') { e.preventDefault(); v.sel = { r: 0, c: 0, r2: v.sheet.rows.length - 1, c2: v.sheet.cols.length - 1 }; drawSelection(v) } else if (e.key.length === 1 && !mod && !e.altKey && v.writable) { e.preventDefault(); startEdit(v, e.key) }
   })
 
   editor.addEventListener('keydown', (e) => {
@@ -525,6 +641,18 @@ function wire (v) {
     document.removeEventListener('cut', onCut)
     document.removeEventListener('paste', onPaste)
   }
+}
+
+function toggleCheck (v, r, c) {
+  setCell(v.ydoc, v.sheetId, r, c, v.sheet.get(r, c)?.value === true ? 'FALSE' : 'TRUE')
+}
+
+function openPick (v, r, c) {
+  const rule = v.sheet.checkAt(r, c)?.rule
+  const cell = td(v, r, c)
+  if (!rule || !cell) return
+  if (!v.writable) return
+  pickMenu(v, cell, r, c, rule, (value) => { setCell(v.ydoc, v.sheetId, r, c, value); v.focus() })
 }
 
 function startResize (v, e, c) {
@@ -611,9 +739,28 @@ function renderToolbar (v) {
     [
       tool('lines', 'Insert or delete rows and columns', icons.table, (b) => linesMenu(v, b), { menu: true }),
       tool('sum', 'Sum the selected cells', el('span', { class: 'tool-text' }, 'Σ'), () => autoSum(v))
+    ],
+    [
+      tool('sort', 'Sort', icons.sort, (b) => sortMenu(v, b), { menu: true }),
+      tool('filter', 'Filter this column (only you see it)', icons.filter, () => filterDialog(v), { menu: true }),
+      tool('freeze', 'Freeze rows and columns', icons.freeze, (b) => freezeMenu(v, b), { menu: true })
+    ],
+    [
+      tool('rules', 'Conditional formatting', icons.condition, () => formatRulesDialog(v), { menu: true }),
+      tool('checks', 'Dropdown, checkbox or allowed numbers', icons.dropdown, () => checksDialog(v), { menu: true })
+    ],
+    [
+      tool('chart', 'Insert a chart', icons.chart, () => insertChart(v, chartRange(v), usedRange(v.sheet))),
+      tool('summary', 'Summarize by group (pivot table)', icons.summary, () => summaryDialog(v, (id) => switchTo(v, id)), { menu: true })
     ]
   ])])
   syncToolbar(v)
+}
+
+// The cells a new chart draws: the selection, or all the data on the sheet.
+function chartRange (v) {
+  const sel = selRange(v.sel)
+  return sel.r0 !== sel.r1 || sel.c0 !== sel.c1 ? sel : tableRange(v.sheet)
 }
 
 // Puts =SUM(...) of the selection in the cell just below it.

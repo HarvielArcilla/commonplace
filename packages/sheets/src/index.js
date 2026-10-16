@@ -1,7 +1,8 @@
 // commonSheets app descriptor: what commonDrive needs to create, preview,
 // merge and restore spreadsheets. The grid UI lives in the desktop app.
 
-import { initSheets, preview, previewGrid, sheetList, sheetMap, context, SHEETS, SHEET_DATA } from './model.js'
+import { initSheets, preview, previewGrid, sheetList, sheetMap, context, SHEETS, SHEET_DATA, CHARTS } from './model.js'
+import { RULES } from './rules.js'
 import { sheetTemplates } from './templates.js'
 import { toDisplay } from './formula.js'
 
@@ -43,7 +44,7 @@ export const sheetsApp = {
   type: 'sheet',
   kind: 'sheet',
   name: 'Spreadsheet',
-  description: 'Rows, columns and formulas. Imports and exports .xlsx and .csv files.',
+  description: 'Rows, columns, formulas, charts and summaries. Imports and exports .xlsx and .csv files.',
   schemaVersion: 1,
   exports: ['xlsx', 'csv'],
   initContent (ydoc) { initSheets(ydoc) },
@@ -53,7 +54,7 @@ export const sheetsApp = {
   resolve,
   snapshotUnit,
   templates: sheetTemplates,
-  history: { roots: [{ name: SHEETS, type: 'array' }, { name: SHEET_DATA, type: 'map' }] }
+  history: { roots: [{ name: SHEETS, type: 'array' }, { name: SHEET_DATA, type: 'map' }, { name: RULES, type: 'map' }, { name: CHARTS, type: 'map' }] }
 }
 
 export default sheetsApp

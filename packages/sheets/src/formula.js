@@ -48,7 +48,7 @@ export function parseA1 (text) {
 
 export const a1 = (r, c) => `${colName(c)}${r + 1}`
 
-const quoteSheet = (name) => (/^[A-Za-z_][A-Za-z0-9_]*$/.test(name) ? name : `'${name.replace(/'/g, "''")}'`)
+export const quoteSheet = (name) => (/^[A-Za-z_][A-Za-z0-9_]*$/.test(name) ? name : `'${name.replace(/'/g, "''")}'`)
 
 // ---- tokenizer -----------------------------------------------------------------
 
@@ -114,6 +114,11 @@ export function toStored (input, ctx) {
   if (typeof input !== 'string' || !input.startsWith('=')) return input
   let tokens
   try { tokens = tokenize(input.slice(1)) } catch { return input }
+  // In Sheet2!A1:A3 the sheet belongs to both ends of the range.
+  tokens.forEach((tok, i) => {
+    const a = tokens[i - 2]
+    if (tok.t === 'ref' && !tok.stored && !tok.sheet && a?.t === 'ref' && a.sheet && tokens[i - 1].v === ':') tok.sheet = a.sheet
+  })
   return '=' + tokens.map((tok) => {
     if (tok.t !== 'ref' || tok.stored) return tok.text
     const sheet = tok.sheet ? sheetByName(ctx, tok.sheet) : sheetById(ctx)
@@ -127,12 +132,15 @@ export function toStored (input, ctx) {
 // "=SUM({r1:c1}:{r3:c1})" -> "=SUM(A1:A3)" for showing and editing.
 export function toDisplay (stored, ctx) {
   if (typeof stored !== 'string' || !stored.startsWith('=')) return stored ?? ''
-  return '=' + stored.slice(1).replace(new RegExp(STORED_REF.source.slice(1), 'g'), (_m, sheetId, absR, row, absC, col) => {
+  let prev = null // the sheet of a reference just before a ':'
+  return '=' + stored.slice(1).replace(new RegExp(STORED_REF.source.slice(1) + '(:?)', 'g'), (_m, sheetId, absR, row, absC, col, colon) => {
+    const sameAsStart = sheetId && prev === sheetId
+    prev = colon ? sheetId : null
     const sheet = sheetById(ctx, sheetId)
     const r = sheet ? sheet.rows.indexOf(row) : -1
     const c = sheet ? sheet.cols.indexOf(col) : -1
-    if (r < 0 || c < 0) return '#REF!'
-    return `${sheetId ? `${quoteSheet(sheet.name)}!` : ''}${absC ? '$' : ''}${colName(c)}${absR ? '$' : ''}${r + 1}`
+    if (r < 0 || c < 0) return '#REF!' + colon
+    return `${sheetId && !sameAsStart ? `${quoteSheet(sheet.name)}!` : ''}${absC ? '$' : ''}${colName(c)}${absR ? '$' : ''}${r + 1}${colon}`
   })
 }
 
@@ -295,6 +303,21 @@ function criterion (crit) {
   }
 }
 
+// The *IFS functions: values of `target` where every (range, criterion)
+// pair matches. count: count matching cells rather than numbers.
+function ifs (target, pairs, finish, count = false) {
+  if (!target?.range || !pairs.length || pairs.length % 2) return fail(ERR.value)
+  const vals = target.range.flat()
+  const tests = []
+  for (let i = 0; i < pairs.length; i += 2) {
+    const range = pairs[i]?.range?.flat()
+    if (!range || range.length !== vals.length) return fail(ERR.value)
+    tests.push([range, criterion(pairs[i + 1])])
+  }
+  const picked = vals.filter((v, i) => tests.every(([range, test]) => test(range[i])) && (count || typeof v === 'number'))
+  return finish(picked)
+}
+
 const round = (n, d, mode) => {
   const f = 10 ** d
   const x = n * f
@@ -357,6 +380,11 @@ const FUNCTIONS = {
     vals.forEach((v, i) => { if (test(v) && typeof sums[i] === 'number') total += sums[i] })
     return total
   },
+  SUMIFS: ([sumRange, ...pairs]) => ifs(sumRange, pairs, (v) => v.reduce((a, b) => a + b, 0)),
+  COUNTIFS: (pairs) => ifs(pairs[0], pairs, (v) => v.length, true),
+  AVERAGEIFS: ([avgRange, ...pairs]) => ifs(avgRange, pairs, (v) => (v.length ? v.reduce((a, b) => a + b, 0) / v.length : fail(ERR.div0))),
+  MINIFS: ([range, ...pairs]) => ifs(range, pairs, (v) => (v.length ? Math.min(...v) : 0)),
+  MAXIFS: ([range, ...pairs]) => ifs(range, pairs, (v) => (v.length ? Math.max(...v) : 0)),
   COUNTIF: ([range, crit]) => (range?.range ? range.range.flat().filter(criterion(crit)).length : fail(ERR.value)),
   AVERAGEIF: ([range, crit, avgRange]) => {
     if (!range?.range) return fail(ERR.value)

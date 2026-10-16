@@ -48,6 +48,13 @@ export const icons = {
   toc: i('<path d="M2.5 3.5h11M4.5 6.5h9M4.5 9.5h9M2.5 12.5h11"/>'),
   template: i('<rect x="2" y="2" width="12" height="12" rx="1.5"/><path d="M2 6h12M6 6v8"/>'),
   file: i('<path d="M3.75 1.75h5.5l3 3v9.5h-8.5z"/><path d="M9.25 1.75v3h3"/>'),
+  sort: i('<path d="M4.5 2.75v10.5M2.25 11l2.25 2.25L6.75 11"/><path d="M9 4h5M9 7.25h3.75M9 10.5h2.5"/>'),
+  filter: i('<path d="M2 3h12l-4.75 5.5v4.25l-2.5 1.25V8.5z"/>'),
+  freeze: i('<rect x="1.75" y="1.75" width="12.5" height="12.5" rx="1"/><path d="M1.75 5.5h12.5M5.5 5.5v8.75" stroke-width="2"/>'),
+  condition: i('<rect x="1.75" y="1.75" width="12.5" height="12.5" rx="1"/><path d="M1.75 6h12.5M1.75 10.25h12.5"/><path d="M6 10.25h8.25v4H6z" fill="currentColor" fill-opacity=".35" stroke="none"/><path d="M10 6h4.25v4.25H10z" fill="currentColor" fill-opacity=".6" stroke="none"/>'),
+  dropdown: i('<rect x="1.75" y="3.75" width="12.5" height="8.5" rx="1"/><path d="m9.5 7 1.5 1.5L12.5 7"/><path d="M4 8h3"/>'),
+  chart: i('<path d="M2 1.75v12.5h12.25"/><path d="M5 11.5V8.25M8 11.5V5M11 11.5V7" stroke-width="2"/>'),
+  summary: i('<rect x="1.75" y="1.75" width="12.5" height="12.5" rx="1"/><path d="M1.75 5.25h12.5M6.25 5.25v9"/><path d="M8.75 8h3M8.75 11h3"/>'),
   upload: i('<path d="M8 10.75v-8M4.75 6 8 2.75 11.25 6"/><path d="M2.5 10.5v3.25h11V10.5"/>')
 }
 

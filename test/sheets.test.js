@@ -125,3 +125,117 @@ test('xlsx and csv round trips keep values, formulas, styles and sheets', async 
   assert.equal(t.get(1, 1).text, '=1+1', 'formulas in a CSV stay text')
   assert.equal(t.get(2, 1).value, 98)
 })
+
+// ---- data tools -----------------------------------------------------------------
+
+test('sorting moves rows with their formulas and keeps references outside right', async () => {
+  const { sortRange } = await import('@commonplace/sheets/model')
+  const { d, id, text } = book({ A1: 'Name', B1: 'Score', A2: 'Cy', B2: '7', A3: 'Al', B3: '12', A4: 'Bo', B4: '3', C2: '=B2*2', C3: '=B3*2', C4: '=B4*2', B6: '=SUM(B2:B4)' })
+  assert.equal(sortRange(d, id, { r0: 1, c0: 0, r1: 3, c1: 2 }, 1, { descending: true }), true)
+  assert.deepEqual(['A2', 'A3', 'A4'].map(text), ['Al', 'Cy', 'Bo'])
+  assert.deepEqual(['C2', 'C3', 'C4'].map(text), ['24', '14', '6'])
+  assert.equal(readSheet(d, id).get(1, 2).input, '=B2*2')
+  assert.equal(text('B6'), '22')
+  sortRange(d, id, { r0: 1, c0: 0, r1: 3, c1: 2 }, 0)
+  assert.deepEqual(['A2', 'A3', 'A4'].map(text), ['Al', 'Bo', 'Cy'])
+})
+
+test('conditional formats, color scales and allowed values', async () => {
+  const { addRule, storeRange } = await import('@commonplace/sheets/rules')
+  const { d, id } = book({ A1: '5', A2: '50', A3: '500', B1: 'Yes', B2: 'Maybe', C1: 'TRUE', C2: 'x', D1: '15' })
+  const s0 = sheetList(d)[0]
+  addRule(d, { sheet: id, kind: 'format', range: storeRange(s0, { r0: 0, c0: 0, r1: 2, c1: 0 }), when: 'gt', a: '10', style: { bg: '#f8d7e3' } })
+  addRule(d, { sheet: id, kind: 'format', range: storeRange(s0, { r0: 0, c0: 0, r1: 2, c1: 0 }), when: 'scale', from: '#ffffff', to: '#000000' })
+  addRule(d, { sheet: id, kind: 'check', range: storeRange(s0, { r0: 0, c0: 1, r1: 19, c1: 1 }), check: 'list', options: ['Yes', 'No', 'yes'] })
+  addRule(d, { sheet: id, kind: 'check', range: storeRange(s0, { r0: 0, c0: 2, r1: 19, c1: 2 }), check: 'checkbox' })
+  addRule(d, { sheet: id, kind: 'check', range: storeRange(s0, { r0: 0, c0: 3, r1: 19, c1: 3 }), check: 'number', min: '1', max: '10' })
+  const s = readSheet(d, id)
+  assert.equal(s.get(0, 0).look.bg, '#ffffff') // the scale, added later, wins
+  assert.equal(s.get(2, 0).look.bg, '#000000')
+  assert.equal(s.get(0, 0).style, null) // the cell's own style is untouched
+  assert.equal(s.get(0, 1).invalid, false)
+  assert.equal(s.get(1, 1).invalid, true)
+  assert.deepEqual(s.get(0, 1).check.options, ['Yes', 'No'])
+  assert.equal(s.get(0, 2).invalid, false)
+  assert.equal(s.get(1, 2).invalid, true)
+  assert.equal(s.get(0, 3).invalid, true)
+  assert.equal(s.checkAt(5, 1).rule.check, 'list')
+  // A range follows its cells when rows are inserted above it.
+  insertRows(d, id, 0, 2)
+  assert.equal(readSheet(d, id).get(4, 0).look.bg, '#000000')
+})
+
+test('rules and charts added at the same time on two computers both survive', async () => {
+  const { addRule, storeRange, rulesFor } = await import('@commonplace/sheets/rules')
+  const { addChart, chartsOn } = await import('@commonplace/sheets/charts')
+  const { d: a, id } = book({ A1: '1' })
+  const b = new Y.Doc()
+  sync(a, b)
+  const s = sheetList(a)[0]
+  addRule(a, { sheet: id, kind: 'format', range: storeRange(s, { r0: 0, c0: 0, r1: 0, c1: 0 }), when: 'notEmpty', style: { b: true } })
+  addRule(b, { sheet: id, kind: 'check', range: storeRange(s, { r0: 0, c0: 1, r1: 0, c1: 1 }), check: 'checkbox' })
+  addChart(a, id, { r0: 0, c0: 0, r1: 0, c1: 0 })
+  addChart(b, id, { r0: 0, c0: 0, r1: 0, c1: 0 })
+  sync(a, b)
+  assert.equal(rulesFor(a, id).length, 2)
+  assert.equal(chartsOn(b, id).length, 2)
+})
+
+test('freezing, the IFS functions and sheet names on both ends of a range', async () => {
+  const { setFreeze, freezeOf } = await import('@commonplace/sheets/model')
+  const { d, id, text } = book({ A1: 'a', A2: 'b', A3: 'a', B1: '2', B2: '3', B3: '4', C1: '=SUMIFS(B1:B3,A1:A3,"a")', C2: '=COUNTIFS(A1:A3,"a",B1:B3,">3")', C3: '=MAXIFS(B1:B3,A1:A3,"a")', C4: '=MINIFS(B1:B3,A1:A3,"a")' })
+  assert.deepEqual(['C1', 'C2', 'C3', 'C4'].map(text), ['6', '1', '4', '2'])
+  setFreeze(d, id, { rows: 1 })
+  setFreeze(d, id, { cols: 2 })
+  assert.deepEqual(freezeOf(d, id), { rows: 1, cols: 2 })
+  const other = addSheet(d, { name: 'Other sheet' })
+  setCell(d, other, 0, 0, "=SUM('Sheet 1'!B1:B3)")
+  assert.equal(readSheet(d, other).get(0, 0).text, '9')
+  assert.equal(readSheet(d, other).get(0, 0).input, "=SUM('Sheet 1'!B1:B3)")
+})
+
+test('summaries are formulas that keep up, and update their groups', async () => {
+  const { summarize, writeSummary } = await import('@commonplace/sheets/summary')
+  const { d, id } = book({ A1: 'Team', B1: 'Hours', A2: 'Red', B2: '4', A3: 'Blue', B3: '6', A4: 'Red', B4: '5' })
+  const sid = summarize(d, id, { r0: 0, c0: 0, r1: 9, c1: 1 }, { group: 0, value: 1, fn: 'sum' })
+  const rows = () => { const s = readSheet(d, sid); return [0, 1, 2, 3].map((r) => [s.get(r, 0)?.text, s.get(r, 1)?.text]) }
+  assert.deepEqual(rows(), [['Team', 'Sum of Hours'], ['Blue', '6'], ['Red', '9'], ['Total', '15']])
+  setCell(d, id, 1, 1, '10')
+  assert.deepEqual(rows()[2], ['Red', '15'])
+  setCell(d, id, 4, 0, 'Green')
+  setCell(d, id, 4, 1, '1')
+  assert.equal(writeSummary(d, sid), true)
+  assert.deepEqual(rows(), [['Team', 'Sum of Hours'], ['Blue', '6'], ['Green', '1'], ['Red', '15']])
+})
+
+test('chart data reads headings and labels, and draws as SVG', async () => {
+  const { addChart, chartsOn, chartData, chartSvg } = await import('@commonplace/sheets/charts')
+  const { d, id } = book({ A1: 'Month', B1: 'Sales', C1: 'Costs', A2: 'Jan', B2: '10', C2: '4', A3: 'Feb', B3: '12', C3: '5' })
+  addChart(d, id, { r0: 0, c0: 0, r1: 2, c1: 2 }, { title: 'Q1 <draft>' })
+  const data = chartData(d, chartsOn(d, id)[0])
+  assert.deepEqual(data.labels, ['Jan', 'Feb'])
+  assert.deepEqual(data.series.map((s) => [s.name, s.values]), [['Sales', [10, 12]], ['Costs', [4, 5]]])
+  for (const type of ['column', 'bar', 'line', 'pie']) {
+    const svg = chartSvg(data, { type, title: 'Q1 <draft>' })
+    assert.match(svg, /^<svg/)
+    assert.ok(svg.includes('Q1 &lt;draft&gt;'))
+  }
+  assert.match(chartSvg({ labels: [], series: [] }), /Select cells/)
+})
+
+test('frozen panes, dropdowns, checkboxes and formats travel through .xlsx', async () => {
+  const { setFreeze } = await import('@commonplace/sheets/model')
+  const { addRule, storeRange, rulesFor } = await import('@commonplace/sheets/rules')
+  const { d, id } = book({ A1: 'Done', B1: 'Who' })
+  const s = sheetList(d)[0]
+  setFreeze(d, id, { rows: 1 })
+  addRule(d, { sheet: id, kind: 'check', range: storeRange(s, { r0: 1, c0: 0, r1: 9, c1: 0 }), check: 'checkbox' })
+  addRule(d, { sheet: id, kind: 'check', range: storeRange(s, { r0: 1, c0: 1, r1: 9, c1: 1 }), check: 'list', options: ['Ana', 'Ben'] })
+  addRule(d, { sheet: id, kind: 'format', range: storeRange(s, { r0: 1, c0: 2, r1: 9, c1: 2 }), when: 'gt', a: '3', style: { bg: '#d4efd9' } })
+  const back = new Y.Doc()
+  await importXlsx(back, await exportXlsx(d))
+  const t = sheetList(back)[0]
+  assert.deepEqual(readSheet(back, t.id).freeze, { rows: 1, cols: 0 })
+  assert.deepEqual(rulesFor(back, t.id).map((r) => r.check).sort(), ['checkbox', 'list'])
+  assert.deepEqual(readSheet(back, t.id).checkAt(5, 1).rule.options, ['Ana', 'Ben'])
+})

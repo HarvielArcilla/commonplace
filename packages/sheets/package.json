@@ -6,7 +6,10 @@
     ".": "./src/index.js",
     "./model": "./src/model.js",
     "./formula": "./src/formula.js",
-    "./convert": "./src/convert.js"
+    "./convert": "./src/convert.js",
+    "./rules": "./src/rules.js",
+    "./charts": "./src/charts.js",
+    "./summary": "./src/summary.js"
   },
   "dependencies": {
     "exceljs": "^4.4.0",

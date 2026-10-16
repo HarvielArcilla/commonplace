@@ -8,7 +8,10 @@
 //                                 cols:   Y.Array of column ids
 //                                 cells:  Y.Map  'rowId:colId' -> { v, s? }
 //                                 widths: Y.Map  colId -> pixels
+//                                 freeze: { rows, cols } (optional)
 //                               }
+//   ydoc.getMap('sheetRules')   conditional formats and validation (rules.js)
+//   ydoc.getMap('sheetCharts')  charts placed on a sheet (charts.js)
 //
 // A cell's v is what was typed (formulas in storage form, see formula.js);
 // s is its style: { b, i, u, al, nf, dp, fg, bg }. Rows and columns are
@@ -16,10 +19,12 @@
 // a cell further down on another lands both edits in the right place.
 
 import * as Y from 'yjs'
-import { evaluator, toStored, toDisplay, literal, isError, formatGeneral, dateFromSerial, colName } from './formula.js'
+import { evaluator, toStored, toDisplay, literal, isError, formatGeneral, dateFromSerial, colName, shiftFormula } from './formula.js'
+import { RULES, resolveRange, inRange, matches, allowed, mix } from './rules.js'
 
 export const SHEETS = 'sheets'
 export const SHEET_DATA = 'sheetData'
+export const CHARTS = 'sheetCharts'
 export const DEFAULT_ROWS = 100
 export const DEFAULT_COLS = 26
 export const DEFAULT_WIDTH = 100
@@ -83,6 +88,10 @@ export function deleteSheet (ydoc, id) {
   ydoc.transact(() => {
     for (let i = order.length - 1; i >= 0; i--) if (order.get(i) === id) order.delete(i, 1)
     ydoc.getMap(SHEET_DATA).delete(id)
+    for (const name of [RULES, CHARTS]) {
+      const map = ydoc.getMap(name)
+      for (const [key, x] of [...map]) if (x?.sheet === id) map.delete(key)
+    }
   })
   return true
 }
@@ -196,6 +205,58 @@ export function setWidth (ydoc, sheetId, c, px) {
   if (col) m.get('widths').set(col, Math.max(32, Math.min(800, Math.round(px))))
 }
 
+// Rows and columns that stay in view while the rest scrolls. Counted from
+// the top and the left, so the setting means the same thing on every copy.
+export function setFreeze (ydoc, sheetId, { rows, cols }) {
+  const m = sheetMap(ydoc, sheetId)
+  if (!m) return
+  const cur = m.get('freeze') || {}
+  const next = { rows: Math.max(0, Math.min(10, rows ?? cur.rows ?? 0)), cols: Math.max(0, Math.min(5, cols ?? cur.cols ?? 0)) }
+  if (!next.rows && !next.cols) m.delete('freeze')
+  else m.set('freeze', next)
+}
+
+export const freezeOf = (ydoc, sheetId) => ({ rows: 0, cols: 0, ...(sheetMap(ydoc, sheetId)?.get('freeze') || {}) })
+
+// Sorts the rows of a rectangle by one of its columns, as every spreadsheet
+// does: contents and styles move, the row ids stay. Formulas move with
+// their row, so =B2*C2 sorted to row 5 becomes =B5*C5. Numbers come before
+// text, and empty cells go last either way.
+export function sortRange (ydoc, sheetId, { r0, c0, r1, c1 }, byCol, { descending = false } = {}) {
+  const m = sheetMap(ydoc, sheetId)
+  const sheet = readSheet(ydoc, sheetId)
+  if (!m || !sheet || r1 <= r0) return false
+  const ctx = context(ydoc, sheetId)
+  const cells = m.get('cells')
+  const key = (r) => sheet.get(r, byCol)?.value ?? null
+  const rank = (v) => (v == null || v === '' ? 2 : typeof v === 'number' ? 0 : 1)
+  const order = []
+  for (let r = r0; r <= r1; r++) order.push(r)
+  order.sort((a, b) => {
+    const x = key(a)
+    const y = key(b)
+    if (rank(x) !== rank(y)) return rank(x) - rank(y)
+    if (rank(x) === 2) return a - b
+    const d = rank(x) === 0 ? x - y : String(x).localeCompare(String(y), undefined, { numeric: true, sensitivity: 'base' })
+    return (descending ? -d : d) || a - b
+  })
+  if (order.every((r, i) => r === r0 + i)) return false
+  const before = order.map((r) => Array.from({ length: c1 - c0 + 1 }, (_, i) => cells.get(cellKey(sheet.rows[r], sheet.cols[c0 + i])) || null))
+  ydoc.transact(() => {
+    before.forEach((row, i) => {
+      const to = r0 + i
+      const dr = to - order[i]
+      row.forEach((cell, j) => {
+        const k = cellKey(sheet.rows[to], sheet.cols[c0 + j])
+        if (!cell) { cells.delete(k); return }
+        const v = typeof cell.v === 'string' && cell.v.startsWith('=') && dr ? toStored(shiftFormula(toDisplay(cell.v, ctx), dr, 0), ctx) : cell.v
+        cells.set(k, cell.s ? { v, s: cell.s } : { v })
+      })
+    })
+  })
+  return true
+}
+
 // ---- reading -----------------------------------------------------------------------
 
 // Everything needed to show one sheet: values computed, text formatted.
@@ -215,17 +276,74 @@ export function readSheet (ydoc, sheetId) {
   const m = sheetMap(ydoc, sheetId)
   const widths = m.get('widths')
   const cells = m.get('cells')
+  const rules = [...ydoc.getMap(RULES)].filter(([, x]) => x?.sheet === sheetId)
+    .sort(([a, x], [b, y]) => (x.created || 0) - (y.created || 0) || (a < b ? -1 : 1))
+    .map(([id, rule]) => ({ id, rule, at: resolveRange(sheet, rule.range) }))
+    .filter((x) => x.at)
+  const formats = rules.filter((x) => x.rule.kind === 'format')
+  const checks = rules.filter((x) => x.rule.kind === 'check')
+  // A color scale runs from the smallest to the largest number in its range.
+  const extent = new Map()
+  const scaleOf = (x) => {
+    if (!extent.has(x.id)) {
+      let lo = Infinity
+      let hi = -Infinity
+      for (let r = x.at.r0; r <= x.at.r1; r++) {
+        for (let c = x.at.c0; c <= x.at.c1; c++) {
+          if (!cells.has(cellKey(sheet.rows[r], sheet.cols[c]))) continue
+          const v = evaluate(sheetId, r, c)
+          if (typeof v === 'number') { lo = Math.min(lo, v); hi = Math.max(hi, v) }
+        }
+      }
+      extent.set(x.id, [lo, hi])
+    }
+    return extent.get(x.id)
+  }
+  const lookOf = (r, c, value, style) => {
+    let look = style
+    for (const x of formats) {
+      if (!inRange(x.at, r, c)) continue
+      if (x.rule.when === 'scale') {
+        if (typeof value !== 'number') continue
+        const [lo, hi] = scaleOf(x)
+        look = { ...look, bg: mix(x.rule.from || '#ffffff', x.rule.to || '#5b8ad6', hi > lo ? (value - lo) / (hi - lo) : 1) }
+      } else if (matches(x.rule, value)) {
+        look = { ...look, ...x.rule.style }
+      }
+    }
+    return look
+  }
+  const checkAt = (r, c) => {
+    let found = null
+    for (const x of checks) if (inRange(x.at, r, c)) found = x
+    return found
+  }
+  const freeze = freezeOf(ydoc, sheetId)
   return {
     id: sheetId,
     name: sheet.name,
     rows: sheet.rows,
     cols: sheet.cols,
     widths: sheet.cols.map((id) => widths.get(id) || DEFAULT_WIDTH),
+    freeze: { rows: Math.min(freeze.rows, sheet.rows.length - 1), cols: Math.min(freeze.cols, sheet.cols.length - 1) },
+    formats,
+    checks,
+    checkAt,
     get (r, c) {
       const stored = cells.get(cellKey(sheet.rows[r], sheet.cols[c]))
       if (!stored) return null
       const value = evaluate(sheetId, r, c)
-      return { input: toDisplay(stored.v, ctx), value, text: formatValue(value, stored.s), style: stored.s || null }
+      const style = stored.s || null
+      const check = checks.length ? checkAt(r, c) : null
+      return {
+        input: toDisplay(stored.v, ctx),
+        value,
+        text: formatValue(value, style),
+        style,
+        look: formats.length ? lookOf(r, c, value, style) : style,
+        check: check?.rule || null,
+        invalid: check ? !allowed(check.rule, value) : false
+      }
     },
     // Every cell that has something in it.
     * filled () {

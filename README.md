@@ -22,9 +22,9 @@ Work on the same file at the same time, see each other's cursors, leave comments
 
 **commonDocs** has markdown documents for writing that flows, and paged documents with paper size, margins, fonts and colors. Both have links, LaTeX math, tables, images, footnotes, a table of contents that keeps itself up to date, find and replace, a word count, spell checking, comments, and a suggesting mode whose edits others accept or reject. Paged documents have headers and footers ("Page {page} of {pages}").
 
-**commonSheets** has formulas (SUM, AVERAGE, IF, VLOOKUP, SUMIF and more), several sheets per file, number formats and styles.
+**commonSheets** has formulas (SUM, AVERAGE, IF, VLOOKUP, SUMIFS and more), several sheets per file, number formats and styles, sorting, frozen rows and columns, conditional formatting and color scales, dropdowns and checkboxes, charts (columns, bars, lines and pies) and summaries by group, like pivot tables. Filters change only your own view, so nobody's rows vanish under them.
 
-![commonSheets: a garden budget with a SUM formula](docs/images/sheet.png)
+![commonSheets: a budget with checkboxes, a dropdown, highlighted overspending and a chart](docs/images/sheet.png)
 
 **commonSlides** has layouts, text boxes, shapes, images, speaker notes and full-screen presenting.
 

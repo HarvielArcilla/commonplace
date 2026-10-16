@@ -122,6 +122,7 @@ button.crumb:hover { color: var(--ink); text-decoration: underline; text-underli
 .btn-quiet:hover { color: var(--ink); border-color: var(--rule); }
 .btn-icon { padding: 4px 6px; display: inline-flex; align-items: center; }
 .btn-danger { color: var(--danger); }
+.btn-small { padding: 2px 8px; font-size: 12px; }
 .btn-danger-solid { background: var(--danger); border-color: var(--danger); color: var(--paper-raised); }
 
 /* ---- secondary toolbars (Drive options, formatting) ------------------- */
@@ -730,6 +731,54 @@ body.margin-folded :is(.grid-margin, .margin-inner) { padding-left: 0; padding-r
 .sheet-tab { border: 1px solid transparent; background: none; padding: 4px 12px; border-radius: 0 0 6px 6px; font: 13px var(--ui); color: var(--ink-soft); cursor: pointer; white-space: nowrap; }
 .sheet-tab[aria-selected="true"] { background: var(--paper-raised); border-color: var(--rule); border-top-color: var(--paper-raised); color: var(--ink); font-weight: 500; margin-top: -5px; padding-top: 9px; }
 .sheet-tab.add { font-size: 16px; padding: 2px 10px; }
+/* frozen panes */
+.grid tr.frozen-row > td, .grid tr.frozen-row > th { position: sticky; top: var(--top); z-index: 2; }
+.grid td.frozen-col { position: sticky; left: var(--left); z-index: 1; }
+.grid tr.frozen-row > td.frozen-col { z-index: 3; }
+.grid tr.frozen-row > th.row-head { z-index: 4; }
+.grid thead th.frozen-col { left: var(--left); z-index: 5; }
+.grid tr.freeze-edge > td, .grid tr.freeze-edge > th { border-bottom: 2px solid var(--margin-line); }
+.grid td.freeze-edge, .grid th.freeze-edge { border-right: 2px solid var(--margin-line); }
+
+/* validation: checkboxes, dropdowns, values outside the rule */
+.grid td.checkbox { cursor: pointer; }
+.grid td.checkbox::before { content: ''; display: inline-block; width: 12px; height: 12px; border: 1.5px solid var(--ink-faint); border-radius: 3px; vertical-align: -2px; }
+.grid td.checkbox.checked::before { background: var(--accent) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 6.2 5 8.5l4.5-5' fill='none' stroke='white' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / 10px no-repeat; border-color: var(--accent); }
+.grid td.dropdown { padding-right: 18px; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6'%3E%3Cpath d='m1 1 4 4 4-4' fill='none' stroke='%238a8f9b' stroke-width='1.4' stroke-linecap='round'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 6px center; background-size: 8px 5px; }
+.grid td.invalid { box-shadow: inset 0 -2px 0 var(--danger); }
+.grid td.invalid.focus { box-shadow: inset 0 0 0 2px var(--accent), inset 0 -4px 0 var(--danger); }
+
+/* filters (yours only) and the line above the grid */
+.grid th.filtered { color: var(--accent); font-weight: 600; }
+.grid th.filtered::before { content: ''; display: inline-block; width: 7px; height: 7px; margin-right: 4px; background: currentColor; clip-path: polygon(0 0, 100% 0, 60% 55%, 60% 100%, 40% 100%, 40% 55%); }
+.sheet-notice { display: flex; align-items: center; gap: 10px; padding: 5px 14px; border-bottom: 1px solid var(--rule); background: color-mix(in srgb, var(--accent) 6%, var(--paper)); font: 13px var(--serif); color: var(--ink-soft); }
+.filter-actions { display: flex; gap: 4px; margin: 8px 0 4px; }
+.filter-list { max-height: 280px; overflow-y: auto; border: 1px solid var(--rule); border-radius: 6px; padding: 4px 10px; }
+.filter-value { margin: 6px 0; }
+.filter-value span:nth-child(2) { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.filter-count { color: var(--ink-faint); font-size: 12px; }
+
+/* conditional formatting and allowed values */
+.dialog-sub { font: 600 15px var(--serif); margin: 18px 0 10px; }
+.rule-list { list-style: none; margin: 0 0 6px; padding: 0; display: grid; gap: 6px; }
+.rule-list li { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+.rule-swatch { width: 18px; height: 18px; border-radius: 4px; border: 1px solid var(--rule); background: var(--swatch); flex: none; }
+.rule-text { flex: 1; }
+.rule-values { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; }
+.rule-values input { flex: 1; min-width: 0; }
+.rule-and { color: var(--ink-faint); font-size: 13px; }
+
+/* charts over the grid */
+.chart-layer { position: absolute; left: 0; top: 0; width: 0; height: 0; z-index: 2; }
+.chart-box { position: absolute; margin: 0; border: 1px solid var(--rule); border-radius: 6px; background: var(--paper-raised); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08); overflow: hidden; outline: none; }
+.chart-box.editable { cursor: move; }
+.chart-box:focus-visible, .chart-box:focus { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.chart-art, .chart-art svg { display: block; width: 100%; height: 100%; }
+.chart-menu { position: absolute; top: 6px; right: 6px; border: 1px solid var(--rule); border-radius: 5px; background: var(--paper-raised); color: var(--ink-soft); padding: 2px 4px; cursor: pointer; opacity: 0; transition: opacity 0.12s; display: inline-flex; }
+.chart-box:hover .chart-menu, .chart-box:focus-within .chart-menu { opacity: 1; }
+.chart-grip { position: absolute; right: 0; bottom: 0; width: 14px; height: 14px; cursor: nwse-resize; display: none; background: linear-gradient(135deg, transparent 50%, var(--ink-faint) 50%, var(--ink-faint) 58%, transparent 58%, transparent 70%, var(--ink-faint) 70%, var(--ink-faint) 78%, transparent 78%); }
+.chart-box.editable:hover .chart-grip { display: block; }
+
 .thumb-grid { padding: 8px; background: var(--paper-raised); }
 .thumb-grid table { border-collapse: collapse; width: 100%; table-layout: fixed; }
 .thumb-grid td { border: 1px solid var(--rule); height: 13px; font: 7px/12px var(--ui); color: var(--ink-soft); overflow: hidden; white-space: nowrap; padding: 0 2px; }

@@ -4,9 +4,10 @@
 
 import ExcelJS from 'exceljs'
 import {
-  addSheet, sheetList, readSheet, setCell, styleRange, setWidth, context, SHEETS, SHEET_DATA, DEFAULT_WIDTH
+  addSheet, sheetList, readSheet, setCell, styleRange, setWidth, setFreeze, context, SHEETS, SHEET_DATA, CHARTS, DEFAULT_WIDTH
 } from './model.js'
-import { isError } from './formula.js'
+import { isError, a1, parseA1 } from './formula.js'
+import { RULES, addRule, storeRange } from './rules.js'
 
 const NUMBER_FORMATS = { number: '#,##0.00', percent: '0%', currency: '$#,##0.00', date: 'yyyy-mm-dd', text: '@' }
 const argb = (hex) => `FF${hex.replace('#', '').toUpperCase()}`
@@ -39,8 +40,66 @@ export async function exportXlsx (ydoc) {
       if (st.bg) x.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: argb(st.bg) } }
       if (st.nf && NUMBER_FORMATS[st.nf]) x.numFmt = st.dp != null && st.nf === 'number' ? `#,##0${st.dp ? '.' + '0'.repeat(st.dp) : ''}` : NUMBER_FORMATS[st.nf]
     }
+    exportSheetExtras(ws, sheet)
   }
   return Buffer.from(await wb.xlsx.writeBuffer())
+}
+
+// Frozen rows and columns, dropdowns, checkboxes and conditional formats.
+// (Charts stay in commonSheets: the .xlsx writer can't draw them.)
+function exportSheetExtras (ws, sheet) {
+  if (sheet.freeze.rows || sheet.freeze.cols) ws.views = [{ state: 'frozen', xSplit: sheet.freeze.cols, ySplit: sheet.freeze.rows }]
+  const ref = (at) => `${a1(at.r0, at.c0)}:${a1(at.r1, at.c1)}`
+  for (const { rule, at } of sheet.checks) {
+    const v = rule.check === 'list'
+      ? { type: 'list', allowBlank: true, formulae: [`"${(rule.options || []).map((o) => o.replace(/[",]/g, ' ')).join(',')}"`] }
+      : rule.check === 'checkbox'
+        ? { type: 'list', allowBlank: true, formulae: ['"TRUE,FALSE"'] }
+        : { type: 'decimal', allowBlank: true, operator: 'between', formulae: [Number(rule.min ?? -1e15), Number(rule.max ?? 1e15)] }
+    ws.dataValidations.add(ref(at), { ...v, showErrorMessage: false })
+  }
+  for (const { rule, at } of sheet.formats) {
+    const style = {}
+    if (rule.style?.bg) style.fill = { type: 'pattern', pattern: 'solid', bgColor: { argb: argb(rule.style.bg) } }
+    if (rule.style?.fg || rule.style?.b) style.font = { color: rule.style.fg ? { argb: argb(rule.style.fg) } : undefined, bold: rule.style.b || undefined }
+    const cell = (operator, formulae) => ({ type: 'cellIs', operator, formulae, style })
+    const x = {
+      gt: () => cell('greaterThan', [Number(rule.a)]),
+      lt: () => cell('lessThan', [Number(rule.a)]),
+      eq: () => cell('equal', [Number.isFinite(Number(rule.a)) ? Number(rule.a) : `"${rule.a}"`]),
+      between: () => cell('between', [Number(rule.a), Number(rule.b)]),
+      contains: () => ({ type: 'containsText', operator: 'containsText', text: String(rule.a), style }),
+      notEmpty: () => ({ type: 'expression', formulae: [`LEN(TRIM(${a1(at.r0, at.c0)}))>0`], style }),
+      scale: () => ({ type: 'colorScale', cfvo: [{ type: 'min' }, { type: 'max' }], color: [{ argb: argb(rule.from || '#ffffff') }, { argb: argb(rule.to || '#5b8ad6') }] })
+    }[rule.when]
+    if (x) ws.addConditionalFormatting({ ref: ref(at), rules: [{ priority: 1, ...x() }] })
+  }
+}
+
+// Frozen panes and dropdown lists from an .xlsx sheet.
+function importSheetExtras (ydoc, id, ws) {
+  const view = ws.views?.find((x) => x.state === 'frozen')
+  if (view) setFreeze(ydoc, id, { rows: view.ySplit || 0, cols: view.xSplit || 0 })
+  const groups = new Map()
+  for (const [address, v] of Object.entries(ws.dataValidations?.model || {})) {
+    if (v?.type !== 'list' || !/^"/.test(v.formulae?.[0] || '')) continue
+    const options = v.formulae[0].slice(1, -1).split(',').map((o) => o.trim()).filter(Boolean)
+    const key = options.join('\n')
+    for (const part of address.replace(/^range:/, '').split(/\s+/)) {
+      const [a, b] = part.split(':').map(parseA1)
+      if (!a) continue
+      const g = groups.get(key) || { options, r0: Infinity, c0: Infinity, r1: -1, c1: -1 }
+      g.r0 = Math.min(g.r0, a.r); g.c0 = Math.min(g.c0, a.c)
+      g.r1 = Math.max(g.r1, (b || a).r); g.c1 = Math.max(g.c1, (b || a).c)
+      groups.set(key, g)
+    }
+  }
+  const sheet = sheetList(ydoc).find((s) => s.id === id)
+  for (const g of groups.values()) {
+    const sel = { r0: g.r0, c0: g.c0, r1: Math.min(g.r1, sheet.rows.length - 1), c1: Math.min(g.c1, sheet.cols.length - 1) }
+    const isBool = g.options.length === 2 && g.options.every((o) => /^(true|false)$/i.test(o))
+    addRule(ydoc, { sheet: id, kind: 'check', range: storeRange(sheet, sel), ...(isBool ? { check: 'checkbox' } : { check: 'list', options: g.options }) })
+  }
 }
 
 // Fills an empty spreadsheet (no sheets yet) from an .xlsx file.
@@ -69,6 +128,7 @@ export async function importXlsx (ydoc, bytes) {
           if (style) styleRange(ydoc, id, { r0: r - 1, c0: c - 1, r1: r - 1, c1: c - 1 }, style)
         })
       })
+      importSheetExtras(ydoc, id, ws)
     }
   })
   return { warnings }
@@ -162,6 +222,8 @@ export function importCsv (ydoc, text, { name = 'Sheet 1' } = {}) {
 function clear (ydoc) {
   const order = ydoc.getArray(SHEETS)
   if (order.length) order.delete(0, order.length)
-  const data = ydoc.getMap(SHEET_DATA)
-  for (const k of [...data.keys()]) data.delete(k)
+  for (const name of [SHEET_DATA, RULES, CHARTS]) {
+    const map = ydoc.getMap(name)
+    for (const k of [...map.keys()]) map.delete(k)
+  }
 }
