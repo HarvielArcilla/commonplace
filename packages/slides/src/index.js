@@ -3,6 +3,7 @@
 
 import * as Y from 'yjs'
 import { initSlides, preview, thumbnail, slideIds, readSlide, plainText, slideMap, SLIDES, SLIDE_DATA, DECK } from './model.js'
+import { slideTemplates } from './templates.js'
 
 // Conflict units: every element on every slide (plus the title). An
 // element's signature covers where it is, how it looks and its text.
@@ -66,6 +67,7 @@ export const slidesApp = {
   units,
   resolve,
   snapshotUnit,
+  templates: slideTemplates,
   history: { roots: [{ name: SLIDES, type: 'array' }, { name: SLIDE_DATA, type: 'map' }, { name: DECK, type: 'map' }] }
 }
 

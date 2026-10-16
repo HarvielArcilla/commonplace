@@ -20,6 +20,7 @@ import { Files, filesApp, GUARD_BYTES } from './files.js'
 import { SharedFolders, folderApp, ITEMS } from './shared-folders.js'
 import { openThreadCount } from '@commonplace/core/threads'
 import { Activity } from './activity.js'
+import { Templates } from './templates.js'
 
 export { sendDrive, receiveDrive, newMoveCode, parseMoveCode } from './move.js'
 export { Backups, readBackupFile, restoreBackup, newRecoveryKey, normalizeRecoveryKey } from './backup.js'
@@ -51,6 +52,7 @@ export class Drive extends EventEmitter {
     this.uploads = new Files(this, { makeThumb })
     this.shared = new SharedFolders(this)
     this.activity = new Activity(this)
+    this.templates = new Templates(this)
     this.history = new History(this.store)
     this.historyTiming = { ...HISTORY, ...history }
     this._checkpoints = new Map() // docId -> { first, timer } for unsaved changes
@@ -301,14 +303,17 @@ export class Drive extends EventEmitter {
 
   // ---- commands ------------------------------------------------------------
 
-  async create (type, title = 'Untitled', { folderId = null } = {}) {
+  // build(ydoc), if given, fills the new file instead of the app's blank start
+  // (templates and copies use it).
+  async create (type, title = 'Untitled', { folderId = null, build = null } = {}) {
     const app = this.appsByType.get(type)
     if (!app) throw new Error(`no app installed for type "${type}"`)
     const secret = newDocSecret()
     const { docId } = deriveDocKeys(secret)
     const doc = this.engine.openDoc(secret)
     initContainer(doc.ydoc, { type, title, owner: this.identity, schemaVersion: app.schemaVersion })
-    app.initContent?.(doc.ydoc)
+    if (build) doc.ydoc.transact(() => build(doc.ydoc), 'local')
+    else app.initContent?.(doc.ydoc)
     doc.ydoc.transact(() => { for (const key of this.myHelpersMap.keys()) doc.ydoc.getMap('helpers').set(key, { addedBy: this.identity.userId, at: Date.now() }) }, 'local')
     this.engine.ensureMembership(docId)
     this.files.set(docId, {
@@ -322,6 +327,8 @@ export class Drive extends EventEmitter {
       addedAt: Date.now()
     })
     this._attach(this.files.get(docId))
+    // Made inside a shared folder: it's shared with the folder's people.
+    if (folderId && this.shared.isFolder(folderId)) { try { this.moveFile(docId, folderId) } catch (err) { this.emit('error', err) } }
     this._changed()
     return docId
   }
@@ -545,6 +552,22 @@ export class Drive extends EventEmitter {
     this._patch(docId, { lastOpenedAt: Date.now() })
   }
 
+  // A new file of mine with the same content (not the people, comments or
+  // history), next to the original.
+  async copy (docId) {
+    const entry = this.files.get(docId)
+    const doc = this.engine.getDoc(docId)
+    const app = entry && this.appsByType.get(entry.type)
+    if (!doc || !app?.history?.roots?.length || entry.type === 'folder' || entry.type === 'file') throw new Error('This file can’t be copied.')
+    const roots = app.history.roots.filter((r) => r.name !== 'responses')
+    const where = this.shared.placeOf(docId)
+    const copyId = await this.create(entry.type, `Copy of ${entry.title || 'Untitled'}`.slice(0, 200), {
+      folderId: where && this.shared.isFolder(where) && ['owner', 'editor'].includes(this.engine.access(where)?.role) ? where : this.folders.has(entry.folderId) ? entry.folderId : null,
+      build: (ydoc) => { restoreContent(ydoc, doc.ydoc, roots); ydoc.getMap('meta').set('title', `Copy of ${entry.title || 'Untitled'}`.slice(0, 200)) }
+    })
+    return copyId
+  }
+
   // Removes the file from my Drive, on each of my computers. Other
   // collaborators keep theirs.
   async remove (docId) {
@@ -646,9 +669,7 @@ export class Drive extends EventEmitter {
 
   // A new shared folder, empty, with me as its owner.
   async createSharedFolder (name, parentId = null) {
-    const docId = await this.create('folder', cleanName(name) || 'Shared folder', { folderId: this.folders.has(parentId) ? parentId : null })
-    if (parentId && this.shared.isFolder(parentId)) this.moveFile(docId, parentId)
-    return docId
+    return this.create('folder', cleanName(name) || 'Shared folder', { folderId: parentId })
   }
 
   // Turns one of my folders into a shared folder, with its subfolders.

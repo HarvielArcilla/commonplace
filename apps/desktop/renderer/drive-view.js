@@ -179,6 +179,7 @@ function emptyState () {
     el('div', { class: 'bar-actions' },
       el('button', { class: 'btn', onclick: importFile }, 'Import a file'),
       el('button', { class: 'btn', onclick: () => uploadFiles() }, 'Upload files'),
+      el('button', { class: 'btn', onclick: () => templateGallery() }, 'Start from a template'),
       el('button', { class: 'btn btn-quiet', onclick: () => handlers.openJoinDialog() }, 'Join with invite')),
     el('p', { class: 'empty-move' }, 'Moving from another computer? ',
       el('button', { type: 'button', class: 'link-button', onclick: moveInDialog }, 'Bring your Drive here'),
@@ -419,6 +420,8 @@ function openNewMenu (anchor) {
   openMenu(anchor, [
     ...state.apps.map((a) => ({ label: a.name, hint: a.description, icon: kindIcon(a.kind), onSelect: () => newDocument(a.type) })),
     { sep: true },
+    { label: 'From a template…', icon: icons.template, onSelect: () => templateGallery() },
+    { sep: true },
     { label: 'Folder', hint: 'Just for organizing your Drive', icon: icons.folder, onSelect: newFolder },
     { label: 'Shared folder', hint: 'Everyone in it gets what’s inside', icon: icons.sharedFolder, onSelect: newSharedFolder },
     { label: 'Import a file…', hint: '.md, .docx, .xlsx, .csv or .ics', icon: icons.import, onSelect: importFile },
@@ -431,6 +434,57 @@ async function newDocument (type) {
   const title = { paged: 'Untitled document', sheet: 'Untitled spreadsheet', slides: 'Untitled presentation', tasks: 'Untitled tasks', calendar: 'Untitled calendar', whiteboard: 'Untitled whiteboard', form: 'Untitled form' }[app?.kind] || 'Untitled notes'
   const docId = await cp.createFile(type, title, state.folderId)
   await handlers.openDocument(docId, { focusTitle: true })
+}
+
+// ---- templates and copies ----------------------------------------------------------
+
+async function templateGallery () {
+  let list
+  try { list = await cp.listTemplates() } catch (err) { toast(cleanError(err)); return }
+  const d = el('dialog', { class: 'dialog dialog-wide templates' })
+  const pick = async (t) => {
+    d.close()
+    try {
+      const docId = await cp.createFromTemplate(t.id, state.folderId)
+      await handlers.openDocument(docId, { focusTitle: true })
+    } catch (err) { toast(cleanError(err)) }
+  }
+  const card = (t) => el('div', { class: 'template' },
+    el('button', { type: 'button', class: 'template-pick', onclick: () => pick(t), 'aria-label': `${t.name}: ${t.description}` },
+      thumbnail({ kind: t.kind, thumb: t.thumb, preview: t.preview }),
+      el('span', { class: 'template-name' }, t.name),
+      el('span', { class: 'template-desc' }, t.description || t.appName)),
+    t.mine ? el('button', { type: 'button', class: 'link-button template-remove', onclick: async () => { if (await confirmAction({ title: `Delete the template “${t.name}”?`, body: 'Files made from it stay as they are.', confirm: 'Delete' })) { await cp.removeTemplate(t.id); d.close(); templateGallery() } } }, 'Delete') : null)
+  const groups = []
+  const mine = list.filter((t) => t.mine)
+  if (mine.length) groups.push(['Your templates', mine])
+  for (const app of state.apps) {
+    const items = list.filter((t) => !t.mine && t.type === app.type)
+    if (items.length) groups.push([app.name, items])
+  }
+  d.append(el('form', { method: 'dialog' },
+    el('h2', {}, 'Start from a template'),
+    el('p', { class: 'fineprint-plain' }, 'Templates are part of commonplace and work offline. Save any file of yours as a template from its menu in commonDrive.'),
+    el('div', { class: 'template-groups' }, ...groups.map(([name, items]) => el('section', {},
+      el('h3', {}, name),
+      el('div', { class: 'template-grid' }, ...items.map(card))))),
+    el('div', { class: 'dialog-actions' }, el('button', { class: 'btn btn-quiet', value: 'cancel' }, 'Cancel'))))
+  document.body.append(d)
+  d.addEventListener('close', () => d.remove())
+  d.showModal()
+}
+
+async function copyFile (f) {
+  try {
+    await cp.copyFile(f.docId)
+    toast(`Made “Copy of ${f.title || 'Untitled'}”`)
+  } catch (err) { toast(cleanError(err)) }
+}
+
+async function saveTemplate (f) {
+  const name = await promptText({ title: 'Save as template', label: 'Template name', value: f.title, confirm: 'Save template', body: 'The content is saved on this computer, without the people, comments or history. Your templates appear under New → From a template.' })
+  if (!name) return
+  try { await cp.saveAsTemplate(f.docId, name, ''); toast(`Saved the template “${name}”`) } catch (err) { toast(cleanError(err)) }
 }
 
 async function newFolder () {
@@ -543,6 +597,8 @@ function fileMenu (anchor, f) {
     { label: 'Sync in the background', hint: f.syncMode === 'open' ? 'Off: syncs only while the file is open' : 'On: syncs whenever commonplace is running', checked: f.syncMode !== 'open', onSelect: () => setSyncMode(f.docId, f.syncMode === 'open' ? 'always' : 'open') },
     { label: 'Move to…', icon: icons.folder, onSelect: () => moveDialog({ kind: 'file', id: f.docId, name: f.title, current: f.folderId }) },
     f.conflicts?.length ? { label: f.role === 'owner' ? 'Review conflicts\u2026' : 'See conflicts\u2026', onSelect: () => conflictsDialog(f.docId) } : null,
+    { label: 'Make a copy', disabled: !openable || f.kind === 'file', onSelect: () => copyFile(f) },
+    { label: 'Save as template…', disabled: !openable || f.kind === 'file', onSelect: () => saveTemplate(f) },
     { label: 'Details', onSelect: () => detailsDialog(f) },
     { sep: true },
     {

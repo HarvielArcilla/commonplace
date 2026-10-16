@@ -1119,3 +1119,17 @@ textarea.a-text { resize: vertical; }
 .activity-time { color: var(--ink-faint); font: italic 13px/1.4 var(--serif); white-space: nowrap; }
 .task-card .comment-badge { top: 9px; right: 8px; }
 .q-edit .comment-badge { top: 10px; right: 10px; }
+
+/* ---- templates ------------------------------------------------------------------- */
+.templates { width: min(860px, calc(100vw - 32px)); }
+.template-groups { max-height: 64vh; overflow: auto; margin: 8px -4px 0; padding: 0 4px; }
+.template-groups h3 { margin: 18px 0 8px; font: 500 16px/1.3 var(--serif); }
+.template-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 14px; }
+.template { display: flex; flex-direction: column; gap: 4px; }
+.template-pick { display: flex; flex-direction: column; align-items: stretch; gap: 6px; padding: 0; border: 0; background: none; text-align: left; cursor: pointer; color: var(--ink); }
+.template-pick .thumb { width: 100%; height: 126px; border-radius: 8px; box-sizing: border-box; }
+.template-pick:hover .thumb, .template-pick:focus-visible .thumb { box-shadow: 0 0 0 2px var(--accent); }
+.template-name { font: 500 15px/1.3 var(--serif); }
+.template-desc { font: italic 13px/1.4 var(--serif); color: var(--ink-soft); }
+.template-remove { align-self: flex-start; font-size: 13px; }
+.template-groups:focus { outline: none; }

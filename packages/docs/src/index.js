@@ -10,6 +10,7 @@
 import * as Y from 'yjs'
 import { DEFAULT_PAGE } from './page.js'
 import { reviewCounts } from './comments.js'
+import { pagedTemplates, markdownTemplates } from './templates.js'
 
 export const CONTENT_FIELD = 'content'
 
@@ -109,6 +110,7 @@ export const markdownApp = {
   resolve,
   snapshotBlock,
   review: reviewCounts,
+  templates: markdownTemplates,
   // What restoring an old version puts back (the title always comes back).
   history: { roots: [{ name: CONTENT_FIELD, type: 'xml' }] }
 }
@@ -129,11 +131,12 @@ export const pagedApp = {
   resolve,
   snapshotBlock,
   review: reviewCounts,
+  templates: pagedTemplates,
   history: { roots: [{ name: CONTENT_FIELD, type: 'xml' }, { name: 'page', type: 'map' }] }
 }
 
 // Files created before there were two types used "docs"; they are markdown.
-export const docsApp = { ...markdownApp, type: 'docs', hidden: true }
+export const docsApp = { ...markdownApp, type: 'docs', hidden: true, templates: [] }
 
 export const docsApps = [markdownApp, pagedApp, docsApp]
 

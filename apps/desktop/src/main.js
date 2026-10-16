@@ -395,6 +395,11 @@ function registerIpc () {
   ipcMain.handle('storage:usage', () => drive.storageUsage())
   ipcMain.handle('storage:settings', (_e, patch) => drive.setStorageSettings(patch || {}))
   ipcMain.handle('drive:keepSyncing', (_e, docId) => drive.keepSyncing(docId))
+  ipcMain.handle('templates:list', () => drive.templates.list())
+  ipcMain.handle('templates:create', (_e, id, folderId) => drive.templates.create(id, { folderId }))
+  ipcMain.handle('templates:save', (_e, docId, name, description) => drive.templates.save(docId, { name, description }))
+  ipcMain.handle('templates:remove', (_e, id) => drive.templates.remove(id))
+  ipcMain.handle('file:copy', (_e, docId) => drive.copy(docId))
   ipcMain.handle('activity:list', () => drive.activity.list())
   ipcMain.handle('activity:read', (_e, ids) => drive.activity.markRead(Array.isArray(ids) ? ids.filter((x) => typeof x === 'string') : null))
 

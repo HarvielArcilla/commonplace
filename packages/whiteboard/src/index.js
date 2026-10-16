@@ -3,6 +3,7 @@
 
 import * as Y from 'yjs'
 import { initBoard, preview, thumbnail, allShapes, HAS_TEXT, SHAPES } from './model.js'
+import { boardTemplates } from './templates.js'
 
 // Conflict units: each shape, and the title. A shape's signature covers its
 // place, look and text.
@@ -54,6 +55,7 @@ export const whiteboardApp = {
   units,
   resolve,
   snapshotUnit,
+  templates: boardTemplates,
   history: { roots: [{ name: SHAPES, type: 'map' }] }
 }
 

@@ -2,6 +2,7 @@
 // merge and restore spreadsheets. The grid UI lives in the desktop app.
 
 import { initSheets, preview, previewGrid, sheetList, sheetMap, context, SHEETS, SHEET_DATA } from './model.js'
+import { sheetTemplates } from './templates.js'
 import { toDisplay } from './formula.js'
 
 // Conflict units: every cell that has something in it (plus the title).
@@ -51,6 +52,7 @@ export const sheetsApp = {
   units,
   resolve,
   snapshotUnit,
+  templates: sheetTemplates,
   history: { roots: [{ name: SHEETS, type: 'array' }, { name: SHEET_DATA, type: 'map' }] }
 }
 

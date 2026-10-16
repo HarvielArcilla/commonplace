@@ -62,6 +62,10 @@ Everything you share lives on the computers of the people you share it with, so 
 
 ![A large file someone shared, waiting for a yes before it takes space](docs/images/upload-large.png)
 
+**Templates.** New → From a template has meeting notes, a project brief, a budget, shared costs, a project update deck, a moving-house board, a retrospective, an event sign-up and more, all built in and working offline. Save any file as your own template, or make a copy of it.
+
+![The template gallery](docs/images/templates.png)
+
 **Comments in every app.** Comment on a passage, a cell, a slide, a task, an event, a shape, a question or a whole file, reply, and resolve. Type @ to mention someone with access. **Activity** in commonDrive lists mentions, replies, comments on your files and files shared folders bring you, with a notification when you're elsewhere.
 
 ![A comment on a spreadsheet cell, mentioning Maya](docs/images/comments.png)

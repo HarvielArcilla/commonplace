@@ -4,6 +4,7 @@
 
 import * as Y from 'yjs'
 import { initForm, preview, thumbnail, readQuestions, FORM, QUESTIONS, QUESTION_DATA } from './model.js'
+import { formTemplates } from './templates.js'
 
 // Conflict units: each question (its whole definition), the description
 // and the title.
@@ -67,6 +68,7 @@ export const formsApp = {
   snapshotUnit,
   // Answers and the response key aren't part of a version: restoring an
   // old version of the questions never loses answers.
+  templates: formTemplates,
   history: { roots: [{ name: QUESTIONS, type: 'array' }, { name: QUESTION_DATA, type: 'map' }, { name: FORM, type: 'map' }] }
 }
 

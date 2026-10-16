@@ -3,6 +3,7 @@
 
 import * as Y from 'yjs'
 import { initTasks, preview, thumbnail, allCards, readLists, LISTS, LIST_DATA, CARDS } from './model.js'
+import { taskTemplates } from './templates.js'
 
 // Conflict units: each card (everything but its exact place in the list),
 // each list's name, and the title.
@@ -52,6 +53,7 @@ export const tasksApp = {
   units,
   resolve,
   snapshotUnit,
+  templates: taskTemplates,
   history: { roots: [{ name: LISTS, type: 'array' }, { name: LIST_DATA, type: 'map' }, { name: CARDS, type: 'map' }] }
 }
 
