@@ -58,6 +58,8 @@ async function open (docId, opts) {
 }
 
 initDrive({ openDocument: open, openJoinDialog })
+// A file chip, or anything else that links to a file in the Drive.
+window.addEventListener('commonplace:open', (e) => { if (e.detail?.docId) open(e.detail.docId) })
 
 // From the activity list or a notification: the file, and the thread in it.
 async function openThread (docId, threadId) {

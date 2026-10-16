@@ -67,6 +67,11 @@ contextBridge.exposeInMainWorld('commonplace', {
   restoreBackup: (file, key) => ipcRenderer.invoke('backup:restore', file, key),
   onBackup: listen('backup:changed'),
   submitForm: (docId, answers) => ipcRenderer.invoke('forms:submit', docId, answers),
+  taskBoards: () => ipcRenderer.invoke('links:boards'),
+  calendars: () => ipcRenderer.invoke('links:calendars'),
+  addCards: (boardId, listId, items, from) => ipcRenderer.invoke('links:addCards', boardId, listId, items, from),
+  addEvent: (calendarId, event) => ipcRenderer.invoke('links:addEvent', calendarId, event),
+  dueTasks: () => ipcRenderer.invoke('links:dueTasks'),
   uploadFiles: (folderId) => ipcRenderer.invoke('files:upload', folderId),
   // Files dropped on the window: their paths, read here (the window can't).
   uploadDropped: (files, folderId) => ipcRenderer.invoke('files:uploadPaths', [...files].map((f) => webUtils.getPathForFile(f)).filter(Boolean), folderId),

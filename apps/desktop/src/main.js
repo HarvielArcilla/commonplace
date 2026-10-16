@@ -24,6 +24,7 @@ import { exportIcs, importIcs } from '@commonplace/calendar/ics'
 import { importPptx, MAX_PPTX_BYTES } from '@commonplace/slides/pptx-import'
 import { whiteboardApp } from '@commonplace/whiteboard'
 import { formServices } from './forms.js'
+import { linkServices } from './links.js'
 import { Reminders } from './reminders.js'
 import { Updates } from './updates.js'
 import { readPage, PAGE_SIZES, DEFAULT_PAGE, pageLine } from '@commonplace/docs/page'
@@ -472,6 +473,11 @@ function registerIpc () {
   // commonForms: the keys live here, so answers are sealed and opened here.
   ipcMain.handle('forms:submit', (_e, docId, answers) => forms.submit(docId, answers))
   ipcMain.handle('forms:responses', (_e, docId) => forms.responses(docId))
+  ipcMain.handle('links:boards', () => links.boards())
+  ipcMain.handle('links:calendars', () => links.calendars())
+  ipcMain.handle('links:addCards', (_e, boardId, listId, items, from) => links.addCards(boardId, listId, items, from))
+  ipcMain.handle('links:addEvent', (_e, calendarId, event) => links.addEvent(calendarId, event))
+  ipcMain.handle('links:dueTasks', () => links.dueTasks())
 
   // Recovery: one backup file, kept up to date, opened by a recovery key.
   ipcMain.handle('backup:status', () => backups.status())
@@ -510,6 +516,7 @@ function registerIpc () {
 let move = null
 let backups = null
 let forms = null
+let links = null
 let reminders = null
 
 // COMMONPLACE_BOOTSTRAP=host:port[,host:port] joins a private DHT instead of
@@ -557,6 +564,7 @@ async function startDrive () {
   backups?.destroy()
   backups = new Backups({ drive, dataDir: app.getPath('userData') })
   forms = formServices(drive)
+  links = linkServices(drive)
   forms.watch()
   reminders?.destroy()
   reminders = new Reminders({

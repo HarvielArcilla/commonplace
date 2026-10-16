@@ -72,6 +72,10 @@ Everything you share lives on the computers of the people you share it with, so 
 
 ![A comment on a spreadsheet cell, mentioning Maya](docs/images/comments.png)
 
+**The apps work together.** Type @ in a document to place a person, a file or a date as a chip; clicking a file opens it, and a date can go straight onto one of your calendars. Select some lines and **Send to a task board**: each line becomes a card, people in it become who it's assigned to and dates become due dates. Calendars can show the due dates from your task boards (for you only; nothing is copied). Copy a chart from commonSheets as a picture and paste it into a document or slide. Each file still keeps its own people: linking to a file never shares it.
+
+![Lines with chips for a date, a person and a file, about to become tasks](docs/images/links.png)
+
 ## Sharing
 
 Invite people to edit, only view, or (for forms) answer; change their role, remove them, or hand ownership to someone else. Invite links expire (after 7 days unless you choose otherwise) and can be limited to one person or need your approval for each person.

@@ -246,6 +246,7 @@ function inlineRun (node, ctx, isLink) {
     ctx.footnotes[id] = { children: [new Paragraph({ children: [new TextRun({ text: node.attrs?.text || '', size: 20 })] })] }
     return new FootnoteReferenceRun(id)
   }
+  if (node.type === 'chip') return new TextRun({ text: node.attrs?.label || '', color: '284B8C' })
   if (node.type !== 'text') return null
   const opts = { text: node.text }
   for (const m of node.marks || []) {

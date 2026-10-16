@@ -10,6 +10,7 @@ import {
 import { $, el, svg, dialog, selectField, toast } from './ui.js'
 import { toolButton, labeledButton, toolbarGroups, setToolbar } from './toolbar.js'
 import { countBy, badges } from './comment-marks.js'
+import { cp, openFile } from './state.js'
 
 const ICON = {
   prev: '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="m10 3-5 5 5 5"/></svg>',
@@ -19,6 +20,7 @@ const ICON = {
   redo: '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="m11 4 3 3-3 3"/><path d="M13.5 7H6a3.5 3.5 0 0 0 0 7h3"/></svg>'
 }
 const VIEW_KEY = 'commonplace.calendarView'
+const TASKS_KEY = 'commonplace.calendarTasks'
 const HOUR_PX = 44
 const DRAG = 'application/x-commonplace-event'
 const REMINDERS = [['', 'No reminder'], ['0', 'At the start'], ['5', '5 minutes before'], ['10', '10 minutes before'], ['30', '30 minutes before'], ['60', '1 hour before'], ['1440', '1 day before']]
@@ -30,6 +32,10 @@ export function mountCalendar (o) {
     writable: true,
     layout: (() => { try { return localStorage.getItem(VIEW_KEY) === 'week' ? 'week' : 'month' } catch { return 'month' } })(),
     cursor: new Date(), // a day in the period shown
+    // Cards with due dates from your task boards: yours to show or hide,
+    // read from boards you already have, never copied into the calendar.
+    showTasks: (() => { try { return localStorage.getItem(TASKS_KEY) !== 'off' } catch { return true } })(),
+    tasks: [],
     undo: new Y.UndoManager([o.ydoc.getMap(EVENTS)], { trackedOrigins: new Set([null]) })
   }
   v.root = el('div', { class: 'cal-app' })
@@ -44,7 +50,14 @@ export function mountCalendar (o) {
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? v.undo.redo() : v.undo.undo() }
   }
   document.addEventListener('keydown', onKey)
-  v.destroy = () => { cancelAnimationFrame(frame); o.ydoc.getMap(EVENTS).unobserveDeep(schedule); clearInterval(tick); document.removeEventListener('keydown', onKey); v.undo.destroy() }
+  const loadTasks = async () => {
+    try { v.tasks = await cp.dueTasks() } catch { v.tasks = [] }
+    schedule()
+  }
+  const taskTick = setInterval(loadTasks, 60e3)
+  window.addEventListener('focus', loadTasks)
+  loadTasks()
+  v.destroy = () => { cancelAnimationFrame(frame); o.ydoc.getMap(EVENTS).unobserveDeep(schedule); clearInterval(tick); clearInterval(taskTick); window.removeEventListener('focus', loadTasks); document.removeEventListener('keydown', onKey); v.undo.destroy() }
   renderToolbar(v)
   render(v)
   if (v.layout === 'week') requestAnimationFrame(() => { const s = v.root.querySelector('.week-scroll'); if (s) s.scrollTop = HOUR_PX * 7.5 })
@@ -62,7 +75,7 @@ export function mountCalendar (o) {
       const ydoc = new Y.Doc()
       Y.applyUpdate(ydoc, update)
       v.root.hidden = true
-      const shown = el('div', { class: 'cal-app' }, monthGrid({ ...v, ydoc, writable: false }))
+      const shown = el('div', { class: 'cal-app' }, monthGrid({ ...v, ydoc, writable: false, showTasks: false }))
       $('#desk').append(shown)
       return { title: ydoc.getMap('meta').get('title') || '', close () { shown.remove(); ydoc.destroy(); v.root.hidden = false } }
     },
@@ -120,6 +133,13 @@ function head (v) {
     nav('Previous', ICON.prev, () => go(-1)),
     nav('Next', ICON.next, () => go(1)),
     el('h2', { class: 'cal-period' }, periodLabel(v)),
+    el('button', {
+      type: 'button',
+      class: 'btn btn-quiet cal-tasks-toggle',
+      'aria-pressed': String(v.showTasks),
+      title: 'Show the due dates of tasks on your task boards (only you see this)',
+      onclick: () => { v.showTasks = !v.showTasks; try { localStorage.setItem(TASKS_KEY, v.showTasks ? 'on' : 'off') } catch {} render(v) }
+    }, v.showTasks ? 'Hide tasks' : 'Show tasks'),
     el('div', { class: 'seg', role: 'group', 'aria-label': 'Show' },
       el('button', { type: 'button', 'aria-pressed': String(v.layout === 'month'), onclick: () => setLayout('month') }, 'Month'),
       el('button', { type: 'button', 'aria-pressed': String(v.layout === 'week'), onclick: () => setLayout('week') }, 'Week')))
@@ -149,14 +169,17 @@ function monthGrid (v) {
     const key = dayKey(day)
     const next = addDays(day, 1)
     const here = occs.filter((o) => o.start < next && o.end > day)
+    const due = tasksOn(v, key)
+    const room = Math.max(0, 4 - due.length)
     const cell = el('div', {
       class: `month-day${day.getMonth() !== first.getMonth() ? ' other' : ''}${key === today ? ' today' : ''}`,
       'data-day': key,
       ondblclick: (e) => { if (v.writable && !e.target.closest('.cal-event')) editDialog(v, null, { day }) }
     },
     el('span', { class: 'day-num' }, String(day.getDate())),
-    ...here.slice(0, 4).map((o) => eventChip(v, o, day)),
-    here.length > 4 ? el('button', { type: 'button', class: 'more-events', onclick: () => { v.layout = 'week'; v.cursor = day; render(v) } }, `${here.length - 4} more`) : null)
+    ...due.slice(0, 4).map(taskChip),
+    ...here.slice(0, room).map((o) => eventChip(v, o, day)),
+    here.length > room ? el('button', { type: 'button', class: 'more-events', onclick: () => { v.layout = 'week'; v.cursor = day; render(v) } }, `${here.length - room} more`) : null)
     if (v.writable) wireDayDrop(v, cell, day)
     cells.push(cell)
   }
@@ -180,6 +203,18 @@ function eventChip (v, o, day) {
   },
   !e.allDay && !continues && o.end - o.start < 864e5 ? el('span', { class: 'ev-time' }, time(o.start)) : null,
   el('span', { class: 'ev-title' }, e.title || 'Untitled event'))
+}
+
+const tasksOn = (v, key) => (v.showTasks ? v.tasks.filter((t) => t.due === key) : [])
+
+// A task due that day; opens its board.
+function taskChip (t) {
+  return el('button', {
+    type: 'button',
+    class: `cal-task${t.done ? ' done' : ''}`,
+    title: `${t.title}\nDue on “${t.board}”${t.done ? ' (done)' : ''}`,
+    onclick: () => openFile(t.docId)
+  }, el('span', { class: 'cal-task-box', 'aria-hidden': 'true' }), el('span', { class: 'ev-title' }, t.title))
 }
 
 // Dropping an event on another day moves it (the whole series, if it repeats).
@@ -217,6 +252,7 @@ function weekGrid (v) {
     el('span', { class: 'wd-name' }, d.toLocaleDateString(undefined, { weekday: 'short' })), el('span', { class: 'wd-num' }, String(d.getDate())))))
   const allDay = el('div', { class: 'week-allday' }, el('span', { class: 'hour-label' }, 'All day'), ...days.map((d) => {
     const cell = el('div', { class: 'allday-cell', 'data-day': dayKey(d), ondblclick: (e) => { if (v.writable && !e.target.closest('.cal-event')) editDialog(v, null, { day: d }) } },
+      ...tasksOn(v, dayKey(d)).map(taskChip),
       ...occs.filter((o) => long(o) && o.start < addDays(d, 1) && o.end > d).map((o) => eventChip(v, o, d)))
     if (v.writable) wireDayDrop(v, cell, d)
     return cell

@@ -4,6 +4,9 @@ import { el, ago, listNames } from './ui.js'
 
 export const cp = window.commonplace
 
+// Opens a file in the Drive from anywhere (a chip, a task on a calendar).
+export const openFile = (docId) => window.dispatchEvent(new CustomEvent('commonplace:open', { detail: { docId } }))
+
 const PREFS_KEY = 'commonplace.drive.prefs'
 const DEFAULT_PREFS = { mode: 'list', filter: 'all', type: 'all', sort: 'recent' }
 

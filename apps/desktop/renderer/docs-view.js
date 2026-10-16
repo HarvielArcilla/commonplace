@@ -11,6 +11,7 @@ import { icons } from './icons.js'
 import { state, cp } from './state.js'
 import { toolButton, sep, swatchMenu, showValue, setToolbar, TEXT_COLORS } from './toolbar.js'
 import { attachReview, recordMySuggestions, newComment } from './comments-view.js'
+import { attachChipMenu, openChip, sendToTasks } from './doc-chips.js'
 
 // Fonts that ship with both macOS and Windows (plus Office's), so a document
 // looks the same on everyone's computer.
@@ -59,6 +60,7 @@ export function mountDocs (o, { initialContent } = {}) {
     onEditMath: (m) => { if (state.open === o) mathDialog(m) },
     onEditFootnote: (n) => { if (state.open === o && o.editor?.isEditable) footnoteDialog(n) },
     onOpenLink: (href) => cp.openLink(href),
+    onOpenChip: (attrs, target) => { if (state.open === o) openChip(o, attrs, target) },
     getPageSetup: () => readPage(ydoc),
     getZoom: () => o.zoom || 1,
     getMaxImageWidth: () => (kind === 'paged' ? pageGeometry(readPage(ydoc)).contentWidth : 680),
@@ -66,6 +68,7 @@ export function mountDocs (o, { initialContent } = {}) {
     onNewSuggestion: (ids) => { if (state.open === o) recordMySuggestions(o, ids) }
   })
   attachReview(o)
+  attachChipMenu(o)
   const onFindKey = (e) => {
     if (state.open !== o || !(e.metaKey || e.ctrlKey) || e.altKey) return
     const k = e.key.toLowerCase()
@@ -282,6 +285,8 @@ function renderToolbar () {
   ].filter(Boolean))
   groups.push([
     tool('comment', 'Comment on the selection', icons.comment, () => newComment(), { key: 'Mod-Alt-M' }),
+    tool('chip', 'Insert a person, file or date (or type @)', icons.at, (e) => e.chain().focus().insertContent('@').run()),
+    tool('sendTasks', 'Send the selected lines to a task board', icons.tasks, () => sendToTasks(o)),
     tool('find', 'Find and replace', icons.search, () => openFind(o, { replace: true }), { key: 'Mod-F' })
   ])
   groups.push([

@@ -23,9 +23,11 @@ import { blockKey } from './index.js'
 import { Indent } from './indent.js'
 import { CommentMark, Suggestions, ReviewDocument } from './review.js'
 import { Search, Footnote, TableOfContents } from './extras.js'
+import { Chip } from './chips.js'
 
 export { commentAnchors, suggestionList, isSuggesting, withoutSuggestions } from './review.js'
 export { wordCount, footnotesOf, headingsOf, countText } from './extras.js'
+export { actionItems, dayLabel } from './chips.js'
 
 export { pageGeometry, readPage, normalizePage, PAGE_SIZES, DEFAULT_PAGE, fillPageLine } from './page.js'
 
@@ -120,7 +122,7 @@ const ConflictHighlight = Extension.create({
 })
 
 // kind: 'markdown' | 'paged'
-export function createDocsEditor ({ kind, element, ydoc, awareness, user, editable = true, onUpdate = () => {}, onEditMath, onEditFootnote, onOpenLink, getPageSetup, getZoom, getMaxImageWidth, onLayout, onNewSuggestion }) {
+export function createDocsEditor ({ kind, element, ydoc, awareness, user, editable = true, onUpdate = () => {}, onEditMath, onEditFootnote, onOpenLink, onOpenChip, getPageSetup, getZoom, getMaxImageWidth, onLayout, onNewSuggestion }) {
   const paged = kind === 'paged'
   const extensions = [
     // The CRDT keeps its own undo history (per user), so disable the default one.
@@ -164,7 +166,8 @@ export function createDocsEditor ({ kind, element, ydoc, awareness, user, editab
     PageBreak,
     Search,
     Footnote.configure({ onEdit: onEditFootnote || null }),
-    TableOfContents
+    TableOfContents,
+    Chip.configure({ onOpen: onOpenChip || null })
   ]
   if (paged) {
     extensions.push(
