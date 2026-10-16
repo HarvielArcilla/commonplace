@@ -11,6 +11,7 @@ import {
 import { $, el, toast, openMenu, cleanError, ago } from './ui.js'
 import { state, cp } from './state.js'
 import { toolButton, labeledButton, toolbarGroups, setToolbar } from './toolbar.js'
+import { countBy, badges } from './comment-marks.js'
 
 const PLUS = '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M8 3v10M3 8h10"/></svg>'
 
@@ -52,6 +53,19 @@ export function mountForm (o) {
       if (mode === 'build') { renderToolbar(v); loadResponses(v) } else setToolbar([])
       v.root.replaceChildren()
       render(v)
+    },
+    comments: {
+      current () {
+        const q = v.lastQuestion && readQuestions(v.ydoc).find((x) => x.id === v.lastQuestion)
+        return q ? { anchor: { kind: 'question', id: q.id }, label: `“${q.title || 'Untitled question'}”` } : null
+      },
+      label: (a) => { const q = readQuestions(v.ydoc).find((x) => x.id === a.id); return q ? `Question “${q.title || 'Untitled question'}”` : null },
+      reveal (a) {
+        const node = v.root.querySelector(`.q-edit[data-q="${CSS.escape(a.id)}"]`)
+        node?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+        node?.querySelector('input, textarea')?.focus({ preventScroll: true })
+      },
+      mark: (threads) => { v.commentCounts = countBy(threads, 'question'); badges(v.root, '.q-edit[data-q]', 'data-q', v.commentCounts) }
     },
     notes () {
       const n = v.ydoc.getMap('responses').size
@@ -245,13 +259,14 @@ function drawQuestions (v) {
   const nodes = [head]
   for (const q of questions) {
     let card = v.cards.get(q.id)
-    if (!card) { card = { node: el('div', { class: 'form-card q-edit', 'data-q': q.id }) }; v.cards.set(q.id, card) }
+    if (!card) { card = { node: el('div', { class: 'form-card q-edit', 'data-q': q.id, onfocusin: () => { v.lastQuestion = q.id } }) }; v.cards.set(q.id, card) }
     updateCard(v, card, q)
     nodes.push(card.node)
   }
   nodes.push(page.querySelector('.form-add') || el('div', { class: 'form-add' }, addButton(v, null)))
   // Reorder only what moved, so focus stays put.
   nodes.forEach((node, i) => { if (page.children[i] !== node) page.insertBefore(node, page.children[i] || null) })
+  badges(page, '.q-edit[data-q]', 'data-q', v.commentCounts)
 }
 
 function headCard (v) {

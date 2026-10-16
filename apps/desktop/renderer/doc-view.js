@@ -22,7 +22,7 @@ import { state, cp, statusNotes, renderNotes, marginMark } from './state.js'
 import { shareDialog } from './share.js'
 import { conflictsDialog } from './conflicts.js'
 import { toggleHistory, closePanel } from './history-view.js'
-import { toggleComments, newComment } from './comments-view.js'
+import { toggleComments, newComment, attachThreads } from './comments-view.js'
 import { mountDocs, pageSetupDialog } from './docs-view.js'
 import { setToolbar, fitToolbar } from './toolbar.js'
 import { mountSheet } from './sheet-view.js'
@@ -109,6 +109,7 @@ export async function openDocument (docId, { focusTitle = false, initialContent 
   $('#doc-view').dataset.kind = kind
   $('[data-action="page-setup"]').hidden = kind !== 'paged'
   $('[data-action="comments"]').hidden = !o.view.comments
+  if (o.view.comments && o.view.comments !== true) attachThreads(o)
   renderPresence()
   renderDocMargin()
   if (focusTitle) { title.focus(); title.select() } else o.view.focus()
@@ -201,6 +202,7 @@ function applyAccess () {
   const writable = Boolean(file) && (file.role === 'owner' || file.role === 'editor') && !file.access?.removed
   o.view.setEditable(writable)
   $('#doc-title').readOnly = !writable || Boolean(o.closePreview)
+  $('[data-action="comments"]').hidden = !o.view.comments || file?.role === 'respondent'
   const bar = writable && !o.view.noToolbar
   if ($('#toolbar').hidden === bar) { $('#toolbar').hidden = !bar; if (bar) fitToolbar() }
   $('#doc-view').classList.toggle('read-only', !writable)

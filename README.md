@@ -62,6 +62,10 @@ Everything you share lives on the computers of the people you share it with, so 
 
 ![A large file someone shared, waiting for a yes before it takes space](docs/images/upload-large.png)
 
+**Comments in every app.** Comment on a passage, a cell, a slide, a task, an event, a shape, a question or a whole file, reply, and resolve. Type @ to mention someone with access. **Activity** in commonDrive lists mentions, replies, comments on your files and files shared folders bring you, with a notification when you're elsewhere.
+
+![A comment on a spreadsheet cell, mentioning Maya](docs/images/comments.png)
+
 ## Sharing
 
 Invite people to edit, only view, or (for forms) answer; change their role, remove them, or hand ownership to someone else. Invite links expire (after 7 days unless you choose otherwise) and can be limited to one person or need your approval for each person.

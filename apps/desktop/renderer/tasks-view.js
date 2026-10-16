@@ -10,6 +10,7 @@ import {
 import { $, el, openMenu, confirmAction } from './ui.js'
 import { state } from './state.js'
 import { toolButton, toolbarGroups, setToolbar, press } from './toolbar.js'
+import { countBy, badges } from './comment-marks.js'
 
 const ICON = {
   board: '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="2" y="2.5" width="3.5" height="11" rx="1"/><rect x="6.25" y="2.5" width="3.5" height="7" rx="1"/><rect x="10.5" y="2.5" width="3.5" height="9" rx="1"/></svg>',
@@ -75,6 +76,12 @@ export function mountTasks (o) {
       return { title: ydoc.getMap('meta').get('title') || '', close () { shown.remove(); ydoc.destroy(); v.root.hidden = false } }
     },
     async exportPayload () { return { payload: { names: memberNames(v) } } },
+    comments: {
+      current: () => { const c = v.open && readCard(v.ydoc, v.open); return c ? { anchor: { kind: 'card', id: c.id }, label: `“${c.title || 'Untitled task'}”` } : null },
+      label: (a) => { const c = readCard(v.ydoc, a.id); return c ? `Task “${c.title || 'Untitled task'}”` : null },
+      reveal: (a) => { if (readCard(v.ydoc, a.id)) openCard(v, a.id) },
+      mark: (threads) => { v.commentCounts = countBy(threads, 'card'); badges(v.main, '.task-card[data-card]', 'data-card', v.commentCounts) }
+    },
     exportFormats: { csv: 'Spreadsheet (.csv)', md: 'Checklist (.md)' },
     exportHints: { csv: 'One row per task; opens in commonSheets and Excel', md: 'A Markdown checklist, one section per list' },
     destroy: () => v.destroy()
@@ -113,6 +120,7 @@ function render (v) {
   v.main.scrollTop = top
   drawPanel(v)
   syncToolbar(v)
+  badges(v.main, '.task-card[data-card]', 'data-card', v.commentCounts)
 }
 
 function board (v) {

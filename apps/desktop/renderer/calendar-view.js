@@ -9,6 +9,7 @@ import {
 } from '@commonplace/calendar/model'
 import { $, el, svg, dialog, selectField, toast } from './ui.js'
 import { toolButton, labeledButton, toolbarGroups, setToolbar } from './toolbar.js'
+import { countBy, badges } from './comment-marks.js'
 
 const ICON = {
   prev: '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="m10 3-5 5 5 5"/></svg>',
@@ -66,6 +67,19 @@ export function mountCalendar (o) {
       return { title: ydoc.getMap('meta').get('title') || '', close () { shown.remove(); ydoc.destroy(); v.root.hidden = false } }
     },
     async exportPayload () { return { payload: {} } },
+    comments: {
+      current: () => { const e = v.picked && readEvent(v.ydoc, v.picked); return e ? { anchor: { kind: 'event', id: v.picked }, label: `“${e.title || 'Untitled event'}”` } : null },
+      label: (a) => { const e = readEvent(v.ydoc, a.id); return e ? `Event “${e.title || 'Untitled event'}”` : null },
+      reveal: (a) => {
+        const e = readEvent(v.ydoc, a.id)
+        if (!e) return
+        const next = occurrences(v.ydoc, addDays(new Date(), -1), addDays(new Date(), 400)).find((x) => x.id === a.id) || occurrences(v.ydoc, addDays(new Date(), -3650), addDays(new Date(), 3650)).find((x) => x.id === a.id)
+        if (next) v.cursor = v.layout === 'month' ? new Date(next.start.getFullYear(), next.start.getMonth(), 1) : next.start
+        v.picked = a.id
+        render(v)
+      },
+      mark: (threads) => { v.commentCounts = countBy(threads, 'event'); badges(v.root, '.cal-event[data-event]', 'data-event', v.commentCounts) }
+    },
     exportFormats: { ics: 'Calendar file (.ics)' },
     exportHints: { ics: 'Opens in Google Calendar, Apple Calendar and Outlook' },
     destroy: () => v.destroy()
@@ -84,6 +98,7 @@ function render (v) {
   const scroll = v.root.querySelector('.week-scroll')?.scrollTop
   v.root.replaceChildren(head(v), v.layout === 'week' ? weekGrid(v) : monthGrid(v))
   if (scroll != null) { const s = v.root.querySelector('.week-scroll'); if (s) s.scrollTop = scroll }
+  badges(v.root, '.cal-event[data-event]', 'data-event', v.commentCounts)
 }
 
 // Moving around is for everyone, so it's here rather than in the toolbar
@@ -155,12 +170,13 @@ function eventChip (v, o, day) {
   const continues = !e.allDay && o.start < day // started on an earlier day
   return el('button', {
     type: 'button',
-    class: `cal-event${e.allDay || o.end - o.start >= 864e5 ? ' all-day' : ''}`,
+    class: `cal-event${e.allDay || o.end - o.start >= 864e5 ? ' all-day' : ''}${v.picked === o.id ? ' picked' : ''}`,
+    'data-event': o.id,
     style: `--ev:${e.color || COLORS[0]}`,
     title: `${e.title || 'Untitled event'}\n${when(o)}${e.location ? `\n${e.location}` : ''}`,
     draggable: v.writable ? 'true' : null,
     ondragstart: (ev) => { ev.dataTransfer.setData(DRAG, JSON.stringify({ id: o.id, from: dayKey(o.start) })); ev.dataTransfer.effectAllowed = 'move' },
-    onclick: () => editDialog(v, o)
+    onclick: () => { v.picked = o.id; editDialog(v, o) }
   },
   !e.allDay && !continues && o.end - o.start < 864e5 ? el('span', { class: 'ev-time' }, time(o.start)) : null,
   el('span', { class: 'ev-title' }, e.title || 'Untitled event'))

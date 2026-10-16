@@ -7,6 +7,8 @@ import { initDrive, renderDrive } from './drive-view.js'
 import { initDocView, openDocument, renderDocMargin } from './doc-view.js'
 import { moveOutDialog, helperStatus } from './share.js'
 import { renderRecovery, restoreDialog } from './recovery-view.js'
+import { openActivity, showActivityCount } from './activity-view.js'
+import { showThread } from './comments-view.js'
 
 const COLORS = ['#b4532a', '#2f6f5e', '#4a5aa8', '#8a4f8c', '#a2741b', '#2d6f8f', '#9b3d4f', '#55703a']
 
@@ -56,6 +58,18 @@ async function open (docId, opts) {
 }
 
 initDrive({ openDocument: open, openJoinDialog })
+
+// From the activity list or a notification: the file, and the thread in it.
+async function openThread (docId, threadId) {
+  const file = state.files.find((f) => f.docId === docId)
+  if (!file) return
+  if (file.kind === 'folder') { showDrive(); return }
+  if (state.open?.docId !== docId) await open(docId)
+  if (threadId && state.open?.docId === docId) showThread(threadId)
+}
+$('[data-action="activity"]').addEventListener('click', () => openActivity({ openThread }))
+cp.onActivityOpen((docId, threadId) => openThread(docId, threadId))
+cp.listActivity().then((items) => showActivityCount(items.filter((i) => !i.read).length)).catch(() => {})
 initDocView({ onBack: showDrive })
 
 // ---- join with invite ------------------------------------------------------
@@ -220,10 +234,11 @@ cp.updateState().then(showUpdate)
 
 // ---- boot ----------------------------------------------------------------------
 
-cp.onDriveChanged((files, me, folders) => {
+cp.onDriveChanged((files, me, folders, unread) => {
   state.files = files
   state.me = me
   if (folders) state.folders = folders
+  if (unread != null) showActivityCount(unread)
   if ($('#profile-dialog').open && !$('#profile-computers').hidden) { renderComputers(); renderMyHelpers() }
   if (state.open) renderDocMargin()
   else renderDrive()

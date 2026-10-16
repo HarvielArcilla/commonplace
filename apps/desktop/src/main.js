@@ -395,6 +395,8 @@ function registerIpc () {
   ipcMain.handle('storage:usage', () => drive.storageUsage())
   ipcMain.handle('storage:settings', (_e, patch) => drive.setStorageSettings(patch || {}))
   ipcMain.handle('drive:keepSyncing', (_e, docId) => drive.keepSyncing(docId))
+  ipcMain.handle('activity:list', () => drive.activity.list())
+  ipcMain.handle('activity:read', (_e, ids) => drive.activity.markRead(Array.isArray(ids) ? ids.filter((x) => typeof x === 'string') : null))
 
   // commonForms: the keys live here, so answers are sealed and opened here.
   ipcMain.handle('forms:submit', (_e, docId, answers) => forms.submit(docId, answers))
@@ -460,7 +462,20 @@ async function startDrive () {
     pendingNotice = 'This computer was unlinked from your Drive on another computer, so its copy was deleted.'
     signOutAndWipe().catch((err) => console.error('[commonplace]', err))
   })
-  drive.on('changed', () => send('drive:changed', drive.list(), drive.me(), drive.listFolders()))
+  drive.on('changed', () => send('drive:changed', drive.list(), drive.me(), drive.listFolders(), drive.activity.unread()))
+  // Mentions, replies and comments on my files: a notification, unless I'm
+  // looking at that very file.
+  drive.activity.on('new', (items) => {
+    for (const item of items) {
+      if (item.kind === 'shared' || !Notification.isSupported()) continue
+      if (win?.isFocused() && openDocs.has(item.docId)) continue
+      const title = drive.files.get(item.docId)?.title || 'Untitled'
+      const head = { mention: `${item.byName} mentioned you in “${title}”`, reply: `${item.byName} replied in “${title}”`, comment: `${item.byName} commented on “${title}”` }[item.kind]
+      const n = new Notification({ title: head, body: item.text, icon: ICON })
+      n.on('click', () => { if (win) { if (win.isMinimized()) win.restore(); win.show(); win.focus() } drive.activity.markRead([item.id]); send('activity:open', item.docId, item.threadId) })
+      n.show()
+    }
+  })
   drive.engine.on('update', (docId, update, origin) => {
     if (origin !== 'renderer' && origin !== 'disk' && openDocs.has(docId)) send('doc:update', docId, update)
   })

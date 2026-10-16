@@ -36,10 +36,57 @@ export function mountSheet (o) {
       const past = createGrid({ ydoc, host, readonly: true, sheetId: v.sheetId })
       return { title: ydoc.getMap('meta').get('title') || '', close () { past.destroy(); host.remove(); ydoc.destroy(); v.root.hidden = false } }
     },
+    comments: sheetComments(v),
     exportPayload: async () => ({ payload: { sheetId: v.sheetId } }),
     exportFormats: { xlsx: 'Excel workbook (.xlsx)', csv: 'CSV, this sheet (.csv)' },
     exportHints: { xlsx: 'Keeps every sheet, formulas and formatting', csv: 'Values only, for other programs' },
     destroy () { v.destroy() }
+  }
+}
+
+// ---- comments -----------------------------------------------------------------
+
+// Threads are anchored to a cell by its row and column ids, so they stay on
+// it when rows or columns are inserted.
+function sheetComments (v) {
+  const find = (a) => {
+    const sheet = a?.kind === 'cell' ? readSheet(v.ydoc, a.sheet) : null
+    if (!sheet) return null
+    const r = sheet.rows.indexOf(a.row)
+    const c = sheet.cols.indexOf(a.col)
+    return r < 0 || c < 0 ? null : { sheet, r, c }
+  }
+  const name = (sheet, r, c) => `cell ${a1(r, c)}${sheetList(v.ydoc).length > 1 ? ` in ${sheet.name}` : ''}`
+  return {
+    current () {
+      const s = v.sheet
+      if (!s) return null
+      return { anchor: { kind: 'cell', sheet: v.sheetId, row: s.rows[v.sel.r2], col: s.cols[v.sel.c2] }, label: name(s, v.sel.r2, v.sel.c2) }
+    },
+    label (a) { const f = find(a); return f ? name(f.sheet, f.r, f.c).replace(/^c/, 'C') : null },
+    reveal (a) {
+      const f = find(a)
+      if (!f) return
+      if (f.sheet.id !== v.sheetId) switchTo(v, f.sheet.id)
+      select(v, f.r, f.c)
+    },
+    mark (threads) {
+      v.commented = new Set(threads.filter((t) => t.anchor?.kind === 'cell').map((t) => `${t.anchor.sheet}:${t.anchor.row}:${t.anchor.col}`))
+      drawCommentMarks(v)
+    }
+  }
+}
+
+function drawCommentMarks (v) {
+  for (const x of v.commentCells || []) x.classList.remove('has-comment')
+  v.commentCells = []
+  const s = v.sheet
+  if (!s || !v.commented?.size) return
+  for (const key of v.commented) {
+    const [sheet, row, col] = key.split(':')
+    if (sheet !== v.sheetId) continue
+    const cell = td(v, s.rows.indexOf(row), s.cols.indexOf(col))
+    if (cell && s.rows.includes(row) && s.cols.includes(col)) { cell.classList.add('has-comment'); v.commentCells.push(cell) }
   }
 }
 
@@ -129,6 +176,7 @@ function render (v) {
   drawSelection(v)
   drawTabs(v)
   drawPeers(v)
+  drawCommentMarks(v)
   v.more.hidden = !v.writable
   if (!v.more.isConnected) v.scroll.append(v.more)
 }

@@ -1,14 +1,27 @@
-// Comments and suggestions panel: threads anchored to text, replies,
-// resolving, and accepting or rejecting suggested changes, in the order they
-// appear in the document.
+// The comments panel, for every kind of file: threads, replies, @mentions
+// and resolving. In documents threads are anchored to text and the panel
+// also lists suggested changes, in the order they appear. Other apps anchor
+// a thread to what was selected (a cell, a card, a slide...), through the
+// view's `comments` object:
+//
+//   current()      { anchor, label } for what's selected now, or null
+//   label(anchor)  how to name it, or null if it no longer exists
+//   reveal(anchor) show and select it
+//   mark(threads)  optional: draw markers on what has open threads
 
-import { addThread, reply, editMessage, deleteMessage, setResolved, readThreads, recordSuggestions, suggestionAuthor } from '@commonplace/docs/comments'
+import { addThread, reply, editMessage, deleteMessage, setResolved, readThreads, mentionsIn } from '@commonplace/core/threads'
+import { recordSuggestions, suggestionAuthor } from '@commonplace/docs/comments'
 import { commentAnchors, suggestionList } from '@commonplace/docs/editor'
 import { el, ago, toast } from './ui.js'
 import { state } from './state.js'
 import { openPanel, closePanel, openPanelName } from './panel.js'
 
-let view = null // { o, body, drafts: Map, composing: { quote } | null, active, showResolved }
+let view = null // { o, body, drafts: Map, composing: { quote, anchor? } | null, active, showResolved }
+
+const textMode = (o) => o.view?.comments === true
+const fileOf = (o) => state.files.find((x) => x.docId === o?.docId)
+// People who can be @-mentioned: everyone with access but me.
+const people = (o) => (fileOf(o)?.members || []).filter((m) => m.userId !== state.me.userId && m.name)
 
 const canEdit = () => {
   const f = state.files.find((x) => x.docId === state.open?.docId)
@@ -38,12 +51,28 @@ export function attachReview (o) {
   refresh()
 }
 
+// Other apps: count, markers and the panel follow the threads.
+export function attachThreads (o) {
+  const refresh = () => {
+    if (state.open !== o) return
+    const threads = readThreads(o.ydoc)
+    updateCount(o, threads)
+    try { o.view.comments.mark?.(threads.filter((t) => !t.resolved), view?.o === o ? view.active : null) } catch {}
+    if (view?.o === o) scheduleRender()
+  }
+  const comments = o.ydoc.getMap('comments')
+  comments.observeDeep(refresh)
+  o.cleanup.push(() => comments.unobserveDeep(refresh))
+  o.refreshComments = refresh
+  refresh()
+}
+
 export function recordMySuggestions (o, ids) {
   recordSuggestions(o.ydoc, ids, state.me.userId)
 }
 
-function updateCount (o) {
-  const open = readThreads(o.ydoc).filter((t) => !t.resolved).length + suggestionList(o.editor).length
+function updateCount (o, threads = readThreads(o.ydoc)) {
+  const open = threads.filter((t) => !t.resolved).length + (textMode(o) ? suggestionList(o.editor).length : 0)
   const badge = document.querySelector('#comment-count')
   badge.hidden = !open
   badge.textContent = String(open)
@@ -52,6 +81,7 @@ function updateCount (o) {
 // Resolved comments keep their anchor but lose their highlight; the
 // selected one is drawn stronger.
 function applyHighlights (o) {
+  if (!textMode(o)) { o.refreshComments?.(); return }
   let style = document.querySelector('#comment-style')
   if (!style) { style = el('style', { id: 'comment-style' }); document.head.append(style) }
   const rules = readThreads(o.ydoc).filter((t) => t.resolved).map((t) => `.cp-comment[data-comment="${CSS.escape(t.id)}"]{background:none;border-bottom-color:transparent}`)
@@ -77,11 +107,29 @@ export function openComments ({ composing = null } = {}) {
   render()
 }
 
+// Opens the panel on one thread (from the activity list, say).
+export function showThread (id) {
+  openComments()
+  if (!view) return
+  const t = readThreads(view.o.ydoc).find((x) => x.id === id)
+  if (!t) return
+  if (t.resolved) view.showResolved = true
+  render()
+  select(view, id, textMode(view.o) ? commentAnchors(view.o.editor).get(id) : null, t)
+  view.body.querySelector(`.review-card[data-id="${CSS.escape(id)}"]`)?.scrollIntoView({ block: 'nearest' })
+}
+
 // Starts a comment on the selected text.
 export function newComment () {
   const o = state.open
   if (!o) return
   if (!canEdit()) { toast('Only people who can edit this file can comment.'); return }
+  if (!textMode(o)) {
+    const cur = o.view.comments.current?.() || { anchor: { kind: 'file' }, label: 'This file' }
+    openComments({ composing: { quote: cur.label, anchor: cur.anchor } })
+    queueMicrotask(() => view?.body.querySelector('.composer textarea')?.focus())
+    return
+  }
   const { from, to, empty } = o.editor.state.selection
   if (empty) { toast('Select the text you want to comment on.'); return }
   openComments({ composing: { quote: o.editor.state.doc.textBetween(from, to, ' ').slice(0, 300), from, to } })
@@ -102,6 +150,7 @@ function render () {
   const focused = document.activeElement?.dataset?.draft
   const { o } = v
   const writable = canEdit()
+  if (!textMode(o)) return renderThreads(v, writable, focused)
   const anchors = commentAnchors(o.editor)
   const threads = readThreads(o.ydoc)
   const items = []
@@ -125,19 +174,113 @@ function render () {
     if (v.showResolved) for (const t of resolved) out.push(threadCard(v, t, anchors.get(t.id), writable))
   }
   v.body.replaceChildren(...out)
-  for (const box of v.body.querySelectorAll('textarea[data-draft]')) box.value = v.drafts.get(box.dataset.draft) || ''
+  for (const box of v.body.querySelectorAll('textarea[data-draft]')) { box.value = v.drafts.get(box.dataset.draft) || ''; mentionable(box) }
   if (focused) v.body.querySelector(`textarea[data-draft="${CSS.escape(focused)}"]`)?.focus()
 }
 
+// Threads in any app other than documents, newest activity last.
+function renderThreads (v, writable, focused) {
+  const { o } = v
+  const threads = readThreads(o.ydoc)
+  const out = []
+  if (v.composing) out.push(composer(v))
+  else if (writable) {
+    const cur = o.view.comments.current?.()
+    out.push(el('button', { type: 'button', class: 'btn comment-start', onclick: () => newComment() }, cur ? `Comment on ${cur.label}` : 'Comment on this file'))
+  }
+  const open = threads.filter((t) => !t.resolved)
+  if (!open.length && !v.composing) {
+    out.push(el('p', { class: 'panel-note' }, writable
+      ? 'Select something and comment on it, or comment on the whole file. Type @ to mention someone; they’ll be told.'
+      : 'No comments yet.'))
+  }
+  for (const t of open) out.push(threadCard(v, t, null, writable))
+  const resolved = threads.filter((x) => x.resolved)
+  if (resolved.length) {
+    out.push(el('button', { type: 'button', class: 'panel-toggle', 'aria-expanded': String(v.showResolved), onclick: () => { v.showResolved = !v.showResolved; render() } },
+      `${v.showResolved ? 'Hide' : 'Show'} ${resolved.length} resolved`))
+    if (v.showResolved) for (const t of resolved) out.push(threadCard(v, t, null, writable))
+  }
+  v.body.replaceChildren(...out)
+  for (const box of v.body.querySelectorAll('textarea[data-draft]')) { box.value = v.drafts.get(box.dataset.draft) || ''; mentionable(box) }
+  if (focused) v.body.querySelector(`textarea[data-draft="${CSS.escape(focused)}"]`)?.focus()
+}
+
+// What a thread is about, in words; null when that thing is gone.
+function anchorLabel (o, t) {
+  if (!t.anchor || t.anchor.kind === 'file') return 'This file'
+  try { return o.view.comments.label(t.anchor) } catch { return null }
+}
+
+// ---- @mentions ------------------------------------------------------------------
+
+// Typing @ in a comment box offers the people with access.
+function mentionable (box) {
+  if (box.dataset.mentions) return
+  box.dataset.mentions = '1'
+  let menu = null
+  const close = () => { menu?.remove(); menu = null }
+  const query = () => {
+    const before = box.value.slice(0, box.selectionStart)
+    const m = /(?:^|\s)@([^\s@]{0,30})$/u.exec(before)
+    return m ? { text: m[1], start: before.length - m[1].length - 1 } : null
+  }
+  const pick = (p, q) => {
+    box.value = `${box.value.slice(0, q.start)}@${p.name} ${box.value.slice(box.selectionStart)}`
+    const at = q.start + p.name.length + 2
+    box.setSelectionRange(at, at)
+    close()
+    box.focus()
+  }
+  box.addEventListener('input', () => {
+    const q = query()
+    const list = q && view ? people(view.o).filter((p) => p.name.toLowerCase().startsWith(q.text.toLowerCase())).slice(0, 6) : []
+    close()
+    if (!list.length) return
+    menu = el('div', { class: 'mention-menu', role: 'listbox' }, ...list.map((p, i) => el('button', {
+      type: 'button',
+      role: 'option',
+      class: `mention-option${i === 0 ? ' active' : ''}`,
+      onmousedown: (e) => { e.preventDefault(); pick(p, q) }
+    }, p.name)))
+    box.after(menu)
+  })
+  box.addEventListener('keydown', (e) => {
+    if (!menu) return
+    const opts = [...menu.querySelectorAll('.mention-option')]
+    const i = opts.findIndex((b) => b.classList.contains('active'))
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault()
+      e.stopImmediatePropagation()
+      opts[i]?.classList.remove('active')
+      opts[(i + (e.key === 'ArrowDown' ? 1 : opts.length - 1)) % opts.length].classList.add('active')
+    } else if (e.key === 'Enter' || e.key === 'Tab') {
+      e.preventDefault()
+      e.stopImmediatePropagation()
+      opts[Math.max(0, i)].dispatchEvent(new MouseEvent('mousedown'))
+    } else if (e.key === 'Escape') { e.stopImmediatePropagation(); close() }
+  }, { capture: true })
+  box.addEventListener('blur', () => setTimeout(close, 150))
+}
+
+// A message's text with the people it mentions picked out.
+function messageText (o, m) {
+  const names = (m.mentions || []).map((id) => (id === state.me.userId ? state.me.name : people(o).find((p) => p.userId === id)?.name)).filter(Boolean)
+  if (!names.length) return el('p', { class: 'message-text' }, m.text)
+  const pattern = new RegExp(`(@(?:${names.map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')}))`, 'g')
+  return el('p', { class: 'message-text' }, ...m.text.split(pattern).map((part, i) => (i % 2 ? el('span', { class: `mention${part === `@${state.me.name}` ? ' mention-me' : ''}` }, part) : part)))
+}
+
 function composer (v) {
-  const box = el('textarea', { rows: '3', 'data-draft': 'new', placeholder: 'Add a comment', 'aria-label': 'New comment' })
+  const box = el('textarea', { rows: '3', 'data-draft': 'new', placeholder: 'Add a comment. Type @ to mention someone.', 'aria-label': 'New comment' })
   const submit = () => {
     const text = box.value.trim()
     if (!text) return
     const { o } = v
-    const { from, to, quote } = v.composing
-    const id = addThread(o.ydoc, { quote, userId: state.me.userId, text })
-    o.editor.chain().setTextSelection({ from, to }).addComment(id).run()
+    const { from, to, quote, anchor } = v.composing
+    const mentions = mentionsIn(text, people(o))
+    const id = addThread(o.ydoc, { quote, anchor, userId: state.me.userId, text, mentions })
+    if (textMode(o)) o.editor.chain().setTextSelection({ from, to }).addComment(id).run()
     v.composing = null
     v.drafts.delete('new')
     v.active = id
@@ -145,17 +288,17 @@ function composer (v) {
   }
   box.addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); submit() } else if (e.key === 'Escape') { v.composing = null; render() } })
   return el('div', { class: 'review-card composer' },
-    el('p', { class: 'review-quote' }, `“${v.composing.quote}”`),
+    el('p', { class: 'review-quote' }, v.composing.anchor ? v.composing.quote : `“${v.composing.quote}”`),
     box,
     el('div', { class: 'review-actions' },
       el('button', { type: 'button', class: 'btn btn-primary', onclick: submit }, 'Comment'),
       el('button', { type: 'button', class: 'btn btn-quiet', onclick: () => { v.composing = null; v.drafts.delete('new'); render() } }, 'Cancel')))
 }
 
-function select (v, id, anchor) {
+function select (v, id, anchor, thread = null) {
   v.active = id
   applyHighlights(v.o)
-  if (anchor) {
+  if (!textMode(v.o)) { if (thread?.anchor && thread.anchor.kind !== 'file') { try { v.o.view.comments.reveal(thread.anchor) } catch {} } } else if (anchor) {
     v.o.editor.chain().setTextSelection({ from: anchor.from, to: anchor.to }).scrollIntoView().run()
   }
   for (const c of v.body.querySelectorAll('.review-card')) c.classList.toggle('active', c.dataset.id === id)
@@ -170,16 +313,17 @@ function threadCard (v, t, anchor, writable) {
         el('span', { class: 'message-dot', style: `--c:${colorOf(o.ydoc, m.userId)}`, 'aria-hidden': 'true' }),
         el('strong', {}, nameOf(o.ydoc, m.userId)),
         el('span', { class: 'message-time', title: new Date(m.at).toLocaleString() }, ago(m.at), m.editedAt ? ' (edited)' : '')),
-      el('p', { class: 'message-text' }, m.text),
+      messageText(o, m),
       mine && writable ? el('div', { class: 'message-tools' },
         el('button', { type: 'button', class: 'link-button', onclick: (e) => { e.stopPropagation(); editInPlace(v, t, m) } }, 'Edit'),
-        el('button', { type: 'button', class: 'link-button', onclick: (e) => { e.stopPropagation(); deleteMessage(o.ydoc, t.id, m.id, { userId: state.me.userId }); if (i === 0 && t.messages.length === 1) o.editor.commands.removeComment(t.id) } }, 'Delete')) : null)
+        el('button', { type: 'button', class: 'link-button', onclick: (e) => { e.stopPropagation(); deleteMessage(o.ydoc, t.id, m.id, { userId: state.me.userId }); if (textMode(o) && i === 0 && t.messages.length === 1) o.editor.commands.removeComment(t.id) } }, 'Delete')) : null)
   })
   const replyBox = writable && !t.resolved ? el('textarea', { rows: '1', 'data-draft': `reply:${t.id}`, placeholder: 'Reply', 'aria-label': 'Reply' }) : null
+  const label = textMode(o) ? null : anchorLabel(o, t)
   const sendReply = () => {
     const text = replyBox.value.trim()
     if (!text) return
-    reply(o.ydoc, t.id, { userId: state.me.userId, text })
+    reply(o.ydoc, t.id, { userId: state.me.userId, text, mentions: mentionsIn(text, people(o)) })
     v.drafts.delete(`reply:${t.id}`)
     replyBox.value = ''
   }
@@ -187,9 +331,11 @@ function threadCard (v, t, anchor, writable) {
   return el('div', {
     class: `review-card thread${t.resolved ? ' resolved' : ''}${v.active === t.id ? ' active' : ''}`,
     'data-id': t.id,
-    onclick: (e) => { if (!e.target.closest('button, textarea')) select(v, t.id, anchor) }
+    onclick: (e) => { if (!e.target.closest('button, textarea')) select(v, t.id, anchor, t) }
   },
-  el('p', { class: 'review-quote' }, anchor ? `“${anchor.text.slice(0, 160)}”` : el('em', {}, `The text “${t.quote.slice(0, 80)}” was deleted`)),
+  textMode(o)
+    ? el('p', { class: 'review-quote' }, anchor ? `“${anchor.text.slice(0, 160)}”` : el('em', {}, `The text “${t.quote.slice(0, 80)}” was deleted`))
+    : el('p', { class: 'review-quote' }, label || el('em', {}, `${t.quote || 'What this was about'} was deleted`)),
   ...messages,
   t.resolved ? el('p', { class: 'review-note' }, `Resolved by ${nameOf(o.ydoc, t.resolvedBy)} ${ago(t.resolvedAt)}`) : null,
   replyBox,
@@ -204,10 +350,11 @@ function editInPlace (v, t, m) {
   const msg = [...card.querySelectorAll('.message')][t.messages.findIndex((x) => x.id === m.id)]
   const box = el('textarea', { rows: '3', 'data-draft': `edit:${m.id}`, 'aria-label': 'Edit comment' })
   box.value = m.text
-  const save = () => { editMessage(v.o.ydoc, t.id, m.id, { userId: state.me.userId, text: box.value }); v.drafts.delete(`edit:${m.id}`) }
+  const save = () => { editMessage(v.o.ydoc, t.id, m.id, { userId: state.me.userId, text: box.value, mentions: mentionsIn(box.value, people(v.o)) }); v.drafts.delete(`edit:${m.id}`) }
   box.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); save() } else if (e.key === 'Escape') render() })
   msg.querySelector('.message-text').replaceWith(box)
   msg.querySelector('.message-tools')?.remove()
+  mentionable(box)
   box.focus()
 }
 

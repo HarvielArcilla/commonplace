@@ -24,6 +24,7 @@ export function mountFile (o) {
     preview () { return { title: '', close () {} } },
     async exportPayload () { return { payload: {} } },
     exportFormats: {},
+    comments: { current: () => null, label: () => 'This file', reveal () {} },
     noToolbar: true,
     noHistory: true, // a new version replaces the file; there's no edit history
     destroy: () => clearInterval(v.timer)

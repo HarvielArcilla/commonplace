@@ -1092,3 +1092,30 @@ textarea.a-text { resize: vertical; }
 .crumb-share { display: inline-flex; align-items: center; gap: 6px; margin-left: 6px; font: italic 13px/1 var(--serif); color: var(--ink-soft); }
 .crumb-share svg { color: var(--accent); }
 .share-folder-note { margin: -4px 0 12px; color: var(--ink-soft); font: 15px/1.5 var(--serif); }
+
+/* ---- comments everywhere ------------------------------------------------------- */
+.comment-start { display: flex; width: calc(100% - 24px); justify-content: center; margin: 4px 12px 8px; }
+.comment-badge { position: absolute; top: -6px; right: -6px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: #f2c94c; color: #1f2430; font: 600 11px/18px var(--sans, system-ui); text-align: center; box-shadow: 0 0 0 2px var(--paper); pointer-events: none; }
+.task-card, .slide-thumb, .q-edit, .cal-event { position: relative; }
+.cal-event .comment-badge { top: -5px; right: -4px; min-width: 14px; height: 14px; line-height: 14px; font-size: 9px; padding: 0 3px; }
+.cal-event.picked { outline: 2px solid var(--accent); outline-offset: 1px; }
+.grid td.has-comment { position: relative; }
+.grid td.has-comment::after { content: ''; position: absolute; top: 0; right: 0; border-style: solid; border-width: 0 7px 7px 0; border-color: transparent #e0a526 transparent transparent; }
+.mention { color: var(--accent); font-weight: 600; }
+.mention.mention-me { background: color-mix(in srgb, var(--accent) 14%, transparent); border-radius: 3px; padding: 0 2px; }
+.mention-menu { display: flex; flex-direction: column; margin-top: 4px; border: 1px solid var(--rule); border-radius: 8px; background: var(--paper-raised); box-shadow: 0 6px 18px rgb(0 0 0 / .08); overflow: hidden; }
+.mention-option { text-align: left; padding: 6px 10px; border: 0; background: none; font: 14px/1.3 var(--serif); color: var(--ink); cursor: pointer; }
+.mention-option.active, .mention-option:hover { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+
+/* ---- activity ------------------------------------------------------------------ */
+.activity-list { list-style: none; margin: 0 0 8px; padding: 0; max-height: 60vh; overflow: auto; border: 1px solid var(--rule); border-radius: 10px; }
+.activity-list li + li { border-top: 1px solid var(--rule); }
+.activity-item { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto; gap: 10px; align-items: start; width: 100%; padding: 10px 12px; border: 0; background: none; text-align: left; cursor: pointer; color: var(--ink); font: 15px/1.4 var(--serif); }
+.activity-item:hover { background: color-mix(in srgb, var(--accent) 6%, transparent); }
+.activity-dot { width: 7px; height: 7px; margin-top: 7px; border-radius: 50%; }
+.activity-item.unread .activity-dot { background: var(--accent); }
+.activity-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.activity-text { color: var(--ink-soft); font-size: 14px; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.activity-time { color: var(--ink-faint); font: italic 13px/1.4 var(--serif); white-space: nowrap; }
+.task-card .comment-badge { top: 9px; right: 8px; }
+.q-edit .comment-badge { top: 10px; right: 10px; }

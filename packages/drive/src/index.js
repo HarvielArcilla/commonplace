@@ -18,6 +18,8 @@ import {
 } from '@commonplace/core'
 import { Files, filesApp, GUARD_BYTES } from './files.js'
 import { SharedFolders, folderApp, ITEMS } from './shared-folders.js'
+import { openThreadCount } from '@commonplace/core/threads'
+import { Activity } from './activity.js'
 
 export { sendDrive, receiveDrive, newMoveCode, parseMoveCode } from './move.js'
 export { Backups, readBackupFile, restoreBackup, newRecoveryKey, normalizeRecoveryKey } from './backup.js'
@@ -48,6 +50,7 @@ export class Drive extends EventEmitter {
     this.engine = new SyncEngine({ identity: this.identity, store: this.store, device: this.device, blobs: new BlobStore(path.join(dataDir, 'blobs')) })
     this.uploads = new Files(this, { makeThumb })
     this.shared = new SharedFolders(this)
+    this.activity = new Activity(this)
     this.history = new History(this.store)
     this.historyTiming = { ...HISTORY, ...history }
     this._checkpoints = new Map() // docId -> { first, timer } for unsaved changes
@@ -139,6 +142,7 @@ export class Drive extends EventEmitter {
   async stop () {
     clearInterval(this._seenTimer)
     this.shared.destroy()
+    this.activity.destroy()
     if (!this.signedOut) this._seen()
     for (const docId of [...this._checkpoints.keys()]) this.checkpoint(docId)
     for (const [docId, t] of this._persistTimers) {
@@ -269,7 +273,7 @@ export class Drive extends EventEmitter {
       // A small picture of the start of the file, for the icon view.
       thumb: app?.thumbnail && doc ? safeCall(() => app.thumbnail(doc.ydoc), null) : null,
       // Open comments and pending suggestions.
-      review: app?.review && doc ? safeCall(() => app.review(doc.ydoc), { comments: 0, suggestions: 0 }) : { comments: 0, suggestions: 0 },
+      review: !doc ? { comments: 0, suggestions: 0 } : app?.review ? safeCall(() => app.review(doc.ydoc), { comments: 0, suggestions: 0 }) : { comments: safeCall(() => openThreadCount(doc.ydoc), 0), suggestions: 0 },
       syncMode: entry.syncMode === 'open' ? 'open' : 'always',
       // Paused because someone else's file grew past the size guard.
       held: entry.held ? { bytes: entry.heldBytes || 0 } : null,
@@ -580,6 +584,7 @@ export class Drive extends EventEmitter {
       addedAt: Date.now()
     })
     this._attach(this.files.get(docId))
+    if (item.owner !== this.identity.userId) this.activity.shared(docId, folderId, { userId: item.owner, name: item.ownerName })
   }
 
   // ---- folders -------------------------------------------------------------
@@ -772,6 +777,7 @@ export class Drive extends EventEmitter {
     this._attached.delete(docId)
     this._open.delete(docId)
     this.uploads.unwatch(docId)
+    this.activity.unwatch(docId)
     this.engine.closeDoc(docId, { deleteLocalData: true })
     this._changed()
     await this._leaveTopics(docId)
@@ -906,6 +912,7 @@ export class Drive extends EventEmitter {
     doc.meta.observe(watchItems)
     watchItems()
     this.uploads.watch(entry.docId)
+    this.activity.watch(entry.docId)
     refresh()
     this._syncTopics(entry.docId)
     this._applyHelpers(entry.docId)

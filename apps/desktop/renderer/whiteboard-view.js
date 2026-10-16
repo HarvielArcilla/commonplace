@@ -114,10 +114,34 @@ export function mountWhiteboard (o) {
       if (format === 'svg') return { payload: { svg } }
       return { payload: { png: await toPng(svg) } }
     },
+    comments: {
+      current () {
+        const s = v.selected.size === 1 && readShape(v.ydoc, [...v.selected][0])
+        return s ? { anchor: { kind: 'shape', id: s.id }, label: shapeLabel(s) } : null
+      },
+      label: (a) => { const s = readShape(v.ydoc, a.id); return s ? shapeLabel(s).replace(/^t/, 'T') : null },
+      reveal (a) {
+        const s = readShape(v.ydoc, a.id)
+        if (!s) return
+        const b = bounds(s)
+        const r = v.svg.getBoundingClientRect()
+        v.cam = { ...v.cam, x: b.x + b.w / 2 - r.width / 2 / v.cam.k, y: b.y + b.h / 2 - r.height / 2 / v.cam.k }
+        applyCamera(v)
+        v.selected = new Set([s.id])
+        render(v)
+      }
+    },
     exportFormats: { png: 'Image (.png)', svg: 'Vector image (.svg)' },
     exportHints: { png: 'The whole board, at twice its size', svg: 'Opens in browsers, Figma, Illustrator and Inkscape' },
     destroy: () => v.destroy()
   }
+}
+
+// How a comment names a shape: its words, or what kind of shape it is.
+function shapeLabel (s) {
+  const words = shapeText(s)?.trim().replace(/\s+/g, ' ')
+  const kind = { sticky: 'sticky note', rect: 'rectangle', ellipse: 'ellipse', text: 'text', arrow: 'arrow', line: 'line', pen: 'drawing' }[s.type] || 'shape'
+  return words ? `the ${kind} “${words.slice(0, 40)}${words.length > 40 ? '…' : ''}”` : `a ${kind}`
 }
 
 function svgEl (tag, attrs = {}) {

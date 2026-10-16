@@ -13,6 +13,7 @@ import { $, el, toast, openMenu, cleanError } from './ui.js'
 import { icons } from './icons.js'
 import { state, cp } from './state.js'
 import { toolButton, toolbarGroups, setToolbar, press, swatchMenu, showValue, TEXT_COLORS, FILL_COLORS } from './toolbar.js'
+import { countBy, badges } from './comment-marks.js'
 
 const SIZES = [12, 14, 16, 18, 20, 24, 28, 32, 36, 44, 54, 66, 80]
 const BACKGROUNDS = [['White', '#ffffff'], ['Paper', '#fbfbf9'], ['Mist', '#eef1f6'], ['Sand', '#f3e6cf'], ['Sage', '#e3ece4'], ['Ink', '#1f2430'], ['Navy', '#1d2c4d'], ['Forest', '#1f3a2e']]
@@ -92,6 +93,23 @@ export function mountSlides (o) {
         print: () => { document.body.append(pages); document.body.classList.add('printing-slides'); return () => { pages.remove(); document.body.classList.remove('printing-slides') } }
       }
     },
+    comments: {
+      current () {
+        const n = slideIds(v.ydoc).indexOf(v.slideId) + 1
+        if (!n) return null
+        return { anchor: { kind: 'slide', id: v.slideId, el: v.selected || undefined }, label: v.selected ? `the selected box on slide ${n}` : `slide ${n}` }
+      },
+      label (a) {
+        const n = slideIds(v.ydoc).indexOf(a.id) + 1
+        return n ? `Slide ${n}${a.el && readSlide(v.ydoc, a.id)?.elements.some((e) => e.id === a.el) ? ', a box on it' : ''}` : null
+      },
+      reveal (a) {
+        if (!slideIds(v.ydoc).includes(a.id)) return
+        goTo(v, a.id)
+        if (a.el && readSlide(v.ydoc, a.id)?.elements.some((e) => e.id === a.el)) { v.selected = a.el; render(v) }
+      },
+      mark: (threads) => { v.commentCounts = countBy(threads, 'slide'); badges(v.root, '.slide-thumb[data-slide]', 'data-slide', v.commentCounts) }
+    },
     exportFormats: { pptx: 'PowerPoint (.pptx)', pdf: 'PDF' },
     exportHints: { pptx: 'Opens in PowerPoint, Keynote and Google Slides', pdf: 'One page per slide' },
     destroy: () => v.destroy()
@@ -108,6 +126,7 @@ function render (v) {
   if (document.activeElement !== v.notes) v.notes.value = slideMap(v.ydoc, v.slideId)?.get('notes')?.toString() || ''
   syncToolbar(v)
   drawPeers(v)
+  badges(v.root, '.slide-thumb[data-slide]', 'data-slide', v.commentCounts)
 }
 
 // A slide drawn at `k` times its size.
@@ -127,6 +146,7 @@ function drawStrip (v, ids) {
     if (!t) {
       const node = el('div', {
         class: 'slide-thumb',
+        'data-slide': id,
         role: 'option',
         tabindex: '0',
         draggable: 'true',

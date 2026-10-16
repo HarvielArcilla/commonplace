@@ -82,6 +82,9 @@ contextBridge.exposeInMainWorld('commonplace', {
   formResponses: (docId) => ipcRenderer.invoke('forms:responses', docId),
   copyText: (text) => ipcRenderer.invoke('clipboard:write', text),
   onDriveChanged: listen('drive:changed'),
+  onActivityOpen: listen('activity:open'),
+  listActivity: () => ipcRenderer.invoke('activity:list'),
+  markActivityRead: (ids) => ipcRenderer.invoke('activity:read', ids || null),
   onInvite: listen('invite:received'),
 
   openDoc: (docId, clientId) => ipcRenderer.invoke('doc:open', docId, clientId),

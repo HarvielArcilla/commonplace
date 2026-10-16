@@ -11,6 +11,7 @@
     "./comments": "./src/comments.js"
   },
   "dependencies": {
+    "@commonplace/core": "0.1.0",
     "@handlewithcare/prosemirror-suggest-changes": "^0.1.8",
     "@tiptap/core": "^3.32.0",
     "@tiptap/extension-collaboration": "^3.32.0",

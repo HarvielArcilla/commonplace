@@ -5,7 +5,8 @@
   "main": "src/index.js",
   "exports": {
     ".": "./src/index.js",
-    "./helper-protocol": "./src/helper-protocol.js"
+    "./helper-protocol": "./src/helper-protocol.js",
+    "./threads": "./src/threads.js"
   },
   "dependencies": {
     "@hyperswarm/secret-stream": "^6.9.2",
