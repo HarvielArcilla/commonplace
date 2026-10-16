@@ -108,6 +108,21 @@
         <h3>Recovery</h3>
         <div id="profile-recovery-body"></div>
       </section>
+      <section id="profile-storage" class="computers" hidden>
+        <h3>Storage</h3>
+        <p class="fineprint-plain" id="storage-summary"></p>
+        <label class="field field-inline">Download files others share automatically up to
+          <select id="storage-auto" aria-label="Automatic download limit">
+            <option value="0">Never</option>
+            <option value="1048576">1 MB</option>
+            <option value="10485760">10 MB</option>
+            <option value="26214400">25 MB</option>
+            <option value="104857600">100 MB</option>
+          </select>
+        </label>
+        <p class="fineprint-plain">Bigger files, and kinds that can run programs, always wait for you to say yes. Nothing is downloaded when less than 2 GB would be left free.</p>
+        <ul class="people" id="storage-list" aria-label="What takes the most space"></ul>
+      </section>
       <section id="profile-helpers" class="computers" hidden>
         <h3>Always-on helper</h3>
         <p class="fineprint-plain">A computer you leave on keeps encrypted copies it can’t read, so your files and your computers sync even when nothing else is online. New files you make use it.</p>

@@ -135,4 +135,12 @@ export class FileStore {
   remove (id) {
     fs.rmSync(this._docDir(id), { recursive: true, force: true })
   }
+
+  // Bytes on disk for one document.
+  sizeOf (id) {
+    const dir = this._docDir(id)
+    let n = 0
+    try { for (const f of fs.readdirSync(dir)) n += fs.statSync(path.join(dir, f)).size } catch {}
+    return n
+  }
 }

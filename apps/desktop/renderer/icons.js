@@ -42,8 +42,10 @@ export const icons = {
   tasks: i('<rect x="1.75" y="2.25" width="3.5" height="11.5" rx=".75"/><rect x="6.25" y="2.25" width="3.5" height="7.5" rx=".75"/><rect x="10.75" y="2.25" width="3.5" height="9.5" rx=".75"/>'),
   calendar: i('<rect x="1.75" y="2.75" width="12.5" height="11.5" rx="1"/><path d="M1.75 6.25h12.5M5 1.5v2.5M11 1.5v2.5"/><path d="M4.5 9h1M7.5 9h1M10.5 9h1M4.5 11.75h1M7.5 11.75h1"/>'),
   whiteboard: i('<path d="M2 2.75h12v8.5H2z"/><path d="M5 13.75 6.5 11.25M11 13.75l-1.5-2.5"/><path d="m4.5 8.5 2-2.25 2 1.5 3-3.25"/>'),
-  form: i('<rect x="2.25" y="1.75" width="11.5" height="12.5" rx="1"/><circle cx="5.25" cy="5.5" r="1"/><path d="M7.5 5.5h4"/><circle cx="5.25" cy="9" r="1"/><path d="M7.5 9h4"/><path d="M4.5 12h3.5"/>')
+  form: i('<rect x="2.25" y="1.75" width="11.5" height="12.5" rx="1"/><circle cx="5.25" cy="5.5" r="1"/><path d="M7.5 5.5h4"/><circle cx="5.25" cy="9" r="1"/><path d="M7.5 9h4"/><path d="M4.5 12h3.5"/>'),
+  file: i('<path d="M3.75 1.75h5.5l3 3v9.5h-8.5z"/><path d="M9.25 1.75v3h3"/>'),
+  upload: i('<path d="M8 10.75v-8M4.75 6 8 2.75 11.25 6"/><path d="M2.5 10.5v3.25h11V10.5"/>')
 }
 
 // The icon for a kind of file.
-export const kindIcon = (kind) => ({ paged: icons.paged, sheet: icons.sheet, slides: icons.slides, tasks: icons.tasks, calendar: icons.calendar, whiteboard: icons.whiteboard, form: icons.form }[kind] || icons.markdown)
+export const kindIcon = (kind) => ({ paged: icons.paged, sheet: icons.sheet, slides: icons.slides, tasks: icons.tasks, calendar: icons.calendar, whiteboard: icons.whiteboard, form: icons.form, file: icons.file }[kind] || icons.markdown)

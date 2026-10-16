@@ -13,6 +13,7 @@
 
 import { EventEmitter } from 'node:events'
 import crypto from 'node:crypto'
+import path from 'node:path'
 import * as Y from 'yjs'
 import * as awarenessProtocol from 'y-protocols/awareness'
 import { deriveDocKeys, epochKeys, seal, open } from './crypto.js'
@@ -20,6 +21,7 @@ import { MSG, encodeFrame, FrameReader, encodeHello, decodeHello, helloProof } f
 import { verifySignature } from './identity.js'
 import { Membership, canEdit, canRespond } from './members.js'
 import { isResponseUpdate } from './respond.js'
+import { ChunkExchange, BlobStore } from './chunks.js'
 import { stateVectorMap, hasOpsBeyond, sameState, docFrom } from './conflicts.js'
 
 const EMPTY_UPDATE_BYTES = 2
@@ -113,13 +115,28 @@ class DocHandle {
 export class SyncEngine extends EventEmitter {
   // device: { id, name } for this computer, so my other computers can tell
   // which of them they're talking to.
-  constructor ({ identity, store, device = null }) {
+  // blobs: where uploaded files' chunks are kept (a BlobStore), if any.
+  constructor ({ identity, store, device = null, blobs = null }) {
     super()
     this.identity = identity
     this.store = store
     this.device = device
     this.docs = new Map()
     this.connections = new Set()
+    this.chunks = new ChunkExchange({
+      blobs: blobs || new BlobStore(path.join(store.dir, '..', 'blobs')),
+      types: MSG,
+      send: (conn, type, docId, plain) => {
+        const doc = this.docs.get(docId)
+        if (doc?.contentEpoch != null) conn.send(type, docId, doc.contentEpoch, seal(doc.keyFor(doc.contentEpoch), plain))
+      },
+      links: (docId) => {
+        const doc = this.docs.get(docId)
+        return doc ? [...doc.links].filter(([, l]) => l.contentEpoch === doc.contentEpoch && l.contentEpoch != null).map(([c]) => c) : []
+      },
+      // Set by the Drive: whether a chunk belongs to a file.
+      allow: (docId, hash) => this.allowChunk?.(docId, hash) || false
+    })
   }
 
   // Opens (or creates) a document from its root secret, loads it from disk and
@@ -431,6 +448,7 @@ export class SyncEngine extends EventEmitter {
   }
 
   destroy () {
+    this.chunks.destroy()
     for (const conn of this.connections) conn.destroy()
     for (const docId of [...this.docs.keys()]) this.closeDoc(docId)
   }
@@ -566,6 +584,11 @@ export class SyncEngine extends EventEmitter {
       case MSG.AWARENESS:
         try { awarenessProtocol.applyAwarenessUpdate(doc.awareness, plain, conn) } catch {}
         break
+      case MSG.WANT:
+      case MSG.CHUNK:
+      case MSG.NOCHUNK:
+        this.chunks.onMessage(doc.docId, conn, type, plain)
+        break
     }
   }
 
@@ -677,6 +700,7 @@ export class SyncEngine extends EventEmitter {
     if (canEdit(link.role) && canRespond(doc.myAccess?.role)) {
       for (const update of this.outbox(doc.docId)) conn.send(MSG.UPDATE, doc.docId, contentEpoch, seal(doc.keyFor(contentEpoch), update))
     }
+    this.chunks.pump(doc.docId) // someone new who may have chunks I'm waiting for
     const states = [...doc.awareness.getStates().keys()]
     if (states.length) {
       const msg = awarenessProtocol.encodeAwarenessUpdate(doc.awareness, states)
@@ -748,6 +772,7 @@ export class SyncEngine extends EventEmitter {
 
   _onConnectionClosed (conn) {
     this.connections.delete(conn)
+    this.chunks.dropConnection(conn)
     for (const doc of this.docs.values()) {
       const link = doc.links.get(conn)
       if (!link) continue

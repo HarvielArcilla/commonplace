@@ -11,6 +11,7 @@ Work on the same file at the same time, see each other's cursors, leave comments
 - **No account.** Open the app, type your name, start working. Your identity is a key made on your computer.
 - **No server.** Computers find each other on a peer-to-peer network and connect directly. Nobody can read your files in transit, sell them, lose them in a breach, or lock you out.
 - **Works offline.** Edits are saved on your computer first and merge on their own when you meet again, like a git merge that resolves itself. Where two people changed the same sentence, the owner sees both and picks.
+- **Any file.** Upload anything up to 100 MB. Big files, and kinds that can run code, wait for you to say yes before they take space on your computer.
 - **Yours to keep.** Import and export `.docx`, `.xlsx`, `.pptx`, `.csv`, `.ics`, `.md`, `.svg`, `.png` and PDF. MIT licensed.
 
 ## The apps
@@ -44,6 +45,22 @@ Work on the same file at the same time, see each other's cursors, leave comments
 **commonForms** collects answers. Share a form with "Can answer", and each person's answers are sealed so only people who can edit the form can read them, not the other people answering. See the answers summarized or one by one, and export them as `.csv`.
 
 ![commonForms: a summary of the answers to a sign-up form](docs/images/form.png)
+
+**Any other file** can be uploaded too (New → Upload files, or drag files onto the Drive), up to 100 MB each, and shared like the rest. Images, video, audio and text preview right in the app.
+
+![Uploaded files in commonDrive: a picture, a text file, a large archive waiting to be downloaded and a program](docs/images/uploads.png)
+
+### Your disk comes first
+
+Everything you share lives on the computers of the people you share it with, so commonplace is careful with space:
+
+- Files others share download by themselves only when they're small (10 MB or less; change it, or turn it off, under **Storage** in your profile). Bigger files wait until you click **Download**.
+- Kinds of file that can run code (programs, scripts, installers, web pages, documents with macros) always wait for a yes, and are only ever saved, never opened from commonplace.
+- Nothing downloads if it would leave less than 2 GB free. Nobody can send a file over 100 MB, and your computer refuses any piece of a file it didn't ask for or whose contents don't match.
+- A shared document someone else made that grows past 100 MB pauses until you choose to keep syncing it.
+- **Storage** in your profile shows what takes space, biggest first. Remove this computer's copy of anything someone else uploaded; it stays in your Drive and won't come back unless you download it again.
+
+![A large file someone shared, waiting for a yes before it takes space](docs/images/upload-large.png)
 
 ## Sharing
 

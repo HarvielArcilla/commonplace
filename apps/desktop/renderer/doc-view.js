@@ -31,8 +31,9 @@ import { mountTasks } from './tasks-view.js'
 import { mountCalendar } from './calendar-view.js'
 import { mountWhiteboard } from './whiteboard-view.js'
 import { mountForm } from './form-view.js'
+import { mountFile } from './file-view.js'
 
-const VIEWS = { markdown: mountDocs, paged: mountDocs, sheet: mountSheet, slides: mountSlides, tasks: mountTasks, calendar: mountCalendar, whiteboard: mountWhiteboard, form: mountForm }
+const VIEWS = { markdown: mountDocs, paged: mountDocs, sheet: mountSheet, slides: mountSlides, tasks: mountTasks, calendar: mountCalendar, whiteboard: mountWhiteboard, form: mountForm, file: mountFile }
 
 let onClosed = () => {}
 export function initDocView ({ onBack }) {
@@ -88,6 +89,8 @@ export async function openDocument (docId, { focusTitle = false, initialContent 
   o.refreshMargin = () => { if (state.open === o) renderDocMargin() }
   state.open = o
   o.view = (VIEWS[kind] || mountDocs)(o, { initialContent })
+  $('[data-action="export"]').hidden = !Object.keys(o.view.exportFormats || {}).length
+  $('[data-action="history"]').hidden = Boolean(o.view.noHistory)
 
   // Title lives in the shared container metadata.
   const meta = ydoc.getMap('meta')
@@ -198,7 +201,8 @@ function applyAccess () {
   const writable = Boolean(file) && (file.role === 'owner' || file.role === 'editor') && !file.access?.removed
   o.view.setEditable(writable)
   $('#doc-title').readOnly = !writable || Boolean(o.closePreview)
-  if ($('#toolbar').hidden === writable) { $('#toolbar').hidden = !writable; if (writable) fitToolbar() }
+  const bar = writable && !o.view.noToolbar
+  if ($('#toolbar').hidden === bar) { $('#toolbar').hidden = !bar; if (bar) fitToolbar() }
   $('#doc-view').classList.toggle('read-only', !writable)
 }
 

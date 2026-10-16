@@ -29,6 +29,8 @@ export const state = {
 // Status notes shown in the margin, for the list and for an open document.
 // "Here" means someone has the file open; "syncing" means our computers are
 // exchanging changes in the background.
+export const formatBytes = (n) => (n < 1024 ? `${n} B` : n < 1024 ** 2 ? `${Math.round(n / 1024)} KB` : n < 1024 ** 3 ? `${(n / 1024 ** 2).toFixed(n < 10 * 1024 ** 2 ? 1 : 0)} MB` : `${(n / 1024 ** 3).toFixed(1)} GB`)
+
 export function statusNotes (file, { detailed = false } = {}) {
   const notes = []
   const isMe = (p) => p.userId === state.me?.userId
@@ -57,6 +59,18 @@ export function statusNotes (file, { detailed = false } = {}) {
   if (file.access?.waitingForKey) {
     notes.push({ text: `Waiting for ${file.owner?.name || 'the owner'} to let you in`, cls: 'warn' })
     return notes
+  }
+  if (file.held) {
+    notes.push({ text: `Paused at ${formatBytes(file.held.bytes)} so it doesn’t fill this computer.`, cls: 'warn', action: { label: 'Keep syncing', run: () => cp.keepSyncing(file.docId) } })
+    return notes
+  }
+  const up = file.upload
+  if (up && !up.waiting && !up.ready) {
+    if (up.hold === 'large') notes.push({ text: `Large file (${formatBytes(up.size)}). Not downloaded yet.`, cls: 'warn', action: { label: 'Download', run: () => cp.approveDownload(file.docId) } })
+    else if (up.hold === 'risky') notes.push({ text: 'Can run programs. Download only if you trust who shared it.', cls: 'warn' })
+    else if (up.hold === 'space') notes.push({ text: 'Not enough free space to download', cls: 'warn' })
+    else if (up.hold === 'removed') notes.push({ text: 'Not on this computer', action: { label: 'Download', run: () => cp.approveDownload(file.docId) } })
+    else if (up.downloading) notes.push({ text: `Downloading ${Math.round(up.progress * 100)}%`, cls: 'live' })
   }
   if (!file.supported) {
     notes.push({ text: 'Made with a newer version of commonplace', cls: 'warn' })
@@ -99,7 +113,7 @@ export function statusNotes (file, { detailed = false } = {}) {
   if (file.sync.pending > 0 && file.sync.lastSyncedAt) {
     notes.push({ text: 'Some of your edits are only on this computer', cls: 'warn' })
   }
-  if (detailed && !here.length && !syncing.length && (file.role === 'owner' || file.role === 'editor')) {
+  if (detailed && file.kind !== 'file' && !here.length && !syncing.length && (file.role === 'owner' || file.role === 'editor')) {
     notes.push({
       text: (file.sync.helpers || []).length
         ? 'You can keep writing. Edits are saved here and reach the others through the helper, even when nobody else is online.'
@@ -110,8 +124,10 @@ export function statusNotes (file, { detailed = false } = {}) {
   return notes
 }
 
+// A note can carry one action ({ label, run }), shown as a link after it.
 export function renderNotes (notes) {
-  return notes.map((n) => el('span', { class: `note ${n.cls || ''}` }, n.text, n.dot ? el('span', { class: 'dot', 'aria-hidden': 'true' }) : null))
+  return notes.map((n) => el('span', { class: `note ${n.cls || ''}` }, n.text, n.dot ? el('span', { class: 'dot', 'aria-hidden': 'true' }) : null,
+    n.action ? el('button', { type: 'button', class: 'link-button note-action', onclick: (e) => { e.stopPropagation(); n.action.run() } }, n.action.label) : null))
 }
 
 // What a folded margin shows instead of its notes: one dot for the note

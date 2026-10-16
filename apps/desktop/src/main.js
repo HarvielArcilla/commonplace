@@ -2,14 +2,14 @@
 // hosts the window. The window never touches the network or the disk; it
 // talks to this process over a narrow IPC surface defined in preload.cjs.
 
-import { app, BrowserWindow, ipcMain, clipboard, shell, dialog, Notification } from 'electron'
+import { app, BrowserWindow, ipcMain, clipboard, shell, dialog, Notification, nativeImage } from 'electron'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import * as Y from 'yjs'
 import * as awarenessProtocol from 'y-protocols/awareness'
 import DHT from 'hyperdht'
-import { Drive, sendDrive, receiveDrive, newMoveCode, Backups, readBackupFile, restoreBackup } from '@commonplace/drive'
+import { Drive, sendDrive, receiveDrive, newMoveCode, Backups, readBackupFile, restoreBackup, fileKind, safeFileName } from '@commonplace/drive'
 import { docsApps } from '@commonplace/docs'
 import { sheetsApp } from '@commonplace/sheets'
 import { exportXlsx, importXlsx, exportCsv, importCsv } from '@commonplace/sheets/convert'
@@ -123,6 +123,16 @@ function createWindow () {
 
 function openExternal (url) {
   if (/^(https?:|mailto:)/i.test(String(url))) shell.openExternal(url)
+}
+
+// A small JPEG for an uploaded image, so the Drive can show it before anyone downloads it.
+async function makeThumb (file) {
+  const img = nativeImage.createFromPath(file)
+  if (img.isEmpty()) return null
+  const { width, height } = img.getSize()
+  const k = Math.min(1, 320 / Math.max(width, height))
+  const url = `data:image/jpeg;base64,${img.resize({ width: Math.round(width * k), height: Math.round(height * k), quality: 'good' }).toJPEG(72).toString('base64')}`
+  return url.length < 60000 ? url : null
 }
 
 function safeName (title, ext) {
@@ -326,6 +336,64 @@ function registerIpc () {
     win?.webContents.reload()
     return result
   })
+  // Uploaded files. Size limits, approval and free-space checks are in
+  // drive/files.js; here are the dialogs and opening them.
+  const uploadAll = async (paths, folderId) => {
+    const done = []
+    const failed = []
+    for (const p of paths.slice(0, 50)) {
+      try { done.push(await drive.upload(p, { folderId })) } catch (err) { failed.push(`${path.basename(p)}: ${err.message}`) }
+    }
+    return { done, failed }
+  }
+  ipcMain.handle('files:upload', async (_e, folderId) => {
+    const { canceled, filePaths } = await dialog.showOpenDialog(win, { title: 'Upload files', properties: ['openFile', 'multiSelections'] })
+    return canceled ? null : uploadAll(filePaths, folderId)
+  })
+  ipcMain.handle('files:uploadPaths', (_e, paths, folderId) => uploadAll((paths || []).filter((p) => typeof p === 'string' && path.isAbsolute(p)), folderId))
+  ipcMain.handle('files:uploadVersion', async (_e, docId) => {
+    const { canceled, filePaths } = await dialog.showOpenDialog(win, { title: 'Upload a new version', properties: ['openFile'] })
+    if (canceled || !filePaths[0]) return false
+    await drive.uploadVersion(docId, filePaths[0])
+    return true
+  })
+  ipcMain.handle('files:approve', (_e, docId) => drive.approveDownload(docId))
+  ipcMain.handle('files:removeCopy', (_e, docId) => drive.removeDownloadedCopy(docId))
+  ipcMain.handle('files:save', async (_e, docId) => {
+    const st = drive.describe(docId)?.upload
+    if (!st?.ready) throw new Error('This file isn’t on this computer yet.')
+    const { canceled, filePath } = await dialog.showSaveDialog(win, { defaultPath: path.join(app.getPath('downloads'), safeFileName(st.name)) })
+    if (canceled || !filePath) return null
+    await drive.uploads.saveTo(docId, filePath)
+    return path.basename(filePath)
+  })
+  // Opens a copy with the program your computer uses for that kind of file.
+  // Never for kinds that can run code: those can only be saved.
+  ipcMain.handle('files:open', async (_e, docId) => {
+    const st = drive.describe(docId)?.upload
+    if (!st?.ready) throw new Error('This file isn’t on this computer yet.')
+    if (fileKind(st.name).risky) throw new Error('This kind of file can run programs, so commonplace won’t open it. Save a copy instead, and open it only if you trust it.')
+    const dir = path.join(app.getPath('temp'), 'commonplace-open', docId)
+    await fs.mkdir(dir, { recursive: true })
+    const target = await drive.uploads.saveTo(docId, path.join(dir, safeFileName(st.name)))
+    const problem = await shell.openPath(target)
+    if (problem) throw new Error(problem)
+  })
+  // A preview inside the window, for small images, text, audio and video.
+  ipcMain.handle('files:preview', (_e, docId) => {
+    const st = drive.describe(docId)?.upload
+    if (!st?.ready) return null
+    const { kind, ext } = fileKind(st.name)
+    const types = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', avif: 'image/avif', bmp: 'image/bmp', mp4: 'video/mp4', m4v: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime', mp3: 'audio/mpeg', m4a: 'audio/mp4', wav: 'audio/wav', ogg: 'audio/ogg', oga: 'audio/ogg', flac: 'audio/flac', opus: 'audio/ogg', aac: 'audio/aac' }
+    if (kind === 'text') { const bytes = drive.uploads.read(docId, 512 * 1024); return bytes ? { kind, text: bytes.toString('utf8') } : null }
+    if (!types[ext]) return null // SVG and the rest: no preview (SVG can carry scripts)
+    const bytes = drive.uploads.read(docId, 25 * 1024 * 1024)
+    return bytes ? { kind, src: `data:${types[ext]};base64,${bytes.toString('base64')}` } : null
+  })
+  ipcMain.handle('storage:usage', () => drive.storageUsage())
+  ipcMain.handle('storage:settings', (_e, patch) => drive.setStorageSettings(patch || {}))
+  ipcMain.handle('drive:keepSyncing', (_e, docId) => drive.keepSyncing(docId))
+
   // commonForms: the keys live here, so answers are sealed and opened here.
   ipcMain.handle('forms:submit', (_e, docId, answers) => forms.submit(docId, answers))
   ipcMain.handle('forms:responses', (_e, docId) => forms.responses(docId))
@@ -383,7 +451,7 @@ function swarmOptions () {
 async function startDrive () {
   // COMMONPLACE_CHECKPOINT_SECONDS shortens the pause before a version is saved (for testing).
   const pause = Number(process.env.COMMONPLACE_CHECKPOINT_SECONDS) * 1000
-  drive = new Drive({ dataDir: app.getPath('userData'), apps: APPS, swarm: swarmOptions(), history: pause ? { idleMs: pause } : {} })
+  drive = new Drive({ dataDir: app.getPath('userData'), apps: APPS, swarm: swarmOptions(), history: pause ? { idleMs: pause } : {}, makeThumb })
   drive.on('error', (err) => console.error('[commonplace]', err))
   // Another of my computers unlinked this one: sign out and delete it all here.
   drive.on('unlinked', () => {

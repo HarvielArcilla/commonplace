@@ -15,7 +15,10 @@ export const MSG = {
   ACK: 3, // sealed(stateVector) - "this is everything I have now"
   AWARENESS: 4, // sealed(y-protocols awareness update) - cursors and presence
   MEMBERS: 5, // sealed(json membership log)
-  LEAVE: 6 // sealed(empty) - "I've stopped syncing this document for now"
+  LEAVE: 6, // sealed(empty) - "I've stopped syncing this document for now"
+  WANT: 7, // sealed(json { h: [hash] }) - chunks of an uploaded file I'd like (see chunks.js)
+  CHUNK: 8, // sealed(32-byte hash | data) - one chunk
+  NOCHUNK: 9 // sealed(json { h: [hash] }) - chunks I don't have
 }
 
 const HEADER = 4 + 1 + 16 + 4

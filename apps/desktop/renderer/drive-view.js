@@ -18,6 +18,31 @@ export function initDrive (h) {
   $('#sort').addEventListener('change', (e) => { state.prefs.sort = e.target.value; savePrefs(); renderDrive() })
   $('#search').addEventListener('input', (e) => { state.query = e.target.value; renderDrive() })
   $('#search').addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.target.value = ''; state.query = ''; renderDrive() } })
+  // Files dragged in from the computer are uploaded into the folder on screen.
+  const drive = $('#drive-view')
+  drive.addEventListener('dragover', (e) => {
+    if (!e.dataTransfer.types.includes('Files') || e.dataTransfer.types.includes(DRAG_TYPE)) return
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'copy'
+    drive.classList.add('drop-files')
+  })
+  drive.addEventListener('dragleave', (e) => { if (!drive.contains(e.relatedTarget)) drive.classList.remove('drop-files') })
+  drive.addEventListener('drop', (e) => {
+    drive.classList.remove('drop-files')
+    if (!e.dataTransfer.files.length || e.dataTransfer.types.includes(DRAG_TYPE)) return
+    e.preventDefault()
+    uploadFiles(e.dataTransfer.files)
+  })
+}
+
+// From the picker, or files dropped onto the Drive.
+async function uploadFiles (dropped) {
+  try {
+    const res = dropped ? await cp.uploadDropped(dropped, state.folderId) : await cp.uploadFiles(state.folderId)
+    if (!res) return
+    if (res.done.length) toast(res.done.length === 1 ? 'Uploaded 1 file' : `Uploaded ${res.done.length} files`)
+    if (res.failed.length) toast(`Couldn’t upload ${res.failed.join('; ')}`)
+  } catch (err) { toast(cleanError(err)) }
 }
 
 // ---- data helpers ------------------------------------------------------------
@@ -148,6 +173,7 @@ function emptyState () {
       svg(kindIcon(a.kind)), el('span', { class: 'app-tile-name' }, a.name), el('span', { class: 'app-tile-hint' }, a.description)))),
     el('div', { class: 'bar-actions' },
       el('button', { class: 'btn', onclick: importFile }, 'Import a file'),
+      el('button', { class: 'btn', onclick: () => uploadFiles() }, 'Upload files'),
       el('button', { class: 'btn btn-quiet', onclick: () => handlers.openJoinDialog() }, 'Join with invite')),
     el('p', { class: 'empty-move' }, 'Moving from another computer? ',
       el('button', { type: 'button', class: 'link-button', onclick: moveInDialog }, 'Bring your Drive here'),
@@ -310,6 +336,11 @@ function thumbnail (f) {
       el('div', { class: 'tc-grid' }, ...cells.map((d) => el('span', { class: `tc-day${d === t.today ? ' today' : ''}${d && t.busy[d] ? ' busy' : ''}`, style: d && t.busy[d] ? `--ev:${t.busy[d]}` : null }, d ? String(d) : ''))))
   }
   if (f.kind === 'whiteboard') return boardThumb(f.thumb?.shapes || [])
+  if (f.kind === 'file') {
+    const t = f.thumb
+    if (t?.image) return el('div', { class: 'thumb thumb-image', 'aria-hidden': 'true' }, el('img', { src: t.image, alt: '' }))
+    return el('div', { class: `thumb thumb-file${t?.risky ? ' risky' : ''}`, 'aria-hidden': 'true' }, el('span', { class: 'tfile-ext' }, (t?.ext || 'file').toUpperCase().slice(0, 5)))
+  }
   if (f.kind === 'form') {
     const t = f.thumb || { questions: [] }
     return el('div', { class: 'thumb thumb-form', 'aria-hidden': 'true' },
@@ -390,7 +421,8 @@ function openNewMenu (anchor) {
     ...state.apps.map((a) => ({ label: a.name, hint: a.description, icon: kindIcon(a.kind), onSelect: () => newDocument(a.type) })),
     { sep: true },
     { label: 'Folder', icon: icons.folder, onSelect: newFolder },
-    { label: 'Import a file…', hint: '.md, .docx, .xlsx, .csv or .ics', icon: icons.import, onSelect: importFile }
+    { label: 'Import a file…', hint: '.md, .docx, .xlsx, .csv or .ics', icon: icons.import, onSelect: importFile },
+    { label: 'Upload files…', hint: 'Any kind, up to 100 MB each', icon: icons.upload, onSelect: () => uploadFiles() }
   ], { align: 'end', label: 'Create' })
 }
 

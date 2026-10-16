@@ -1,5 +1,5 @@
 // The only bridge between the window and the background process.
-const { contextBridge, ipcRenderer } = require('electron')
+const { contextBridge, ipcRenderer, webUtils } = require('electron')
 
 const listen = (channel) => (fn) => {
   const handler = (_e, ...args) => fn(...args)
@@ -65,6 +65,18 @@ contextBridge.exposeInMainWorld('commonplace', {
   restoreBackup: (file, key) => ipcRenderer.invoke('backup:restore', file, key),
   onBackup: listen('backup:changed'),
   submitForm: (docId, answers) => ipcRenderer.invoke('forms:submit', docId, answers),
+  uploadFiles: (folderId) => ipcRenderer.invoke('files:upload', folderId),
+  // Files dropped on the window: their paths, read here (the window can't).
+  uploadDropped: (files, folderId) => ipcRenderer.invoke('files:uploadPaths', [...files].map((f) => webUtils.getPathForFile(f)).filter(Boolean), folderId),
+  uploadVersion: (docId) => ipcRenderer.invoke('files:uploadVersion', docId),
+  approveDownload: (docId) => ipcRenderer.invoke('files:approve', docId),
+  removeDownloadedCopy: (docId) => ipcRenderer.invoke('files:removeCopy', docId),
+  saveFileCopy: (docId) => ipcRenderer.invoke('files:save', docId),
+  openFile: (docId) => ipcRenderer.invoke('files:open', docId),
+  previewFile: (docId) => ipcRenderer.invoke('files:preview', docId),
+  storageUsage: () => ipcRenderer.invoke('storage:usage'),
+  setStorageSettings: (patch) => ipcRenderer.invoke('storage:settings', patch),
+  keepSyncing: (docId) => ipcRenderer.invoke('drive:keepSyncing', docId),
   formResponses: (docId) => ipcRenderer.invoke('forms:responses', docId),
   copyText: (text) => ipcRenderer.invoke('clipboard:write', text),
   onDriveChanged: listen('drive:changed'),

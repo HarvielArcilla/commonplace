@@ -14,11 +14,13 @@ import * as Y from 'yjs'
 import {
   FileStore, SyncEngine, SwarmTransport, LanTransport, HelperClient, formatHelperAddress, parseHelperAddress, loadOrCreateIdentity, canEdit,
   newDocSecret, deriveDocKeys, encodeInvite, parseInvite, initContainer, readMeta, updatePerson,
-  findConflicts, conflictId, docFrom, History, restoreContent
+  findConflicts, conflictId, docFrom, History, restoreContent, BlobStore
 } from '@commonplace/core'
+import { Files, filesApp, GUARD_BYTES } from './files.js'
 
 export { sendDrive, receiveDrive, newMoveCode, parseMoveCode } from './move.js'
 export { Backups, readBackupFile, restoreBackup, newRecoveryKey, normalizeRecoveryKey } from './backup.js'
+export { MAX_FILE_BYTES, GUARD_BYTES, fileKind, safeFileName, formatBytes, filesApp } from './files.js'
 
 // Where the index lived before it synced between computers (still used to
 // hand an index over when moving or linking a Drive).
@@ -31,15 +33,19 @@ const HISTORY = { idleMs: 60e3, maxMs: 10 * 60e3 }
 export class Drive extends EventEmitter {
   // transport: sync over the internet (Hyperswarm). lan: also find computers
   // on the same network directly, with or without internet (options for tests).
-  constructor ({ dataDir, apps = [], swarm = {}, transport = true, lan = true, history = {}, deviceName = defaultDeviceName() }) {
+  // makeThumb(path): a small JPEG data URL for an uploaded image (optional).
+  // guardBytes: how big someone else's file may grow before it pauses.
+  constructor ({ dataDir, apps = [], swarm = {}, transport = true, lan = true, history = {}, deviceName = defaultDeviceName(), makeThumb = null, guardBytes = GUARD_BYTES }) {
     super()
     this.dataDir = dataDir
+    this.guardBytes = guardBytes
     this.swarmOpts = swarm
-    this.appsByType = new Map(apps.map((a) => [a.type, a]))
+    this.appsByType = new Map([...apps, filesApp].map((a) => [a.type, a]))
     this.identity = loadOrCreateIdentity(dataDir)
     this.device = { id: loadDeviceId(dataDir), name: String(deviceName).slice(0, 60) }
     this.store = new FileStore(path.join(dataDir, 'files'))
-    this.engine = new SyncEngine({ identity: this.identity, store: this.store, device: this.device })
+    this.engine = new SyncEngine({ identity: this.identity, store: this.store, device: this.device, blobs: new BlobStore(path.join(dataDir, 'blobs')) })
+    this.uploads = new Files(this, { makeThumb })
     this.history = new History(this.store)
     this.historyTiming = { ...HISTORY, ...history }
     this._checkpoints = new Map() // docId -> { first, timer } for unsaved changes
@@ -110,7 +116,7 @@ export class Drive extends EventEmitter {
     this.engine.on('update', (docId, update, origin) => {
       if (docId === this.indexId) { if (origin !== 'disk') this._changed(); return }
       if (origin === 'renderer') this._patch(docId, { contributed: true, lastEditedAt: Date.now() })
-      else if (origin !== 'disk' && origin !== 'local' && origin !== 'local-meta') this._remoteChange(docId, update)
+      else if (origin !== 'disk' && origin !== 'local' && origin !== 'local-meta') { this._remoteChange(docId, update); this._guardSoon(docId) }
       if (origin !== 'disk' && origin !== 'local-meta' && this.files.has(docId)) this._scheduleCheckpoint(docId)
     })
   }
@@ -233,6 +239,10 @@ export class Drive extends EventEmitter {
       // Open comments and pending suggestions.
       review: app?.review && doc ? safeCall(() => app.review(doc.ydoc), { comments: 0, suggestions: 0 }) : { comments: 0, suggestions: 0 },
       syncMode: entry.syncMode === 'open' ? 'open' : 'always',
+      // Paused because someone else's file grew past the size guard.
+      held: entry.held ? { bytes: entry.heldBytes || 0 } : null,
+      // Uploaded files: whether the contents are here, and why not.
+      upload: entry.type === 'file' ? this.uploads.status(docId) : null,
       conflicts: doc ? openConflicts(doc.ydoc).map((c) => ({ id: c.id, kind: c.kind, unit: c.unit, names: c.versions.map((v) => nameOf(v.userId, v.name)) })) : [],
       sync: {
         active: Boolean(status.active),
@@ -623,6 +633,7 @@ export class Drive extends EventEmitter {
     this._checkpoints.delete(docId)
     this._attached.delete(docId)
     this._open.delete(docId)
+    this.uploads.unwatch(docId)
     this.engine.closeDoc(docId, { deleteLocalData: true })
     this._changed()
     await this._leaveTopics(docId)
@@ -746,6 +757,7 @@ export class Drive extends EventEmitter {
     doc.ydoc.getMap('authors').observe(refresh)
     doc.ydoc.getMap('people').observe(refresh)
     doc.ydoc.getMap('helpers').observe(() => this._applyHelpers(entry.docId))
+    this.uploads.watch(entry.docId)
     refresh()
     this._syncTopics(entry.docId)
     this._applyHelpers(entry.docId)
@@ -763,8 +775,46 @@ export class Drive extends EventEmitter {
   }
 
   _shouldSync (entry) {
+    if (entry.held) return false
     return entry.syncMode !== 'open' || this._open.has(entry.docId)
   }
+
+  // ---- protecting the disk ----------------------------------------------------------
+
+  // A shared file someone else made that grows past GUARD_BYTES (or past
+  // what I last agreed to) stops syncing until I say to keep going.
+  _guardSoon (docId) {
+    this._guardTimers = this._guardTimers || new Map()
+    if (this._guardTimers.has(docId)) return
+    this._guardTimers.set(docId, setTimeout(() => { this._guardTimers.delete(docId); this._guard(docId) }, 2000))
+  }
+
+  _guard (docId) {
+    const entry = this.files.get(docId)
+    if (!entry || entry.held || entry.owner?.userId === this.identity.userId) return
+    const bytes = this.store.sizeOf(docId)
+    if (bytes <= Math.max(this.guardBytes, entry.allowBytes || 0)) return
+    this._patch(docId, { held: true, heldBytes: bytes })
+    this._applyActive(docId)
+    this.emit('held', docId, bytes)
+  }
+
+  // Keep syncing a file the size guard paused, until it doubles again.
+  keepSyncing (docId) {
+    const entry = this.files.get(docId)
+    if (!entry?.held) return
+    this._patch(docId, { held: false, allowBytes: Math.max(this.guardBytes, (entry.heldBytes || 0) * 2) })
+    this._applyActive(docId)
+  }
+
+  // ---- uploads ---------------------------------------------------------------------
+
+  upload (filePath, options) { return this.uploads.upload(filePath, options) }
+  uploadVersion (docId, filePath) { return this.uploads.uploadVersion(docId, filePath) }
+  approveDownload (docId) { this.uploads.approve(docId) }
+  removeDownloadedCopy (docId) { this.uploads.removeCopy(docId) }
+  storageUsage () { return this.uploads.usage() }
+  setStorageSettings (patch) { this.uploads.setSettings(patch); this._changed() }
 
   _applyActive (docId) {
     const entry = this.files.get(docId)
