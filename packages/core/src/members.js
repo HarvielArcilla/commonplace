@@ -6,7 +6,8 @@
 //
 //   create  - the document's first owner (and, for documents made before
 //             membership existed, everyone already working on it)
-//   add     - give someone a role; may carry the current key, sealed to them
+//   add     - give someone a role; may carry the current key, sealed to them,
+//             and the shared folder that gave it (folder), if any
 //   role    - change someone's role (viewer, respondent, editor)
 //   remove  - take someone out
 //   rotate  - start a new key epoch; the new key is sealed to each remaining
@@ -100,7 +101,7 @@ function apply (s, e, i) {
       break
     case 'add':
       if (!GIVEN_ROLES.includes(e.role) && !(e.userId === s.owner && e.role === 'owner')) throw new Error('bad role')
-      s.members.set(e.userId, { role: e.userId === s.owner ? 'owner' : e.role, enc: e.enc || s.members.get(e.userId)?.enc || null })
+      s.members.set(e.userId, { role: e.userId === s.owner ? 'owner' : e.role, enc: e.enc || s.members.get(e.userId)?.enc || null, folder: typeof e.folder === 'string' ? e.folder : null })
       s.removed.delete(e.userId)
       if (e.key) grant(s, e.userId, e.key.epoch, e.key.sealed)
       if (typeof e.via === 'string' && !s.usedInvites.has(e.via)) s.usedInvites.set(e.via, e.userId)
@@ -270,12 +271,13 @@ export class Membership {
   // ---- owner actions (each returns the entries appended) -----------------
 
   // Admits someone with a role, sealing the current key to them if needed.
-  // `via` is the id of the single-use invite this uses up, if any.
-  admit (identity, { userId, role, enc, epochSecret, via }) {
+  // `via` is the id of the single-use invite this uses up, if any; `folder`
+  // the shared folder whose members get this file, if that's why.
+  admit (identity, { userId, role, enc, epochSecret, via, folder }) {
     const key = this.state.epoch > 0 && enc && epochSecret
       ? { epoch: this.state.epoch, sealed: sealTo(enc, epochSecret) }
       : undefined
-    return [this.append(identity, { type: 'add', userId, role: userId === this.state.owner ? 'owner' : role, enc, key, via })]
+    return [this.append(identity, { type: 'add', userId, role: userId === this.state.owner ? 'owner' : role, enc, key, via, folder })]
   }
 
   setRole (identity, userId, role) {
@@ -309,5 +311,10 @@ export class Membership {
 
   list () {
     return [...this.state.members].map(([userId, m]) => ({ userId, role: m.role }))
+  }
+
+  // With each member's encryption key and the shared folder that added them.
+  detailed () {
+    return [...this.state.members].map(([userId, m]) => ({ userId, role: m.role, enc: m.enc, folder: m.folder || null }))
   }
 }

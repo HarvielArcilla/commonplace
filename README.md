@@ -68,6 +68,10 @@ Invite people to edit, only view, or (for forms) answer; change their role, remo
 
 ![The share dialog: invite link options and the people with access](docs/images/share.png)
 
+**Shared folders.** Make one with New → Shared folder, or share one of your folders (with its subfolders). Everyone in it gets everything inside: what you put there and what the others do. Folder editors can edit the files, viewers can view them and answer forms. Moving a file in shares it; moving it out, or removing someone from the folder, takes away what they had only through it. Each file's owner does the granting from their own computer whenever it runs, so nobody needs to be online at the same time.
+
+![A shared folder's share dialog, with the folder's files behind it](docs/images/shared-folder.png)
+
 Use the same Drive on several computers: **Link another computer** in your profile keeps them in sync. Or move your Drive to a new computer.
 
 **Recovery.** Make a backup in your profile and you get a recovery key. If you lose your computer, a new one plus the backup file and the key becomes you again, with your files. The backup stays up to date once a day.

@@ -26,6 +26,7 @@ export function shareDialog (docId) {
   const title = el('h2', {})
   const d = el('dialog', { class: 'dialog dialog-wide share' }, el('form', { method: 'dialog' },
     title,
+    f.kind === 'folder' ? el('p', { class: 'share-folder-note' }, 'Everyone in this folder gets every file in it: editors can edit them, viewers can view them (and answer forms). Leaving the folder takes away what they had only through it.') : null,
     el('div', { class: 'share-body' },
       isOwner ? inviteControls(docId, f.kind) : el('p', {}, `Only ${f.owner?.name || 'the owner'} can invite people or change access.`),
       live),
@@ -63,7 +64,8 @@ function shareLists (docId, f) {
     }
     list.append(el('li', { class: 'person' },
       el('span', { class: `presence-dot${m.online ? ' on' : ''}`, title: m.online ? 'Online' : 'Offline', 'aria-hidden': 'true' }),
-      el('span', { class: 'person-name' }, isMe ? `${m.name} (you)` : m.name, m.pending ? el('span', { class: 'person-note' }, 'Joining with a link') : null),
+      el('span', { class: 'person-name' }, isMe ? `${m.name} (you)` : m.name,
+        m.pending ? el('span', { class: 'person-note' }, 'Joining with a link') : m.via ? el('span', { class: 'person-note' }, m.via.name ? `Through the shared folder “${m.via.name}”` : 'Through a shared folder') : null),
       controls))
   }
   out.push(el('h3', {}, 'People with access'), list)
@@ -169,7 +171,7 @@ function requestList (docId, requests, kind) {
 }
 
 async function act (fn) {
-  try { await fn() } catch (err) { toast(cleanError(err)) }
+  try { await fn(); return true } catch (err) { toast(cleanError(err)); return false }
 }
 
 async function removePerson (docId, m) {
@@ -178,7 +180,7 @@ async function removePerson (docId, m) {
     body: `${m.name} stops receiving changes and can no longer edit. What they already have stays on their computer. Everyone else moves to a new key automatically, and existing invite links stop working.`,
     confirm: 'Remove'
   })
-  if (ok) { await act(() => cp.removeMember(docId, m.userId)); toast(`${m.name} was removed`) }
+  if (ok && await act(() => cp.removeMember(docId, m.userId))) toast(`${m.name} was removed`)
 }
 
 async function transfer (docId, m) {

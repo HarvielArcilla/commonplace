@@ -155,6 +155,8 @@ function registerIpc () {
   ipcMain.handle('drive:apps', () => drive.apps())
   ipcMain.handle('drive:folders', () => drive.listFolders())
   ipcMain.handle('folder:create', (_e, name, parentId) => drive.createFolder(name, parentId))
+  ipcMain.handle('folder:createShared', (_e, name, parentId) => drive.createSharedFolder(name, parentId))
+  ipcMain.handle('folder:share', (_e, id) => drive.shareFolder(id))
   ipcMain.handle('folder:rename', (_e, id, name) => drive.renameFolder(id, name))
   ipcMain.handle('folder:delete', (_e, id) => drive.deleteFolder(id))
   ipcMain.handle('folder:move', (_e, id, parentId) => drive.moveFolder(id, parentId))

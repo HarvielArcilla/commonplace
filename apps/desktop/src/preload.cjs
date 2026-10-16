@@ -18,6 +18,8 @@ contextBridge.exposeInMainWorld('commonplace', {
   createFile: (type, title, folderId) => ipcRenderer.invoke('drive:create', type, title, folderId),
   joinWithInvite: (invite, folderId) => ipcRenderer.invoke('drive:join', invite, folderId),
   createFolder: (name, parentId) => ipcRenderer.invoke('folder:create', name, parentId),
+  createSharedFolder: (name, parentId) => ipcRenderer.invoke('folder:createShared', name, parentId),
+  shareFolder: (id) => ipcRenderer.invoke('folder:share', id),
   renameFolder: (id, name) => ipcRenderer.invoke('folder:rename', id, name),
   deleteFolder: (id) => ipcRenderer.invoke('folder:delete', id),
   moveFolder: (id, parentId) => ipcRenderer.invoke('folder:move', id, parentId),

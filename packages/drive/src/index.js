@@ -17,6 +17,7 @@ import {
   findConflicts, conflictId, docFrom, History, restoreContent, BlobStore
 } from '@commonplace/core'
 import { Files, filesApp, GUARD_BYTES } from './files.js'
+import { SharedFolders, folderApp, ITEMS } from './shared-folders.js'
 
 export { sendDrive, receiveDrive, newMoveCode, parseMoveCode } from './move.js'
 export { Backups, readBackupFile, restoreBackup, newRecoveryKey, normalizeRecoveryKey } from './backup.js'
@@ -40,12 +41,13 @@ export class Drive extends EventEmitter {
     this.dataDir = dataDir
     this.guardBytes = guardBytes
     this.swarmOpts = swarm
-    this.appsByType = new Map([...apps, filesApp].map((a) => [a.type, a]))
+    this.appsByType = new Map([...apps, filesApp, folderApp].map((a) => [a.type, a]))
     this.identity = loadOrCreateIdentity(dataDir)
     this.device = { id: loadDeviceId(dataDir), name: String(deviceName).slice(0, 60) }
     this.store = new FileStore(path.join(dataDir, 'files'))
     this.engine = new SyncEngine({ identity: this.identity, store: this.store, device: this.device, blobs: new BlobStore(path.join(dataDir, 'blobs')) })
     this.uploads = new Files(this, { makeThumb })
+    this.shared = new SharedFolders(this)
     this.history = new History(this.store)
     this.historyTiming = { ...HISTORY, ...history }
     this._checkpoints = new Map() // docId -> { first, timer } for unsaved changes
@@ -107,7 +109,7 @@ export class Drive extends EventEmitter {
     this.devicesMap.observe(() => { this._checkUnlinked(); this._changed() })
 
     this.engine.on('status', (status) => { this._rememberNames(status); this._changed() })
-    this.engine.on('members', () => this._changed())
+    this.engine.on('members', () => { this.shared.soon(); this._changed() })
     this.engine.on('request', () => this._changed())
     this.engine.on('topics', (docId) => this._syncTopics(docId))
     this.engine.on('diverged', (info) => this._recordConflicts(info))
@@ -126,6 +128,7 @@ export class Drive extends EventEmitter {
     this._applyHelpers(this.indexId)
     if (this.lan) await this.lan.start().catch((err) => { this.lan = null; this.emit('error', err) })
     for (const entry of this.files.values()) this._attach(entry)
+    this.shared.soon()
     this._seen()
     this._checkUnlinked()
     this._seenTimer = setInterval(() => this._seen(), 3600e3)
@@ -135,6 +138,7 @@ export class Drive extends EventEmitter {
 
   async stop () {
     clearInterval(this._seenTimer)
+    this.shared.destroy()
     if (!this.signedOut) this._seen()
     for (const docId of [...this._checkpoints.keys()]) this.checkpoint(docId)
     for (const [docId, t] of this._persistTimers) {
@@ -158,15 +162,34 @@ export class Drive extends EventEmitter {
     return this.identity.toPublic()
   }
 
+  // Everything in my Drive, shared folders included (kind 'folder').
   list () {
+    const containers = this.shared.containers()
     return [...this.files.values()]
-      .map((e) => this.describe(e.docId))
+      .map((e) => this.describe(e.docId, containers))
       .sort((a, b) => (b.lastActivityAt || 0) - (a.lastActivityAt || 0))
   }
 
+  // My own folders, and the shared folders I'm in (shared: true, id = the
+  // folder's docId).
   listFolders () {
-    return [...this.folders.values()]
+    const containers = this.shared.containers()
+    const mine = [...this.folders.values()]
       .map((f) => ({ ...f, parentId: this.folders.has(f.parentId) ? f.parentId : null }))
+    const shared = this.shared.folders().map((e) => {
+      const access = this.engine.access(e.docId) || {}
+      return {
+        id: e.docId,
+        name: e.title || 'Shared folder',
+        parentId: this.shared.placeOf(e.docId, containers),
+        shared: true,
+        role: access.role || null,
+        owner: e.owner || null,
+        people: this.engine.membersDetailed(e.docId).length,
+        createdAt: e.addedAt
+      }
+    })
+    return [...mine, ...shared]
       .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base', numeric: true }))
   }
 
@@ -176,7 +199,7 @@ export class Drive extends EventEmitter {
       .map((a) => ({ type: a.type, kind: a.kind, name: a.name, description: a.description, exports: a.exports || [] }))
   }
 
-  describe (docId) {
+  describe (docId, containers = null) {
     const entry = this.files.get(docId)
     if (!entry) return null
     const status = this.engine.status(docId) || { peers: [], here: [], pending: 0, active: false }
@@ -196,7 +219,14 @@ export class Drive extends EventEmitter {
     const changeBy = (recent?.at || 0) >= (entry.lastChangedAt || 0) ? (recent?.by || entry.lastChangedBy) : entry.lastChangedBy
     const changeAt = Math.max(remoteAt, entry.lastEditedAt || 0)
     const members = doc?.members.exists
-      ? doc.members.list().map((m) => ({ ...m, name: m.userId === this.identity.userId ? this.identity.name : nameOf(m.userId), online: m.userId === this.identity.userId || status.peers.some((p) => p.userId === m.userId) }))
+      ? doc.members.detailed().map(({ userId, role, folder }) => ({
+        userId,
+        role,
+        name: userId === this.identity.userId ? this.identity.name : nameOf(userId),
+        online: userId === this.identity.userId || status.peers.some((p) => p.userId === userId),
+        // Has it through this shared folder (its name, if I'm in it).
+        via: folder ? { folderId: folder, name: this.files.get(folder)?.title || null } : null
+      }))
       : []
     // People connected with a valid invite whom the owner hasn't added yet.
     const waiting = status.peers.filter((p) => p.pending && !members.some((m) => m.userId === p.userId)).map((p) => ({ userId: p.userId, role: p.role, name: nameOf(p.userId, p.name), online: true, pending: true }))
@@ -232,7 +262,9 @@ export class Drive extends EventEmitter {
       appName: app?.name || null,
       kind: app?.kind || null,
       exports: app?.exports || [],
-      folderId: this.folders.has(entry.folderId) ? entry.folderId : null,
+      folderId: this.shared.placeOf(docId, containers || this.shared.containers()),
+      // In a shared folder for me only: its owner isn't in the folder.
+      localOnly: Boolean(entry.folderId && this.shared.isFolder(entry.folderId) && !(containers || this.shared.containers()).get(docId)?.includes(entry.folderId)),
       preview: app && doc ? safePreview(app, doc.ydoc) : '',
       // A small picture of the start of the file, for the icon view.
       thumb: app?.thumbnail && doc ? safeCall(() => app.thumbnail(doc.ydoc), null) : null,
@@ -465,8 +497,25 @@ export class Drive extends EventEmitter {
     this._changed()
   }
 
-  setMemberRole (docId, userId, role) { this.engine.setRole(docId, userId, role) }
-  removeMember (docId, userId) { this.engine.removeMember(docId, userId) }
+  // Someone who had a file through a shared folder and is given a role by
+  // hand keeps it directly, whatever happens to the folder.
+  setMemberRole (docId, userId, role) {
+    const m = this.engine.membersDetailed(docId).find((x) => x.userId === userId)
+    if (m?.folder) this.engine.addMember(docId, { userId, role, enc: m.enc })
+    else this.engine.setRole(docId, userId, role)
+  }
+
+  // Someone who has a file through a shared folder they're still in would
+  // only get it back: say so instead.
+  removeMember (docId, userId) {
+    const m = this.engine.membersDetailed(docId).find((x) => x.userId === userId)
+    const folder = m?.folder && this.shared.containers().get(docId)?.includes(m.folder) ? this.files.get(m.folder) : null
+    if (folder && this.engine.membersDetailed(folder.docId).some((x) => x.userId === userId)) {
+      throw new Error(`They have this through the shared folder “${folder.title}”. Remove them from the folder, or move the file out of it.`)
+    }
+    this.engine.removeMember(docId, userId)
+  }
+
   transferOwnership (docId, userId) { this.engine.transferOwnership(docId, userId) }
   resetInvites (docId) { this.engine.resetInvites(docId) }
 
@@ -495,8 +544,42 @@ export class Drive extends EventEmitter {
   // Removes the file from my Drive, on each of my computers. Other
   // collaborators keep theirs.
   async remove (docId) {
+    if (this.shared.isFolder(docId)) this._leaveFolder(docId)
     this.files.delete(docId)
     await this._forget(docId)
+    this.shared.soon()
+  }
+
+  // Before a shared folder leaves my Drive: what I own comes out of it (to
+  // where the folder was), so it stops being shared through a folder I can
+  // no longer see.
+  _leaveFolder (folderId) {
+    const where = this.files.get(folderId)?.folderId
+    const canChange = ['owner', 'editor'].includes(this.engine.access(folderId)?.role)
+    for (const [childId] of this.shared.items(folderId)) {
+      const child = this.files.get(childId)
+      if (!child) continue
+      if (canChange && this.engine.access(childId)?.owner === this.identity.userId) this.shared.remove(folderId, childId)
+      this._patch(childId, { folderId: this.folders.has(where) ? where : null, viaFolder: child.viaFolder === folderId ? null : child.viaFolder })
+    }
+    for (const e of this.files.values()) if (e.folderId === folderId) this._patch(e.docId, { folderId: this.folders.has(where) ? where : null })
+  }
+
+  // Someone else's file, found in a shared folder of mine: join it with its
+  // secret alone. Its owner adds me to it; until then nothing arrives.
+  _joinFromFolder (docId, item, folderId) {
+    this.files.set(docId, {
+      docId,
+      secret: item.secret,
+      invite: null,
+      type: null,
+      title: item.title || 'Waiting for a peer…',
+      owner: { userId: item.owner, name: item.ownerName },
+      folderId: null,
+      viaFolder: folderId,
+      addedAt: Date.now()
+    })
+    this._attach(this.files.get(docId))
   }
 
   // ---- folders -------------------------------------------------------------
@@ -509,12 +592,14 @@ export class Drive extends EventEmitter {
   }
 
   renameFolder (id, name) {
+    if (this.shared.isFolder(id)) { if (cleanName(name)) this.rename(id, cleanName(name)); return }
     const f = this.folders.get(id)
     if (f && cleanName(name)) { this.folders.set(id, { ...f, name: cleanName(name) }); this._changed() }
   }
 
   // Deleting a folder never deletes files: its contents move up one level.
   deleteFolder (id) {
+    if (this.shared.isFolder(id)) return this.remove(id)
     const f = this.folders.get(id)
     if (!f) return
     const parent = this.folders.has(f.parentId) ? f.parentId : null
@@ -526,11 +611,64 @@ export class Drive extends EventEmitter {
     this._changed()
   }
 
+  // Moves a file (or a shared folder) into one of my folders, a shared
+  // folder, or the top. Into a shared folder means sharing it with everyone
+  // there; out of one means they lose what they had only through it.
+  // Returns { localOnly } when it's in a shared folder for me only.
   moveFile (docId, folderId) {
-    this._patch(docId, { folderId: this.folders.has(folderId) ? folderId : null })
+    const entry = this.files.get(docId)
+    if (!entry) return {}
+    const containers = this.shared.containers()
+    const from = this.shared.placeOf(docId, containers)
+    if (from === folderId) return {}
+    const toShared = folderId && this.shared.isFolder(folderId)
+    if (from && this.shared.isFolder(from) && (containers.get(docId) || []).includes(from)) this.shared.remove(from, docId)
+    if (toShared) {
+      try {
+        this.shared.add(folderId, docId)
+        this._patch(docId, { folderId: null })
+      } catch (err) {
+        if (!err.localOnly) throw err
+        this._patch(docId, { folderId })
+        return { localOnly: true, message: err.message }
+      }
+    } else {
+      this._patch(docId, { folderId: this.folders.has(folderId) ? folderId : null })
+    }
+    this._changed()
+    return {}
+  }
+
+  // A new shared folder, empty, with me as its owner.
+  async createSharedFolder (name, parentId = null) {
+    const docId = await this.create('folder', cleanName(name) || 'Shared folder', { folderId: this.folders.has(parentId) ? parentId : null })
+    if (parentId && this.shared.isFolder(parentId)) this.moveFile(docId, parentId)
+    return docId
+  }
+
+  // Turns one of my folders into a shared folder, with its subfolders.
+  // What I own goes in it for everyone; files others own stay in it for me.
+  async shareFolder (id) {
+    const f = this.folders.get(id)
+    if (!f) throw new Error('No such folder.')
+    const docId = await this.create('folder', f.name, { folderId: this.folders.has(f.parentId) ? f.parentId : null })
+    for (const sub of [...this.folders.values()].filter((x) => x.parentId === id)) {
+      const subId = await this.shareFolder(sub.id)
+      this.moveFile(subId, docId)
+    }
+    for (const entry of [...this.files.values()].filter((e) => e.folderId === id)) this.moveFile(entry.docId, docId)
+    this.folders.delete(id)
+    this._changed()
+    return docId
   }
 
   moveFolder (id, parentId) {
+    if (this.shared.isFolder(id)) {
+      for (let p = parentId; p; p = this.shared.isFolder(p) ? this.shared.placeOf(p) : this.folders.get(p)?.parentId) if (p === id) return false
+      this.moveFile(id, parentId)
+      return true
+    }
+    if (parentId && this.shared.isFolder(parentId)) throw new Error('Share this folder first: only shared folders go inside a shared folder.')
     const f = this.folders.get(id)
     if (!f) return false
     const target = this.folders.has(parentId) ? parentId : null
@@ -757,6 +895,16 @@ export class Drive extends EventEmitter {
     doc.ydoc.getMap('authors').observe(refresh)
     doc.ydoc.getMap('people').observe(refresh)
     doc.ydoc.getMap('helpers').observe(() => this._applyHelpers(entry.docId))
+    // A shared folder's contents decide who gets what.
+    let watching = false
+    const watchItems = () => {
+      if (watching || readMeta(doc.ydoc)?.type !== 'folder') return
+      watching = true
+      doc.ydoc.getMap(ITEMS).observe(() => { this.shared.soon(); this._changed() })
+      this.shared.soon()
+    }
+    doc.meta.observe(watchItems)
+    watchItems()
     this.uploads.watch(entry.docId)
     refresh()
     this._syncTopics(entry.docId)

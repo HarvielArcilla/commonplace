@@ -48,6 +48,10 @@ async function uploadFiles (dropped) {
 // ---- data helpers ------------------------------------------------------------
 
 const folderById = (id) => state.folders.find((f) => f.id === id) || null
+// Files proper: shared folders are documents too, but show as folders.
+const docs = () => state.files.filter((f) => f.kind !== 'folder')
+const folderIcon = (f) => (f?.shared ? icons.sharedFolder : icons.folder)
+const canChange = (f) => !f?.shared || f.role === 'owner' || f.role === 'editor'
 
 function folderPath (id) {
   const path = []
@@ -67,7 +71,7 @@ function descendantIds (id) {
 
 function folderStats (id) {
   const ids = descendantIds(id)
-  const files = state.files.filter((f) => ids.has(f.folderId))
+  const files = docs().filter((f) => ids.has(f.folderId))
   return {
     items: files.length + state.folders.filter((f) => f.parentId === id).length,
     lastActivityAt: files.reduce((m, f) => Math.max(m, f.lastActivityAt || 0), 0),
@@ -87,7 +91,7 @@ function visibleItems () {
   const q = state.query.trim().toLowerCase()
   const searching = q.length > 0
   const inFolder = (f) => (f.folderId || null) === (state.folderId || null)
-  let files = state.files.filter((f) => (searching ? true : inFolder(f)) && matchesFilters(f))
+  let files = docs().filter((f) => (searching ? true : inFolder(f)) && matchesFilters(f))
   if (searching) files = files.filter((f) => `${f.title} ${f.preview}`.toLowerCase().includes(q))
   let folders = searching || state.prefs.filter !== 'all' || state.prefs.type !== 'all'
     ? []
@@ -118,7 +122,7 @@ export function renderDrive () {
   list.className = `ledger ledger-${state.prefs.mode}`
   const { files, folders, searching } = visibleItems()
 
-  if (!state.files.length && !state.folders.length) {
+  if (!docs().length && !state.folders.length) {
     list.append(emptyState())
     return
   }
@@ -145,6 +149,7 @@ function renderCrumbs () {
       if (c.id) {
         const more = el('button', { type: 'button', class: 'btn btn-quiet btn-icon', 'aria-label': `Options for folder ${c.name}`, onclick: (e) => folderMenu(e.currentTarget, folderById(c.id)) }, svg(icons.more))
         nav.append(title, more)
+        if (c.shared) nav.append(el('button', { type: 'button', class: 'btn btn-quiet crumb-share', onclick: () => shareDialog(c.id) }, svg(icons.sharedFolder), el('span', {}, sharedNote(c).text)))
       } else nav.append(title)
     } else {
       const b = el('button', { type: 'button', class: 'crumb', onclick: () => goTo(c.id) }, c.name)
@@ -198,13 +203,13 @@ function renderList (list, files, folders, searching) {
       onkeydown: (e) => { if ((e.key === 'Enter' || e.key === ' ') && e.target === row) { e.preventDefault(); goTo(f.id) } }
     },
     (() => {
-      const notes = [{ text: stats.items ? plural(stats.items, 'item') : 'Empty' }, stats.live ? { text: `${stats.live} live now`, cls: 'live', dot: true } : null].filter(Boolean)
+      const notes = [{ text: stats.items ? plural(stats.items, 'item') : 'Empty' }, sharedNote(f), stats.live ? { text: `${stats.live} live now`, cls: 'live', dot: true } : null].filter(Boolean)
       return el('div', { class: 'row-margin' }, ...renderNotes(notes), marginMark(notes))
     })(),
     el('div', { class: 'row-main' },
-      el('p', { class: 'row-title' }, svg(icons.folder), el('span', {}, f.name)),
+      el('p', { class: 'row-title' }, svg(folderIcon(f)), el('span', {}, f.name)),
       searching && f.parentId ? el('p', { class: 'row-preview' }, `In ${folderPath(f.parentId).map((p) => p.name).join(' / ')}`) : null),
-    el('div', { class: 'row-owner' }, 'You'),
+    el('div', { class: 'row-owner' }, f.shared && f.role !== 'owner' ? f.owner?.name || 'Someone' : 'You'),
     el('div', { class: 'row-time' }, ago(stats.lastActivityAt || f.createdAt)),
     el('div', { class: 'row-menu' },
       el('button', { type: 'button', class: 'btn btn-quiet btn-icon', 'aria-label': `Options for folder ${f.name}`, onclick: (e) => folderMenu(e.currentTarget, f) }, svg(icons.more))))
@@ -265,11 +270,11 @@ function renderGrid (list, files, folders, searching) {
       onclick: (e) => { if (!e.target.closest('.tile-menu')) goTo(f.id) },
       onkeydown: (e) => { if (e.key === 'Enter' && e.target === tile) goTo(f.id) }
     },
-    el('div', { class: 'thumb thumb-folder', 'aria-hidden': 'true' }, el('span', { class: 'thumb-count' }, stats.items ? plural(stats.items, 'item') : 'Empty')),
+    el('div', { class: `thumb thumb-folder${f.shared ? ' shared' : ''}`, 'aria-hidden': 'true' }, el('span', { class: 'thumb-count' }, stats.items ? plural(stats.items, 'item') : 'Empty')),
     el('div', { class: 'tile-meta' },
-      el('p', { class: 'tile-title' }, f.name),
+      el('p', { class: 'tile-title' }, f.shared ? svg(icons.sharedFolder) : null, el('span', {}, f.name)),
       el('button', { type: 'button', class: 'btn btn-quiet btn-icon tile-menu', 'aria-label': `Options for folder ${f.name}`, onclick: (e) => folderMenu(e.currentTarget, f) }, svg(icons.more))),
-    stats.live ? el('span', { class: 'note live tile-note' }, `${stats.live} live now`) : null)
+    stats.live ? el('span', { class: 'note live tile-note' }, `${stats.live} live now`) : f.shared ? el('span', { class: 'note tile-note' }, sharedNote(f).text) : null)
     draggable(tile, { kind: 'folder', id: f.id })
     dropTarget(tile, f.id)
     grid.append(tile)
@@ -397,13 +402,7 @@ function dropTarget (node, folderId) {
     if (!raw) return
     e.preventDefault()
     const item = JSON.parse(raw)
-    if (item.kind === 'file') {
-      await cp.moveFile(item.id, folderId)
-      toast(`Moved to ${folderById(folderId)?.name || 'commonDrive'}`)
-    } else if (item.id !== folderId) {
-      const ok = await cp.moveFolder(item.id, folderId)
-      toast(ok ? `Moved to ${folderById(folderId)?.name || 'commonDrive'}` : 'A folder can’t go inside itself.')
-    }
+    if (item.id !== folderId) moveTo(item, folderId)
   })
 }
 
@@ -420,7 +419,8 @@ function openNewMenu (anchor) {
   openMenu(anchor, [
     ...state.apps.map((a) => ({ label: a.name, hint: a.description, icon: kindIcon(a.kind), onSelect: () => newDocument(a.type) })),
     { sep: true },
-    { label: 'Folder', icon: icons.folder, onSelect: newFolder },
+    { label: 'Folder', hint: 'Just for organizing your Drive', icon: icons.folder, onSelect: newFolder },
+    { label: 'Shared folder', hint: 'Everyone in it gets what’s inside', icon: icons.sharedFolder, onSelect: newSharedFolder },
     { label: 'Import a file…', hint: '.md, .docx, .xlsx, .csv or .ics', icon: icons.import, onSelect: importFile },
     { label: 'Upload files…', hint: 'Any kind, up to 100 MB each', icon: icons.upload, onSelect: () => uploadFiles() }
   ], { align: 'end', label: 'Create' })
@@ -450,8 +450,10 @@ async function importFile () {
 }
 
 function folderMenu (anchor, f) {
+  if (f.shared) return sharedFolderMenu(anchor, f)
   openMenu(anchor, [
     { label: 'Open', onSelect: () => goTo(f.id) },
+    { label: 'Share…', icon: icons.share, onSelect: () => shareFolder(f) },
     { label: 'Rename…', onSelect: async () => { const name = await promptText({ title: 'Rename folder', label: 'Name', value: f.name, confirm: 'Rename' }); if (name) cp.renameFolder(f.id, name) } },
     { label: 'Move to…', onSelect: () => moveDialog({ kind: 'folder', id: f.id, name: f.name, current: f.parentId }) },
     { sep: true },
@@ -467,6 +469,70 @@ function folderMenu (anchor, f) {
       }
     }
   ], { label: `Folder ${f.name}` })
+}
+
+function sharedFolderMenu (anchor, f) {
+  openMenu(anchor, [
+    { label: 'Open', onSelect: () => goTo(f.id) },
+    { label: 'Share…', icon: icons.share, onSelect: () => shareDialog(f.id) },
+    canChange(f) ? { label: 'Rename…', onSelect: async () => { const name = await promptText({ title: 'Rename shared folder', label: 'Name', value: f.name, confirm: 'Rename', body: 'Everyone in the folder sees the new name.' }); if (name) cp.renameFolder(f.id, name) } } : null,
+    { label: 'Move to…', onSelect: () => moveDialog({ kind: 'folder', id: f.id, name: f.name, current: f.parentId }) },
+    { sep: true },
+    {
+      label: 'Remove from my Drive…',
+      danger: true,
+      onSelect: async () => {
+        const mine = docs().filter((x) => x.folderId === f.id && x.role === 'owner').length
+        const body = [
+          'The folder leaves your Drive; everyone else keeps it.',
+          mine ? `Your ${plural(mine, 'file')} in it come out of it first, so people who had ${mine === 1 ? 'it' : 'them'} only through the folder lose access.` : null,
+          'Other files you got through it that you never opened leave too.'
+        ].filter(Boolean).join(' ')
+        if (await confirmAction({ title: `Remove “${f.name}” from your Drive?`, body, confirm: 'Remove' })) {
+          if (state.folderId === f.id) state.folderId = f.parentId || null
+          await cp.removeFile(f.id)
+        }
+      }
+    }
+  ].filter(Boolean), { label: `Shared folder ${f.name}` })
+}
+
+function sharedNote (f) {
+  if (!f.shared) return null
+  const others = (f.people || 1) - 1
+  return { text: others ? `Shared with ${others === 1 ? '1 person' : `${others} people`}` : 'Shared folder, just you so far' }
+}
+
+async function newSharedFolder () {
+  const name = await promptText({ title: 'New shared folder', label: 'Name', confirm: 'Create folder', body: 'Invite people to it, and they get everything inside: what you put there, and what the others do.' })
+  if (!name) return
+  try {
+    const id = await cp.createSharedFolder(name, state.folderId)
+    await refreshLists()
+    shareDialog(id)
+  } catch (err) { toast(cleanError(err)) }
+}
+
+async function shareFolder (f) {
+  const ok = await confirmAction({
+    title: `Share “${f.name}”?`,
+    body: 'It becomes a shared folder, with its subfolders. Everyone you invite gets every file you own inside it. Files other people own stay in it for you only.',
+    confirm: 'Make it shared',
+    danger: false
+  })
+  if (!ok) return
+  try {
+    const id = await cp.shareFolder(f.id)
+    if (state.folderId === f.id) state.folderId = id
+    await refreshLists()
+    shareDialog(id)
+  } catch (err) { toast(cleanError(err)) }
+}
+
+async function refreshLists () {
+  state.files = await cp.listFiles()
+  state.folders = await cp.listFolders()
+  renderDrive()
 }
 
 function fileMenu (anchor, f) {
@@ -522,11 +588,29 @@ async function moveDialog ({ kind, id, name, current }) {
   const list = el('fieldset', { class: 'folder-picker' }, el('legend', { class: 'sr-only' }, 'Destination'),
     ...options.map((o) => el('label', { class: 'folder-option', style: `padding-left:${8 + o.depth * 18}px` },
       el('input', { type: 'radio', name: 'target', value: o.id, checked: (o.id || null) === (current || null) || null }),
-      svg(icons.folder), el('span', {}, o.label))))
+      svg(folderIcon(folderById(o.id))), el('span', {}, o.label))))
   const res = await dialog({ title: `Move “${name}”`, fields: [list], confirm: 'Move here' })
   if (res?.action !== 'confirm') return
-  const target = res.data.target || null
-  if (kind === 'file') await cp.moveFile(id, target)
-  else if (!(await cp.moveFolder(id, target))) { toast('A folder can’t go inside itself.'); return }
-  toast(`Moved to ${folderById(target)?.name || 'commonDrive'}`)
+  moveTo({ kind, id }, res.data.target || null)
+}
+
+// Moving into a shared folder shares; moving out of one unshares.
+async function moveTo ({ kind, id }, target) {
+  const dest = folderById(target)
+  const item = kind === 'file' ? state.files.find((f) => f.docId === id) : folderById(id)
+  const from = folderById(kind === 'file' ? item?.folderId : item?.parentId)
+  if ((from?.id || null) === (target || null)) return
+  const mine = kind === 'folder' || item?.role === 'owner'
+  if (dest?.shared && mine) {
+    const ok = await confirmAction({ title: `Share with everyone in “${dest.name}”?`, body: `Everyone in the folder gets “${item?.title || item?.name}”: the folder’s editors can edit it, its viewers can view it.`, confirm: 'Move and share', danger: false })
+    if (!ok) return
+  } else if (from?.shared && mine && !dest?.shared) {
+    const ok = await confirmAction({ title: `Take it out of “${from.name}”?`, body: 'People who had it only through the folder lose access. People you invited to it yourself keep theirs.', confirm: 'Move', danger: false })
+    if (!ok) return
+  }
+  try {
+    const res = kind === 'file' ? await cp.moveFile(id, target) : await cp.moveFolder(id, target)
+    if (res === false) toast('A folder can’t go inside itself.')
+    else toast(res?.localOnly ? res.message : `Moved to ${dest?.name || 'commonDrive'}`)
+  } catch (err) { toast(cleanError(err)) }
 }

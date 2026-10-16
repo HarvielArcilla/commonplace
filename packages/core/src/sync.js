@@ -324,6 +324,16 @@ export class SyncEngine extends EventEmitter {
     this._ownerAction(docId, (doc) => doc.members.setRole(this.identity, userId, role))
   }
 
+  // Adds someone directly, as owner (shared folders use this: the person's
+  // encryption key comes from the folder's own log). `folder` records why.
+  addMember (docId, { userId, role, enc, folder = undefined }) {
+    this._ownerAction(docId, (doc) => this._admit(doc, { userId, role, enc, folder }))
+  }
+
+  membersDetailed (docId) {
+    return this.docs.get(docId)?.members.detailed() || []
+  }
+
   // Removes someone: they keep what they already have, but get nothing new.
   removeMember (docId, userId) {
     this._ownerAction(docId, (doc) => doc.members.remove(this.identity, userId, crypto.randomBytes(32)))
@@ -356,7 +366,7 @@ export class SyncEngine extends EventEmitter {
       if (e.by !== this.identity.userId || !mineNow()) continue
       const m = doc.members
       try {
-        if (e.type === 'add' && !m.member(e.userId)) this._admit(doc, { userId: e.userId, role: e.role, enc: e.enc, invite: e.via ? { once: true, i: e.via } : null })
+        if (e.type === 'add' && !m.member(e.userId)) this._admit(doc, { userId: e.userId, role: e.role, enc: e.enc, invite: e.via ? { once: true, i: e.via } : null, folder: e.folder })
         else if (e.type === 'role' && m.member(e.userId) && m.member(e.userId).role !== e.role) m.setRole(this.identity, e.userId, e.role)
         else if (e.type === 'remove' && m.member(e.userId)) m.remove(this.identity, e.userId, crypto.randomBytes(32))
         else if (e.type === 'rotate' && !dropped.some((x) => x.type === 'remove')) m.rotate(this.identity, crypto.randomBytes(32))
@@ -669,18 +679,19 @@ export class SyncEngine extends EventEmitter {
     const m = doc.members.member(userId)
     const needsKey = doc.members.epoch > 0 && !doc.members.sealedKeyFor(userId, doc.members.epoch)
     if (!m?.enc || needsKey) {
-      this._admit(doc, { userId, role: access.role, enc: link.enc })
+      this._admit(doc, { userId, role: access.role, enc: link.enc, folder: m?.folder || undefined })
       this._membersChanged(doc)
     }
   }
 
-  _admit (doc, { userId, role, enc, invite = null }) {
+  _admit (doc, { userId, role, enc, invite = null, folder = undefined }) {
     doc.members.admit(this.identity, {
       userId,
       role,
       enc,
       epochSecret: doc.epochs.get(doc.members.epoch)?.secret,
-      via: invite?.once ? invite.i : undefined
+      via: invite?.once ? invite.i : undefined,
+      folder
     })
   }
 
