@@ -22,6 +22,11 @@ export function toolButton (id, label, icon, onClick, { key } = {}) {
 
 export const sep = () => el('span', { class: 'tool-sep', role: 'separator' })
 
+// A toolbar button with a word next to its icon, for the main action.
+export function labeledButton (id, label, icon, onClick) {
+  return el('button', { type: 'button', class: 'tool tool-labeled', 'data-cmd': id, onmousedown: (e) => e.preventDefault(), onclick: (e) => onClick(e.currentTarget) }, svg(icon), el('span', {}, label))
+}
+
 // Lays out groups of controls with separators between them.
 export function toolbarGroups (groups) {
   const out = []

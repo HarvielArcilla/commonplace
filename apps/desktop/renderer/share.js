@@ -4,7 +4,11 @@
 import { $, el, ago, toast, dialog, confirmAction, cleanError, listNames } from './ui.js'
 import { state, cp } from './state.js'
 
-const ROLE_LABEL = { owner: 'Owner', editor: 'Can edit', viewer: 'Can view' }
+const ROLE_LABEL = { owner: 'Owner', editor: 'Can edit', viewer: 'Can view', respondent: 'Can answer' }
+
+// The roles someone can be given in a file: forms are answered, not viewed.
+const rolesFor = (kind) => (kind === 'form' ? ['respondent', 'editor'] : ['editor', 'viewer'])
+const roleOptions = (kind, selected) => rolesFor(kind).map((r) => el('option', { value: r, selected: r === selected || null }, ROLE_LABEL[r]))
 
 function currentFile (docId) {
   return state.files.find((f) => f.docId === docId)
@@ -23,7 +27,7 @@ export function shareDialog (docId) {
   const d = el('dialog', { class: 'dialog dialog-wide share' }, el('form', { method: 'dialog' },
     title,
     el('div', { class: 'share-body' },
-      isOwner ? inviteControls(docId) : el('p', {}, `Only ${f.owner?.name || 'the owner'} can invite people or change access.`),
+      isOwner ? inviteControls(docId, f.kind) : el('p', {}, `Only ${f.owner?.name || 'the owner'} can invite people or change access.`),
       live),
     el('div', { class: 'dialog-actions' }, el('button', { class: 'btn btn-primary', value: 'done' }, 'Done'))))
   const render = () => {
@@ -42,7 +46,7 @@ export function shareDialog (docId) {
 function shareLists (docId, f) {
   const isOwner = f.role === 'owner'
   const out = []
-  if (isOwner && f.requests?.length) out.push(el('h3', {}, 'Asking to join'), requestList(docId, f.requests))
+  if (isOwner && f.requests?.length) out.push(el('h3', {}, 'Asking to join'), requestList(docId, f.requests, f.kind))
   const list = el('ul', { class: 'people', 'aria-label': 'People with access' })
   const members = f.members.length ? f.members : (f.owner ? [{ userId: f.owner.userId, name: f.owner.name, role: 'owner' }] : [])
   for (const m of members) {
@@ -50,8 +54,7 @@ function shareLists (docId, f) {
     const controls = el('div', { class: 'person-controls' })
     if (isOwner && m.role !== 'owner') {
       const select = el('select', { class: 'tool-select', 'aria-label': `Role for ${m.name}`, onchange: (e) => act(() => cp.setMemberRole(docId, m.userId, e.target.value)) },
-        el('option', { value: 'editor', selected: m.role === 'editor' || null }, 'Can edit'),
-        el('option', { value: 'viewer', selected: m.role === 'viewer' || null }, 'Can view'))
+        ...roleOptions(f.kind, m.role))
       controls.append(select,
         el('button', { type: 'button', class: 'btn btn-quiet', title: 'Make this person the owner', onclick: () => transfer(docId, m) }, 'Make owner'),
         el('button', { type: 'button', class: 'btn btn-quiet btn-danger', onclick: () => removePerson(docId, m) }, 'Remove'))
@@ -115,11 +118,10 @@ const loadInviteOptions = () => {
 }
 const saveInviteOptions = (o) => { try { localStorage.setItem(INVITE_KEY, JSON.stringify(o)) } catch {} }
 
-function inviteControls (docId) {
+function inviteControls (docId, kind) {
   const o = loadInviteOptions()
-  const role = el('select', { class: 'tool-select', 'aria-label': 'Role for people who use this link' },
-    el('option', { value: 'editor', selected: o.role === 'editor' || null }, 'Can edit'),
-    el('option', { value: 'viewer', selected: o.role === 'viewer' || null }, 'Can view'))
+  if (kind === 'form' || !rolesFor(kind).includes(o.role)) o.role = rolesFor(kind)[0] // a form's link is for answering
+  const role = el('select', { class: 'tool-select', 'aria-label': 'Role for people who use this link' }, ...roleOptions(kind, o.role))
   const expiry = el('select', { class: 'tool-select', 'aria-label': 'How long the link works' },
     ...EXPIRY.map((e) => el('option', { value: e.value, selected: e.value === String(o.expiresIn || '') || null }, e.label)))
   const once = el('input', { type: 'checkbox', checked: o.once || null })
@@ -134,7 +136,8 @@ function inviteControls (docId) {
         ? 'The first person you let in uses up the link. They get the file once you\u2019re online.'
         : 'People who open the link join right away, from you or anyone else who has the file.'
   }
-  for (const c of [role, expiry, once, ask]) c.addEventListener('change', () => { saveInviteOptions(options()); explain() })
+  // Remember the choices, but not a form's role as the default for other files.
+  for (const c of [role, expiry, once, ask]) c.addEventListener('change', () => { saveInviteOptions({ ...options(), role: kind === 'form' ? loadInviteOptions().role : role.value }); explain() })
   explain()
   return el('div', { class: 'invite-box' },
     el('div', { class: 'invite-row' }, el('span', { class: 'invite-label' }, 'Invite link'), role, expiry,
@@ -148,16 +151,14 @@ function inviteControls (docId) {
 async function copyLink (docId, { role, expiresIn, once, ask }) {
   try {
     await cp.copyInvite(docId, role, { expiresIn: Number(expiresIn) || null, once, ask })
-    const what = role === 'viewer' ? 'View-only invite link copied.' : 'Invite link copied.'
+    const what = role === 'viewer' ? 'View-only invite link copied.' : role === 'respondent' ? 'Link to answer the form copied.' : 'Invite link copied.'
     toast(ask ? `${what} You\u2019ll approve each person.` : what)
   } catch (err) { toast(cleanError(err)) }
 }
 
-function requestList (docId, requests) {
+function requestList (docId, requests, kind) {
   return el('ul', { class: 'people', 'aria-label': 'People asking to join' }, ...requests.map((r) => {
-    const role = el('select', { class: 'tool-select', 'aria-label': `Role for ${r.name}` },
-      el('option', { value: 'editor', selected: r.role === 'editor' || null }, 'Can edit'),
-      el('option', { value: 'viewer', selected: r.role === 'viewer' || null }, 'Can view'))
+    const role = el('select', { class: 'tool-select', 'aria-label': `Role for ${r.name}` }, ...roleOptions(kind, r.role))
     return el('li', { class: 'person' },
       el('span', { class: 'presence-dot on', 'aria-hidden': 'true' }),
       el('span', { class: 'person-name' }, r.name, el('span', { class: 'person-note' }, 'Asking to join')),

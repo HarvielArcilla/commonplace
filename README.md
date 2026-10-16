@@ -2,16 +2,16 @@
 
 # commonplace
 
-**A free, open-source office suite you collaborate in like Google Workspace, without a server or an account.** Documents, spreadsheets, presentations and a shared drive, synced directly between the people using them.
+**A free, open-source office suite you collaborate in like Google Workspace, without a server or an account.** Documents, spreadsheets, presentations, task boards, calendars, whiteboards, forms and a shared drive, synced directly between the people using them.
 
 ![Two people working on the same document: Sam's suggested edit and reply in the margin, his cursor in the text](docs/images/doc.png)
 
-Work on the same document, spreadsheet or presentation at the same time, leave comments, suggest edits, share with a link, and go back to any earlier version. It works the way you'd expect from an online office suite, except nobody runs it. There is no company in the middle holding your files, no sign-up, no subscription and no ads. Your files live on your computer and on the computers of the people you share them with, and travel directly between you, encrypted end to end.
+Work on the same file at the same time, see each other's cursors, leave comments, suggest edits, share with a link, and go back to any earlier version. It works the way you'd expect from an online office suite, except nobody runs it. There is no company in the middle holding your files, no sign-up, no subscription and no ads. Your files live on your computer and on the computers of the people you share them with, and travel directly between you, encrypted end to end.
 
 - **No account.** Open the app, type your name, start working. Your identity is a key made on your computer.
 - **No server.** Computers find each other on a peer-to-peer network and connect directly. Nobody can read your files in transit, sell them, lose them in a breach, or lock you out.
 - **Works offline.** Edits are saved on your computer first and merge on their own when you meet again, like a git merge that resolves itself. Where two people changed the same sentence, the owner sees both and picks.
-- **Yours to keep.** Import and export `.docx`, `.xlsx`, `.pptx`, `.csv`, `.md` and PDF. MIT licensed.
+- **Yours to keep.** Import and export `.docx`, `.xlsx`, `.pptx`, `.csv`, `.ics`, `.md`, `.svg`, `.png` and PDF. MIT licensed.
 
 ## The apps
 
@@ -29,9 +29,25 @@ Work on the same document, spreadsheet or presentation at the same time, leave c
 
 ![commonSlides: editing a slide, with the slide strip on the left](docs/images/slides.png)
 
+**commonTasks** is a task board: lists of cards you drag between, with due dates, notes and the person it's assigned to, as a board or a checklist. Exports `.csv` and Markdown.
+
+![commonTasks: three lists of tasks, one open in the side panel](docs/images/tasks.png)
+
+**commonCalendar** has month and week views, all-day and repeating events, reminders, and dragging events to another day. Everyone sees times in their own time zone. Imports and exports `.ics`, so events move to and from Google Calendar, Apple Calendar and Outlook.
+
+![commonCalendar: a month with a weekly event](docs/images/calendar.png)
+
+**commonBoard** is an open whiteboard: sticky notes, shapes, text, arrows and drawing, with everyone's cursor and selection live. Exports `.svg` and `.png`.
+
+![commonBoard: sticky notes, with Sam's cursor and selection in green](docs/images/whiteboard.png)
+
+**commonForms** collects answers. Share a form with "Can answer", and each person's answers are sealed so only people who can edit the form can read them, not the other people answering. See the answers summarized or one by one, and export them as `.csv`.
+
+![commonForms: a summary of the answers to a sign-up form](docs/images/form.png)
+
 ## Sharing
 
-Invite people to edit or only view, change their role, remove them, or hand ownership to someone else. Invite links expire (after 7 days unless you choose otherwise) and can be limited to one person or need your approval for each person.
+Invite people to edit, only view, or (for forms) answer; change their role, remove them, or hand ownership to someone else. Invite links expire (after 7 days unless you choose otherwise) and can be limited to one person or need your approval for each person.
 
 ![The share dialog: invite link options and the people with access](docs/images/share.png)
 
@@ -128,10 +144,14 @@ packages/drive   commonDrive: the file index, background syncing, history, linke
 packages/docs    commonDocs: the app descriptor, rich-text editor, comments and suggestions
 packages/sheets  commonSheets: workbook model, formula engine, .xlsx and .csv
 packages/slides  commonSlides: deck model, text-box editor, .pptx
+packages/tasks   commonTasks: lists and cards, .csv and Markdown
+packages/calendar commonCalendar: events, repeats, .ics
+packages/whiteboard commonBoard: shapes, drawing them as SVG
+packages/forms   commonForms: questions, sealed answers, .csv
 packages/helper  the optional always-on helper
 apps/desktop     Electron shell (background process + window UI)
 scripts/         one-step installers and launchers
-test/            end-to-end sync, access, conflict, history, helper and app tests
+test/            end-to-end sync, access, conflict, history, helper, recovery and app tests
 ```
 
 ## License

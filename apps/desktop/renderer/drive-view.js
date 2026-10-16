@@ -143,9 +143,10 @@ function renderControls () {
 function emptyState () {
   return el('div', { class: 'empty' },
     el('h2', {}, 'Your Drive is empty'),
-    el('p', {}, 'Start a document, import a .md or .docx file, or paste an invite someone sent you. Files live on your computer and on your collaborators’ computers, nowhere else.'),
+    el('p', {}, 'Start something new, import a file, or paste an invite someone sent you. Files live on your computer and on your collaborators’ computers, nowhere else.'),
+    el('div', { class: 'app-tiles' }, ...state.apps.map((a) => el('button', { type: 'button', class: 'app-tile', onclick: () => newDocument(a.type) },
+      svg(kindIcon(a.kind)), el('span', { class: 'app-tile-name' }, a.name), el('span', { class: 'app-tile-hint' }, a.description)))),
     el('div', { class: 'bar-actions' },
-      ...state.apps.map((a) => el('button', { class: a.kind === 'paged' ? 'btn' : 'btn btn-primary', onclick: () => newDocument(a.type) }, `New ${a.name.toLowerCase()}`)),
       el('button', { class: 'btn', onclick: importFile }, 'Import a file'),
       el('button', { class: 'btn btn-quiet', onclick: () => handlers.openJoinDialog() }, 'Join with invite')),
     el('p', { class: 'empty-move' }, 'Moving from another computer? ',
@@ -294,7 +295,47 @@ function thumbnail (f) {
         }, b.text))),
       t?.count > 1 ? el('span', { class: 'thumb-count-badge' }, `${t.count} slides`) : null)
   }
+  if (f.kind === 'tasks') {
+    const lists = f.thumb?.lists || []
+    return el('div', { class: 'thumb thumb-tasks', 'aria-hidden': 'true' }, ...lists.slice(0, 3).map((l) => el('div', { class: 'tt-list' },
+      el('span', { class: 'tt-name' }, l.name),
+      ...l.cards.slice(0, 3).map((c) => el('span', { class: `tt-card${c.done ? ' done' : ''}` }, c.title || ' ')))))
+  }
+  if (f.kind === 'calendar') {
+    const t = f.thumb
+    if (!t) return el('div', { class: 'thumb thumb-cal', 'aria-hidden': 'true' })
+    const cells = [...Array(t.startsOn).fill(null), ...Array.from({ length: t.days }, (_, i) => i + 1)]
+    return el('div', { class: 'thumb thumb-cal', 'aria-hidden': 'true' },
+      el('span', { class: 'tc-month' }, new Date(t.year, t.month, 1).toLocaleDateString(undefined, { month: 'long' })),
+      el('div', { class: 'tc-grid' }, ...cells.map((d) => el('span', { class: `tc-day${d === t.today ? ' today' : ''}${d && t.busy[d] ? ' busy' : ''}`, style: d && t.busy[d] ? `--ev:${t.busy[d]}` : null }, d ? String(d) : ''))))
+  }
+  if (f.kind === 'whiteboard') return boardThumb(f.thumb?.shapes || [])
+  if (f.kind === 'form') {
+    const t = f.thumb || { questions: [] }
+    return el('div', { class: 'thumb thumb-form', 'aria-hidden': 'true' },
+      el('div', { class: 'tf-sheet' }, ...t.questions.slice(0, 3).map((q) => el('div', { class: 'tf-q' },
+        el('span', { class: 'tf-title' }, q.title),
+        ...(q.options.length ? q.options.slice(0, 2).map((o) => el('span', { class: 'tf-opt' }, o)) : [el('span', { class: 'tf-line' })])))),
+      t.responses ? el('span', { class: 'thumb-count-badge' }, `${t.responses} answer${t.responses === 1 ? '' : 's'}`) : null)
+  }
   return el('div', { class: 'thumb thumb-markdown', 'aria-hidden': 'true' }, el('p', {}, text.slice(0, 300) || ' '))
+}
+
+// A whiteboard in miniature (the model has already scaled it to 160 x 100).
+function boardThumb (shapes) {
+  const ns = 'http://www.w3.org/2000/svg'
+  const svgNode = document.createElementNS(ns, 'svg')
+  svgNode.setAttribute('viewBox', '-6 -6 172 112')
+  const add = (tag, attrs) => { const n = document.createElementNS(ns, tag); for (const [k, val] of Object.entries(attrs)) n.setAttribute(k, val); svgNode.append(n) }
+  for (const s of shapes) {
+    const color = s.color || '#8a8f9b'
+    if (s.type === 'pen' && s.points?.length > 2) add('polyline', { points: s.points.map((n, i) => n + (i % 2 ? s.y : s.x)).join(' '), fill: 'none', stroke: color, 'stroke-width': 1.2 })
+    else if (s.type === 'arrow' || s.type === 'line') add('line', { x1: s.x, y1: s.y, x2: s.x + s.w, y2: s.y + s.h, stroke: color, 'stroke-width': 1.2 })
+    else if (s.type === 'ellipse') add('ellipse', { cx: s.x + s.w / 2, cy: s.y + s.h / 2, rx: Math.abs(s.w / 2), ry: Math.abs(s.h / 2), fill: color, stroke: '#1f2430', 'stroke-width': 0.6 })
+    else if (s.type === 'text') add('rect', { x: s.x, y: s.y + s.h * 0.3, width: s.w * 0.7, height: Math.max(1.5, s.h * 0.25), fill: color, opacity: 0.5 })
+    else add('rect', { x: s.x, y: s.y, width: s.w, height: s.h, rx: 1, fill: color, ...(s.type === 'rect' ? { stroke: '#1f2430', 'stroke-width': 0.6 } : {}) })
+  }
+  return el('div', { class: 'thumb thumb-board', 'aria-hidden': 'true' }, svgNode)
 }
 
 // ---- drag and drop -----------------------------------------------------------
@@ -349,13 +390,13 @@ function openNewMenu (anchor) {
     ...state.apps.map((a) => ({ label: a.name, hint: a.description, icon: kindIcon(a.kind), onSelect: () => newDocument(a.type) })),
     { sep: true },
     { label: 'Folder', icon: icons.folder, onSelect: newFolder },
-    { label: 'Import a file…', hint: '.md, .docx, .xlsx or .csv', icon: icons.import, onSelect: importFile }
+    { label: 'Import a file…', hint: '.md, .docx, .xlsx, .csv or .ics', icon: icons.import, onSelect: importFile }
   ], { align: 'end', label: 'Create' })
 }
 
 async function newDocument (type) {
   const app = state.apps.find((a) => a.type === type)
-  const title = { paged: 'Untitled document', sheet: 'Untitled spreadsheet', slides: 'Untitled presentation' }[app?.kind] || 'Untitled notes'
+  const title = { paged: 'Untitled document', sheet: 'Untitled spreadsheet', slides: 'Untitled presentation', tasks: 'Untitled tasks', calendar: 'Untitled calendar', whiteboard: 'Untitled whiteboard', form: 'Untitled form' }[app?.kind] || 'Untitled notes'
   const docId = await cp.createFile(type, title, state.folderId)
   await handlers.openDocument(docId, { focusTitle: true })
 }
@@ -370,7 +411,7 @@ async function importFile () {
     const res = await cp.importFile(state.folderId)
     if (!res) return
     await handlers.openDocument(res.docId, { initialContent: res.content })
-    toast(res.warnings ? 'Imported. Some formatting couldn’t be carried over.' : 'Imported')
+    toast(res.note ? `Imported ${res.note}${res.warnings ? `. ${res.warnings} repeating event${res.warnings === 1 ? '' : 's'} became one-off events.` : ''}` : res.warnings ? 'Imported. Some formatting couldn’t be carried over.' : 'Imported')
   } catch (err) {
     toast(`Couldn’t import that file: ${cleanError(err)}`)
   }

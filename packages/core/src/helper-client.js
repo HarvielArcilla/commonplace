@@ -19,7 +19,8 @@ import { EventEmitter } from 'node:events'
 import crypto from 'node:crypto'
 import * as Y from 'yjs'
 import { seal, open } from './crypto.js'
-import { canEdit } from './members.js'
+import { canEdit, canRespond } from './members.js'
+import { isResponseUpdate } from './respond.js'
 import { verifySignature } from './identity.js'
 import { MsgReader, encodeMsg, boxKeys, putProof, compactProof, sha256hex } from './helper-protocol.js'
 
@@ -40,6 +41,7 @@ export class HelperClient extends EventEmitter {
     this.boxCache = new Map() // epoch secret (hex) -> boxKeys
     engine.on('update', (docId, update, origin) => { if (origin !== this && origin !== 'disk') this._pushUpdate(docId, update) })
     engine.on('members', (docId) => this._pushMembers(docId))
+    engine.on('response', (docId, update) => this._pushResponse(docId, update))
     engine.on('topics', (docId) => this._refreshDoc(docId))
   }
 
@@ -120,6 +122,7 @@ export class HelperClient extends EventEmitter {
         after: resume ? saved.after : 0,
         sv: resume && saved.sv ? Y.decodeStateVector(Buffer.from(saved.sv, 'base64')) : new Map(),
         lastHash: resume ? saved.lastHash : null,
+        answers: resume ? saved.answers : undefined,
         caughtUp: false
       }
       link.boxes.set(box.box, state)
@@ -162,7 +165,9 @@ export class HelperClient extends EventEmitter {
       return
     }
     if (head.k !== 'u') return
-    if (doc.members.exists && !canEdit(doc.members.roleOf(head.by, head.inv && typeof head.inv === 'object' ? head.inv : null)?.role)) return
+    const role = doc.members.exists ? doc.members.roleOf(head.by, head.inv && typeof head.inv === 'object' ? head.inv : null)?.role : 'editor'
+    // Editors may change anything; respondents may only add their answers.
+    if (!canEdit(role) && !(canRespond(role) && isResponseUpdate(data, head.by))) return
     try { Y.applyUpdate(doc.ydoc, data, this) } catch { return }
     try { mergeSV(state.sv, Y.decodeStateVector(Y.encodeStateVectorFromUpdate(data))) } catch {}
   }
@@ -170,6 +175,7 @@ export class HelperClient extends EventEmitter {
   // After reading everything: send what the helper is missing, and rewrite
   // the box as one blob when it has grown long.
   _catchUp (key, link, doc, state, head) {
+    if (canRespond(doc.myAccess?.role)) { this._putAnswers(key, link, doc, state); return }
     if (!this._mayWrite(doc)) return
     if (doc.members.exists) this._put(link, doc, state, 'm', Buffer.from(JSON.stringify(doc.members.entries)))
     if (head.count > this.compactAfter) {
@@ -195,6 +201,29 @@ export class HelperClient extends EventEmitter {
       let sv = null
       try { sv = Y.decodeStateVector(Y.encodeStateVectorFromUpdate(update)) } catch {}
       this._put(link, doc, state, 'u', Buffer.from(update), { sv })
+    }
+  }
+
+  // As a respondent: leave my answers in the box, once each.
+  _putAnswers (key, link, doc, state) {
+    const sent = new Set(this._saved(doc.docId)[key]?.answers || [])
+    for (const update of this.engine.outbox(doc.docId)) {
+      const hash = sha256hex(update)
+      if (sent.has(hash)) continue
+      this._put(link, doc, state, 'u', update)
+      sent.add(hash)
+    }
+    state.answers = [...sent]
+    this._save(key, state)
+  }
+
+  _pushResponse (docId, update) {
+    const doc = this.engine.getDoc(docId)
+    if (!doc) return
+    for (const key of this.helpersOf(docId)) {
+      const link = this.links.get(key)
+      const state = link && [...link.boxes.values()].find((s) => s.docId === docId && s.caughtUp)
+      if (state) this._putAnswers(key, link, doc, state)
     }
   }
 
@@ -240,7 +269,7 @@ export class HelperClient extends EventEmitter {
 
   _save (key, state) {
     const all = this._saved(state.docId)
-    all[key] = { box: state.keys.box, after: state.after, sv: Buffer.from(Y.encodeStateVector(state.sv)).toString('base64'), lastHash: state.lastHash, at: Date.now() }
+    all[key] = { box: state.keys.box, after: state.after, sv: Buffer.from(Y.encodeStateVector(state.sv)).toString('base64'), lastHash: state.lastHash, answers: state.answers, at: Date.now() }
     this.engine.store.writeJSON(state.docId, 'helpers', all)
     this._status(state.docId)
   }

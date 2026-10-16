@@ -7,7 +7,7 @@
 //   create  - the document's first owner (and, for documents made before
 //             membership existed, everyone already working on it)
 //   add     - give someone a role; may carry the current key, sealed to them
-//   role    - change someone's role (viewer, editor)
+//   role    - change someone's role (viewer, respondent, editor)
 //   remove  - take someone out
 //   rotate  - start a new key epoch; the new key is sealed to each remaining
 //             member, and every invite link issued before it stops working
@@ -29,8 +29,12 @@ import crypto from 'node:crypto'
 import { verifySignature } from './identity.js'
 import { sealTo } from './seal.js'
 
-export const ROLES = ['viewer', 'editor', 'owner']
+export const ROLES = ['viewer', 'respondent', 'editor', 'owner']
+// Roles the owner can give someone. A respondent reads the file and may add
+// only their own sealed answers to a form (see respond.js).
+export const GIVEN_ROLES = ['viewer', 'respondent', 'editor']
 export const canEdit = (role) => role === 'editor' || role === 'owner'
+export const canRespond = (role) => role === 'respondent'
 
 export function canonical (value) {
   if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`
@@ -95,14 +99,14 @@ function apply (s, e, i) {
       if (e.legacy === false) s.legacyLinks = false
       break
     case 'add':
-      if (!['viewer', 'editor'].includes(e.role) && !(e.userId === s.owner && e.role === 'owner')) throw new Error('bad role')
+      if (!GIVEN_ROLES.includes(e.role) && !(e.userId === s.owner && e.role === 'owner')) throw new Error('bad role')
       s.members.set(e.userId, { role: e.userId === s.owner ? 'owner' : e.role, enc: e.enc || s.members.get(e.userId)?.enc || null })
       s.removed.delete(e.userId)
       if (e.key) grant(s, e.userId, e.key.epoch, e.key.sealed)
       if (typeof e.via === 'string' && !s.usedInvites.has(e.via)) s.usedInvites.set(e.via, e.userId)
       break
     case 'role':
-      if (!s.members.has(e.userId) || e.userId === s.owner || !['viewer', 'editor'].includes(e.role)) throw new Error('bad role change')
+      if (!s.members.has(e.userId) || e.userId === s.owner || !GIVEN_ROLES.includes(e.role)) throw new Error('bad role change')
       s.members.get(e.userId).role = e.role
       break
     case 'remove':
@@ -227,7 +231,7 @@ export class Membership {
   inviteProblem (token, { userId = null, now = Date.now() } = {}) {
     if (!token || typeof token !== 'object') return 'invalid'
     const { sig, ...body } = token
-    if (body.d !== this.docId || !['viewer', 'editor'].includes(body.r)) return 'invalid'
+    if (body.d !== this.docId || !GIVEN_ROLES.includes(body.r)) return 'invalid'
     if (!this.state.owners.has(body.by) || !verifyWith(body.by, body, sig)) return 'invalid'
     if (!(body.q >= this.state.invitesValidFrom)) return 'revoked'
     if (body.x != null && !(now < body.x)) return 'expired'
@@ -250,7 +254,7 @@ export class Membership {
     if (identity.userId !== this.state.owner) throw new Error('Only the owner can invite people.')
     const body = {
       d: this.docId,
-      r: role === 'viewer' ? 'viewer' : 'editor',
+      r: GIVEN_ROLES.includes(role) ? role : 'editor',
       q: this.entries.length,
       i: crypto.randomBytes(6).toString('hex'),
       by: identity.userId,

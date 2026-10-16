@@ -92,13 +92,14 @@ export function statusNotes (file, { detailed = false } = {}) {
     }
   }
   if (file.role === 'viewer') notes.push({ text: 'You can view this file' })
+  if (file.role === 'respondent') notes.push({ text: 'You can answer this form' })
   if (file.role !== 'owner' && !file.sync.ownerOnline && file.owner?.name) {
     notes.push({ text: `${file.owner.name} (owner) is offline` })
   }
   if (file.sync.pending > 0 && file.sync.lastSyncedAt) {
     notes.push({ text: 'Some of your edits are only on this computer', cls: 'warn' })
   }
-  if (detailed && !here.length && !syncing.length && file.role !== 'viewer') {
+  if (detailed && !here.length && !syncing.length && (file.role === 'owner' || file.role === 'editor')) {
     notes.push({
       text: (file.sync.helpers || []).length
         ? 'You can keep writing. Edits are saved here and reach the others through the helper, even when nobody else is online.'

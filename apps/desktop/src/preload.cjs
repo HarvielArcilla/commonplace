@@ -64,6 +64,8 @@ contextBridge.exposeInMainWorld('commonplace', {
   pickBackup: () => ipcRenderer.invoke('backup:pick'),
   restoreBackup: (file, key) => ipcRenderer.invoke('backup:restore', file, key),
   onBackup: listen('backup:changed'),
+  submitForm: (docId, answers) => ipcRenderer.invoke('forms:submit', docId, answers),
+  formResponses: (docId) => ipcRenderer.invoke('forms:responses', docId),
   copyText: (text) => ipcRenderer.invoke('clipboard:write', text),
   onDriveChanged: listen('drive:changed'),
   onInvite: listen('invite:received'),

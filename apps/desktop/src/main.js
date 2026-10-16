@@ -2,7 +2,7 @@
 // hosts the window. The window never touches the network or the disk; it
 // talks to this process over a narrow IPC surface defined in preload.cjs.
 
-import { app, BrowserWindow, ipcMain, clipboard, shell, dialog } from 'electron'
+import { app, BrowserWindow, ipcMain, clipboard, shell, dialog, Notification } from 'electron'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -15,6 +15,14 @@ import { sheetsApp } from '@commonplace/sheets'
 import { exportXlsx, importXlsx, exportCsv, importCsv } from '@commonplace/sheets/convert'
 import { slidesApp } from '@commonplace/slides'
 import { exportPptx } from '@commonplace/slides/convert'
+import { formsApp } from '@commonplace/forms'
+import { tasksApp } from '@commonplace/tasks'
+import { exportCsv as tasksCsv, exportMarkdown as tasksMarkdown } from '@commonplace/tasks/convert'
+import { calendarApp } from '@commonplace/calendar'
+import { exportIcs, importIcs } from '@commonplace/calendar/ics'
+import { whiteboardApp } from '@commonplace/whiteboard'
+import { formServices } from './forms.js'
+import { Reminders } from './reminders.js'
 import { Updates } from './updates.js'
 import { readPage, PAGE_SIZES, DEFAULT_PAGE } from '@commonplace/docs/page'
 import { exportDocx, importDocx } from '@commonplace/docs/convert'
@@ -23,6 +31,7 @@ const MAX_IMAGE_BYTES = 8 * 1024 * 1024
 const IMAGE_TYPES = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp' }
 
 const here = path.dirname(fileURLToPath(import.meta.url))
+const APPS = [...docsApps, sheetsApp, slidesApp, tasksApp, calendarApp, whiteboardApp, formsApp]
 
 // COMMONPLACE_PROFILE=bob lets you run a second, independent copy on the same
 // computer (separate identity and files), which is handy for trying sync.
@@ -148,7 +157,7 @@ function registerIpc () {
   ipcMain.handle('file:import', async (_e, folderId) => {
     const { canceled, filePaths } = await dialog.showOpenDialog(win, {
       properties: ['openFile'],
-      filters: [{ name: 'Documents and spreadsheets', extensions: ['docx', 'md', 'markdown', 'txt', 'xlsx', 'csv', 'tsv'] }]
+      filters: [{ name: 'Documents, spreadsheets and calendars', extensions: ['docx', 'md', 'markdown', 'txt', 'xlsx', 'csv', 'tsv', 'ics'] }]
     })
     if (canceled || !filePaths[0]) return null
     const file = filePaths[0]
@@ -161,6 +170,11 @@ function registerIpc () {
       const ydoc = drive.getDoc(docId).ydoc
       const { warnings } = ext === '.xlsx' ? await importXlsx(ydoc, bytes) : importCsv(ydoc, bytes.toString('utf8'), { name: title.slice(0, 80) })
       return { docId, content: null, warnings }
+    }
+    if (ext === '.ics') {
+      const docId = await drive.create('calendar', title, { folderId })
+      const { added, simplified } = importIcs(drive.getDoc(docId).ydoc, bytes.toString('utf8'))
+      return { docId, content: null, warnings: simplified, note: `${added} event${added === 1 ? '' : 's'}` }
     }
     if (ext === '.docx') {
       const { html, page, warnings } = await importDocx(bytes)
@@ -176,13 +190,19 @@ function registerIpc () {
     const file = drive.describe(docId)
     const doc = drive.getDoc(docId)
     if (!file || !doc) throw new Error('This file is no longer in your Drive.')
-    if (format === 'md') return saveAs(file.title, 'md', String(payload.markdown || ''), 'Markdown')
+    if (format === 'md' && file.kind !== 'tasks') return saveAs(file.title, 'md', String(payload.markdown || ''), 'Markdown')
     if (format === 'docx') {
       const setup = file.kind === 'paged' ? readPage(doc.ydoc) : { ...DEFAULT_PAGE, pageNumbers: false }
       return saveAs(file.title, 'docx', await exportDocx(payload.json, setup, { title: file.title }), 'Word document')
     }
     if (format === 'xlsx') return saveAs(file.title, 'xlsx', await exportXlsx(doc.ydoc), 'Excel workbook')
+    if (format === 'csv' && file.kind === 'form') return saveAs(`${file.title} answers`, 'csv', '\uFEFF' + forms.csv(docId), 'CSV')
+    if (format === 'csv' && file.kind === 'tasks') return saveAs(file.title, 'csv', '\uFEFF' + tasksCsv(doc.ydoc, payload.names || {}), 'CSV')
+    if (format === 'md' && file.kind === 'tasks') return saveAs(file.title, 'md', tasksMarkdown(doc.ydoc, file.title, payload.names || {}), 'Markdown')
     if (format === 'csv') return saveAs(file.title, 'csv', '\uFEFF' + exportCsv(doc.ydoc, payload.sheetId), 'CSV')
+    if (format === 'ics') return saveAs(file.title, 'ics', exportIcs(doc.ydoc, file.title), 'Calendar')
+    if (format === 'svg') return saveAs(file.title, 'svg', String(payload.svg || ''), 'SVG image')
+    if (format === 'png') return saveAs(file.title, 'png', Buffer.from(String(payload.png || ''), 'base64'), 'PNG image')
     if (format === 'pptx') return saveAs(file.title, 'pptx', await exportPptx(doc.ydoc, { title: file.title }), 'PowerPoint presentation')
     if (format === 'pdf' && file.kind === 'slides') {
       // The window has laid out one page per slide (13.33 x 7.5 in).
@@ -241,6 +261,7 @@ function registerIpc () {
     drive.engine.registerLocalClient(docId, clientId)
     drive.touchPerson(docId)
     drive.markOpened(docId)
+    try { forms.setup(docId) } catch {} // a form's owner makes its response key the first time
     const states = [...doc.awareness.getStates().keys()]
     return {
       state: Y.encodeStateAsUpdate(doc.ydoc),
@@ -305,6 +326,10 @@ function registerIpc () {
     win?.webContents.reload()
     return result
   })
+  // commonForms: the keys live here, so answers are sealed and opened here.
+  ipcMain.handle('forms:submit', (_e, docId, answers) => forms.submit(docId, answers))
+  ipcMain.handle('forms:responses', (_e, docId) => forms.responses(docId))
+
   // Recovery: one backup file, kept up to date, opened by a recovery key.
   ipcMain.handle('backup:status', () => backups.status())
   ipcMain.handle('backup:create', async () => {
@@ -341,6 +366,8 @@ function registerIpc () {
 
 let move = null
 let backups = null
+let forms = null
+let reminders = null
 
 // COMMONPLACE_BOOTSTRAP=host:port[,host:port] joins a private DHT instead of
 // the public one (for testing, or a group running its own bootstrap node).
@@ -356,7 +383,7 @@ function swarmOptions () {
 async function startDrive () {
   // COMMONPLACE_CHECKPOINT_SECONDS shortens the pause before a version is saved (for testing).
   const pause = Number(process.env.COMMONPLACE_CHECKPOINT_SECONDS) * 1000
-  drive = new Drive({ dataDir: app.getPath('userData'), apps: [...docsApps, sheetsApp, slidesApp], swarm: swarmOptions(), history: pause ? { idleMs: pause } : {} })
+  drive = new Drive({ dataDir: app.getPath('userData'), apps: APPS, swarm: swarmOptions(), history: pause ? { idleMs: pause } : {} })
   drive.on('error', (err) => console.error('[commonplace]', err))
   // Another of my computers unlinked this one: sign out and delete it all here.
   drive.on('unlinked', () => {
@@ -373,6 +400,14 @@ async function startDrive () {
   await drive.start()
   backups?.destroy()
   backups = new Backups({ drive, dataDir: app.getPath('userData') })
+  forms = formServices(drive)
+  forms.watch()
+  reminders?.destroy()
+  reminders = new Reminders({
+    drive,
+    dataDir: app.getPath('userData'),
+    notify: ({ title, body }) => { if (Notification.isSupported()) new Notification({ title, body, icon: ICON }).show() }
+  })
   backups.on('changed', (status) => send('backup:changed', status))
 }
 

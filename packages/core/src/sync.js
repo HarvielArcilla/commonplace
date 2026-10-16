@@ -18,7 +18,8 @@ import * as awarenessProtocol from 'y-protocols/awareness'
 import { deriveDocKeys, epochKeys, seal, open } from './crypto.js'
 import { MSG, encodeFrame, FrameReader, encodeHello, decodeHello, helloProof } from './protocol.js'
 import { verifySignature } from './identity.js'
-import { Membership, canEdit } from './members.js'
+import { Membership, canEdit, canRespond } from './members.js'
+import { isResponseUpdate } from './respond.js'
 import { stateVectorMap, hasOpsBeyond, sameState, docFrom } from './conflicts.js'
 
 const EMPTY_UPDATE_BYTES = 2
@@ -359,6 +360,31 @@ export class SyncEngine extends EventEmitter {
     this._membersChanged(doc)
   }
 
+  // ---- answering a form ---------------------------------------------------------
+
+  // As a respondent: adds one answer (an update from responseUpdate) and
+  // sends it to everyone connected who can edit. It also waits in an
+  // outbox and goes again to each editor I connect to, since there may be
+  // nobody to take it right now.
+  respond (docId, update) {
+    const doc = this.docs.get(docId)
+    if (!doc) throw new Error('Unknown document')
+    if (!canRespond(doc.myAccess?.role)) throw new Error('Only respondents answer this way.')
+    if (!isResponseUpdate(update, this.identity.userId)) throw new Error('That isn’t an answer.')
+    Y.applyUpdate(doc.ydoc, update, 'response')
+    const box = this.store.readJSON(docId, 'outbox') || []
+    box.push(Buffer.from(update).toString('base64'))
+    this.store.writeJSON(docId, 'outbox', box)
+    for (const [conn, link] of doc.links) {
+      if (link.contentEpoch === doc.contentEpoch && canEdit(link.role)) conn.send(MSG.UPDATE, docId, doc.contentEpoch, seal(doc.keyFor(doc.contentEpoch), update))
+    }
+    this.emit('response', docId, update)
+  }
+
+  outbox (docId) {
+    return (this.store.readJSON(docId, 'outbox') || []).map((b64) => Buffer.from(b64, 'base64'))
+  }
+
   // ---- status -------------------------------------------------------------------
 
   status (docId) {
@@ -508,7 +534,14 @@ export class SyncEngine extends EventEmitter {
     if (!link || link.contentEpoch !== epoch) return
     switch (type) {
       case MSG.UPDATE: {
-        if (!canEdit(link.role)) return // viewers can't change the document
+        if (!canEdit(link.role)) {
+          // Viewers can't change the document; respondents can only add
+          // their own sealed answers to a form.
+          if (canRespond(link.role) && isResponseUpdate(plain, link.user.userId)) {
+            try { Y.applyUpdate(doc.ydoc, plain, conn) } catch {}
+          }
+          return
+        }
         const check = link.mergeCheck
         link.mergeCheck = null
         try { Y.applyUpdate(doc.ydoc, plain, conn) } catch { return }
@@ -639,6 +672,11 @@ export class SyncEngine extends EventEmitter {
     const diff = Y.encodeStateAsUpdate(doc.ydoc, link.sv)
     if (diff.length > EMPTY_UPDATE_BYTES) conn.send(MSG.UPDATE, doc.docId, contentEpoch, seal(doc.keyFor(contentEpoch), diff))
     if (canEdit(link.role)) this._markAcked(doc, link.sv, link.user, link)
+    // As a respondent, hand my answers to everyone who can edit: they keep
+    // them and pass them on. (Already there: nothing changes.)
+    if (canEdit(link.role) && canRespond(doc.myAccess?.role)) {
+      for (const update of this.outbox(doc.docId)) conn.send(MSG.UPDATE, doc.docId, contentEpoch, seal(doc.keyFor(contentEpoch), update))
+    }
     const states = [...doc.awareness.getStates().keys()]
     if (states.length) {
       const msg = awarenessProtocol.encodeAwarenessUpdate(doc.awareness, states)

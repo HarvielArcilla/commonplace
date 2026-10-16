@@ -5,6 +5,10 @@
 //   docs-view.js    markdown and paged documents
 //   sheet-view.js   spreadsheets
 //   slides-view.js  presentations
+//   tasks-view.js   task boards
+//   calendar-view.js calendars
+//   whiteboard-view.js whiteboards
+//   form-view.js    forms
 //
 // A view is { focus, setEditable(bool), notes(), showConflicts(list),
 // preview(update) -> { title, close }, exportPayload(format), exportFormats,
@@ -23,8 +27,12 @@ import { mountDocs, pageSetupDialog } from './docs-view.js'
 import { setToolbar, fitToolbar } from './toolbar.js'
 import { mountSheet } from './sheet-view.js'
 import { mountSlides } from './slides-view.js'
+import { mountTasks } from './tasks-view.js'
+import { mountCalendar } from './calendar-view.js'
+import { mountWhiteboard } from './whiteboard-view.js'
+import { mountForm } from './form-view.js'
 
-const VIEWS = { markdown: mountDocs, paged: mountDocs, sheet: mountSheet, slides: mountSlides }
+const VIEWS = { markdown: mountDocs, paged: mountDocs, sheet: mountSheet, slides: mountSlides, tasks: mountTasks, calendar: mountCalendar, whiteboard: mountWhiteboard, form: mountForm }
 
 let onClosed = () => {}
 export function initDocView ({ onBack }) {

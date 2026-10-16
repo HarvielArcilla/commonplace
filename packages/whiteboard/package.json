@@ -1,0 +1,14 @@
+{
+  "name": "@commonplace/whiteboard",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.js",
+    "./model": "./src/model.js",
+    "./render": "./src/render.js"
+  },
+  "dependencies": {
+    "yjs": "^13.6.33"
+  },
+  "license": "MIT"
+}
