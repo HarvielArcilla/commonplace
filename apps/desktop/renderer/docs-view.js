@@ -5,7 +5,7 @@
 import * as Y from 'yjs'
 import * as awarenessProtocol from 'y-protocols/awareness'
 import katex from 'katex'
-import { createDocsEditor, activeFormats, setBlock, pageGeometry, readPage, normalizePage, PAGE_SIZES, isSuggesting, withoutSuggestions, suggestionList } from '@commonplace/docs/editor'
+import { createDocsEditor, activeFormats, setBlock, pageGeometry, readPage, normalizePage, PAGE_SIZES, isSuggesting, withoutSuggestions, suggestionList, wordCount, footnotesOf, fillPageLine } from '@commonplace/docs/editor'
 import { $, el, svg, toast, openMenu, dialog, selectField, cleanError } from './ui.js'
 import { icons } from './icons.js'
 import { state, cp } from './state.js'
@@ -57,6 +57,7 @@ export function mountDocs (o, { initialContent } = {}) {
     user: state.me,
     onUpdate: () => { if (state.open === o) { syncToolbar(); o.refreshMargin() } },
     onEditMath: (m) => { if (state.open === o) mathDialog(m) },
+    onEditFootnote: (n) => { if (state.open === o && o.editor?.isEditable) footnoteDialog(n) },
     onOpenLink: (href) => cp.openLink(href),
     getPageSetup: () => readPage(ydoc),
     getZoom: () => o.zoom || 1,
@@ -65,6 +66,13 @@ export function mountDocs (o, { initialContent } = {}) {
     onNewSuggestion: (ids) => { if (state.open === o) recordMySuggestions(o, ids) }
   })
   attachReview(o)
+  const onFindKey = (e) => {
+    if (state.open !== o || !(e.metaKey || e.ctrlKey) || e.altKey) return
+    const k = e.key.toLowerCase()
+    if (k === 'f' && !e.shiftKey) { e.preventDefault(); openFind(o) } else if (k === 'h' || (k === 'f' && e.shiftKey)) { e.preventDefault(); openFind(o, { replace: true }) } else if (k === 'g') { e.preventDefault(); e.shiftKey ? o.editor.commands.findPrevious() : o.editor.commands.findNext(); syncFind(o) }
+  }
+  document.addEventListener('keydown', onFindKey, true)
+  o.cleanup.push(() => { document.removeEventListener('keydown', onFindKey, true); o.find?.remove() })
 
   if (kind === 'paged') {
     applyPageGeometry()
@@ -88,7 +96,9 @@ export function mountDocs (o, { initialContent } = {}) {
     setEditable (writable) { if (o.editor.isEditable !== writable) o.editor.setEditable(writable) },
     notes () {
       if (isSuggesting(o.editor)) return [{ text: 'Suggesting: your edits show as suggestions for others to accept.', cls: 'live' }]
-      return kind === 'paged' ? [{ text: o.pages === 1 ? '1 page' : `${o.pages} pages` }] : []
+      const words = wordCount(o.editor.state).words
+      const count = { text: `${words.toLocaleString()} word${words === 1 ? '' : 's'}`, action: { label: 'Details', run: () => wordCountDialog(o) } }
+      return kind === 'paged' ? [{ text: o.pages === 1 ? '1 page' : `${o.pages} pages` }, count] : [count]
     },
     // Marks the paragraphs that have an open conflict.
     showConflicts (conflicts) {
@@ -101,7 +111,7 @@ export function mountDocs (o, { initialContent } = {}) {
     async exportPayload (format) {
       const json = withoutSuggestions(o.editor)
       const note = suggestionList(o.editor).length ? 'without suggestions that haven\u2019t been accepted' : null
-      if (format === 'md') return { payload: { markdown: o.editor.storage.markdown.manager.serialize(json) }, note }
+      if (format === 'md') return { payload: { markdown: withContents(withNotes(o.editor.storage.markdown.manager.serialize(json), json), json) }, note }
       if (format === 'docx') return { payload: { json }, note }
       return { payload: {}, note, print: () => { document.body.classList.add('printing'); return () => document.body.classList.remove('printing') } }
     },
@@ -203,14 +213,18 @@ function syncZoomControl (pref, zoom) {
   if (document.activeElement !== sel) sel.value = pref
 }
 
+// The pages behind the text, with their header and footer lines.
 function drawSheets (paper, pages, g) {
   const sheets = paper.querySelector('.sheets')
-  if (sheets.children.length !== pages || sheets.dataset.geo !== `${g.width}x${g.height}:${g.pageNumbers}`) {
-    sheets.dataset.geo = `${g.width}x${g.height}:${g.pageNumbers}`
+  const title = state.open?.ydoc.getMap('meta').get('title') || ''
+  const geo = JSON.stringify([g.width, g.height, g.header, g.footer, title, pages])
+  if (sheets.dataset.geo !== geo) {
+    sheets.dataset.geo = geo
+    const line = (text, i, where) => text ? el('span', { class: 'page-number', style: `${where}:${Math.max(8, g.margins[where] / 2 - 8)}px` }, fillPageLine(text, { page: i + 1, pages, title })) : null
     sheets.replaceChildren(...Array.from({ length: pages }, (_, i) => el('div', {
       class: 'page-sheet',
       style: `top:${i * (g.height + g.gap)}px`
-    }, g.pageNumbers ? el('span', { class: 'page-number', style: `bottom:${Math.max(8, g.margins.bottom / 2 - 8)}px` }, String(i + 1)) : null)))
+    }, line(g.header, i, 'top'), line(g.footer, i, 'bottom'))))
   }
   paper.style.minHeight = `${pages * (g.height + g.gap) - g.gap}px`
 }
@@ -262,10 +276,13 @@ function renderToolbar () {
     tool('table', 'Table', icons.table, (e, b) => tableMenu(b)),
     tool('image', 'Image', icons.image, () => insertImage()),
     tool('rule', 'Divider', icons.rule, (e) => e.chain().focus().setHorizontalRule().run()),
+    tool('footnote', 'Footnote', icons.footnote, () => footnoteDialog({ text: '', pos: null }), { key: 'Mod-Alt-F' }),
+    tool('toc', 'Table of contents', icons.toc, (e) => e.chain().focus().insertTableOfContents().run()),
     paged ? tool('pageBreak', 'Page break', icons.pageBreak, (e) => e.chain().focus().setPageBreak().run(), { key: 'Mod-Enter' }) : null
   ].filter(Boolean))
   groups.push([
-    tool('comment', 'Comment on the selection', icons.comment, () => newComment(), { key: 'Mod-Alt-M' })
+    tool('comment', 'Comment on the selection', icons.comment, () => newComment(), { key: 'Mod-Alt-M' }),
+    tool('find', 'Find and replace', icons.search, () => openFind(o, { replace: true }), { key: 'Mod-F' })
   ])
   groups.push([
     tool('undo', 'Undo your last change', icons.undo, (e) => e.chain().focus().undo().run(), { key: 'Mod-Z' }),
@@ -429,6 +446,112 @@ function normalizeUrl (raw) {
   return null
 }
 
+// ---- footnotes, contents, word count, find --------------------------------------------
+
+async function footnoteDialog ({ text, pos }) {
+  const e = state.open?.editor
+  if (!e) return
+  const editing = pos != null
+  const input = el('textarea', { name: 'text', rows: '3', placeholder: 'The note’s text' }, text)
+  const res = await dialog({
+    title: editing ? 'Edit footnote' : 'Add a footnote',
+    body: editing ? null : 'The note is numbered where your cursor is, and listed under Notes at the end.',
+    fields: [input],
+    confirm: editing ? 'Update' : 'Add',
+    extraActions: editing ? [{ label: 'Delete', value: 'delete', danger: true }] : [],
+    validate: (d) => (d.text.trim() ? null : 'Write the note first.')
+  })
+  if (res?.action === 'delete') {
+    e.chain().focus().command(({ tr }) => { const node = tr.doc.nodeAt(pos); if (node) tr.delete(pos, pos + node.nodeSize); return true }).run()
+  } else if (res?.action === 'confirm') {
+    const value = res.data.text.trim().slice(0, 2000)
+    if (editing) e.chain().focus().setFootnote(pos, value).run()
+    else e.chain().focus().insertFootnote(value).run()
+  }
+}
+
+// Markdown footnotes: [^1] where each note was, and the notes at the end.
+function withNotes (markdown, json) {
+  const notes = footnotesOf(json)
+  if (!notes.length) return markdown
+  let n = 0
+  const body = markdown.replace(/\[\^cp-note\]/g, () => `[^${++n}]`)
+  return `${body.trimEnd()}\n\n${notes.map((x) => `[^${x.n}]: ${x.text.replace(/\n+/g, ' ')}`).join('\n')}\n`
+}
+
+// Markdown has no table of contents: write the headings as a list.
+function withContents (markdown, json) {
+  const text = (n) => (n.text || '') + (n.content || []).map(text).join('')
+  const list = (json.content || []).filter((n) => n.type === 'heading').map((n) => `${'  '.repeat((n.attrs?.level || 1) - 1)}- ${text(n).trim()}`).join('\n')
+  return markdown.replace(/^\[\[toc\]\]$/gm, list ? `**Contents**\n\n${list}` : '')
+}
+
+function wordCountDialog (o) {
+  const all = wordCount(o.editor.state)
+  const sel = o.editor.state.selection.empty ? null : wordCount(o.editor.state, { selection: true })
+  const row = (label, a, b) => [el('dt', {}, label), el('dd', {}, sel ? `${b.toLocaleString()} of ${a.toLocaleString()}` : a.toLocaleString())]
+  dialog({
+    title: 'Word count',
+    body: sel ? 'In the selection, of the whole document.' : null,
+    fields: [el('dl', { class: 'details' },
+      ...row('Words', all.words, sel?.words),
+      ...row('Characters (no spaces)', all.characters, sel?.characters),
+      ...row('Paragraphs', all.paragraphs, sel?.paragraphs),
+      ...(o.kind === 'paged' ? [el('dt', {}, 'Pages'), el('dd', {}, String(o.pages || 1))] : []))],
+    confirm: 'Done',
+    cancel: null
+  })
+}
+
+// The find bar: matches highlight as you type; Enter goes to the next.
+function openFind (o, { replace = false } = {}) {
+  if (!o.find) {
+    const query = el('input', { class: 'find-input', type: 'search', placeholder: 'Find', 'aria-label': 'Find', spellcheck: 'false' })
+    const repl = el('input', { class: 'find-input', placeholder: 'Replace with', 'aria-label': 'Replace with', spellcheck: 'false' })
+    const caseBox = el('input', { type: 'checkbox', 'aria-label': 'Match case' })
+    const count = el('span', { class: 'find-count', 'aria-live': 'polite' })
+    const search = () => { o.editor.commands.setSearch(query.value, { caseSensitive: caseBox.checked }); syncFind(o) }
+    const next = () => { o.editor.commands.findNext(); syncFind(o) }
+    const close = () => { o.editor.commands.setSearch(''); o.find.remove(); o.find = null; o.editor.commands.focus() }
+    query.addEventListener('input', search)
+    caseBox.addEventListener('change', search)
+    query.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); e.shiftKey ? o.editor.commands.findPrevious() : next(); syncFind(o) } else if (e.key === 'Escape') close() })
+    repl.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); doReplace() } else if (e.key === 'Escape') close() })
+    const doReplace = () => { if (o.editor.isEditable) { o.editor.commands.replaceMatch(repl.value); syncFind(o) } }
+    const doAll = () => {
+      if (!o.editor.isEditable) return
+      if (o.editor.commands.replaceAll(repl.value)) toast(`Replaced ${o.editor.storage.search.lastReplaced}`)
+      syncFind(o)
+    }
+    const replaceRow = el('div', { class: 'find-row find-replace' }, repl,
+      el('button', { type: 'button', class: 'btn btn-quiet', onclick: doReplace }, 'Replace'),
+      el('button', { type: 'button', class: 'btn btn-quiet', onclick: doAll }, 'Replace all'))
+    o.find = el('div', { class: 'find-bar', role: 'search' },
+      el('div', { class: 'find-row' }, query, count,
+        el('button', { type: 'button', class: 'btn btn-quiet btn-icon', 'aria-label': 'Previous match', title: 'Previous (Shift+Enter)', onclick: () => { o.editor.commands.findPrevious(); syncFind(o) } }, '↑'),
+        el('button', { type: 'button', class: 'btn btn-quiet btn-icon', 'aria-label': 'Next match', title: 'Next (Enter)', onclick: next }, '↓'),
+        el('label', { class: 'find-case', title: 'Match case' }, caseBox, 'Aa'),
+        el('button', { type: 'button', class: 'btn btn-quiet btn-icon', 'aria-label': 'Close find', onclick: close }, '×')),
+      replaceRow)
+    o.find.query = query
+    o.find.replaceRow = replaceRow
+    o.find.count = count
+    $('#desk').parentElement.append(o.find)
+  }
+  o.find.replaceRow.hidden = !(replace && o.editor.isEditable)
+  const { from, to, empty } = o.editor.state.selection
+  if (!empty && !o.find.query.value) { o.find.query.value = o.editor.state.doc.textBetween(from, to, ' ').slice(0, 200); o.find.query.dispatchEvent(new Event('input')) }
+  o.find.query.focus()
+  o.find.query.select()
+}
+
+function syncFind (o) {
+  if (!o.find) return
+  const s = o.editor.storage.search
+  o.find.count.textContent = !s.query ? '' : s.matches.length ? `${s.current >= 0 ? s.current + 1 : 0} of ${s.matches.length}` : 'No matches'
+  requestAnimationFrame(() => document.querySelector('.cp-found.current')?.scrollIntoView({ block: 'center' }))
+}
+
 async function mathDialog ({ display, latex, pos }) {
   const e = state.open.editor
   const editing = pos != null
@@ -487,7 +610,9 @@ export async function pageSetupDialog () {
       el('fieldset', { class: 'radio-row' }, el('legend', {}, 'Orientation'),
         ...['portrait', 'landscape'].map((v) => el('label', { class: 'check' }, el('input', { type: 'radio', name: 'orientation', value: v, checked: s.orientation === v || null }), v[0].toUpperCase() + v.slice(1)))),
       el('fieldset', { class: 'margins' }, el('legend', {}, 'Margins'), num('top', s.margins.top), num('bottom', s.margins.bottom), num('left', s.margins.left), num('right', s.margins.right)),
-      el('label', { class: 'check' }, el('input', { type: 'checkbox', name: 'pageNumbers', checked: s.pageNumbers || null }), 'Page numbers at the bottom')
+      el('label', { class: 'field' }, 'Header', el('input', { name: 'header', value: s.header, maxlength: '200', placeholder: 'Nothing at the top' })),
+      el('label', { class: 'field' }, 'Footer', el('input', { name: 'footer', value: s.footer, maxlength: '200', placeholder: 'Nothing at the bottom' })),
+      el('p', { class: 'fineprint-plain' }, 'Write {page} for the page number, {pages} for how many there are, {title} and {date}. For example: Page {page} of {pages}.')
     ],
     confirm: 'Apply',
     validate: (d) => (['top', 'right', 'bottom', 'left'].every((k) => Number(d[k]) >= 0.25 && Number(d[k]) <= 3) ? null : 'Margins must be between 0.25 and 3 inches.')
@@ -498,7 +623,8 @@ export async function pageSetupDialog () {
     size: d.size,
     orientation: d.orientation,
     margins: { top: Number(d.top), right: Number(d.right), bottom: Number(d.bottom), left: Number(d.left) },
-    pageNumbers: d.pageNumbers
+    header: d.header.trim(),
+    footer: d.footer.trim()
   })
   o.ydoc.getMap('page').set('setup', next)
 }

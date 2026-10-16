@@ -85,6 +85,8 @@ contextBridge.exposeInMainWorld('commonplace', {
   onActivityOpen: listen('activity:open'),
   listActivity: () => ipcRenderer.invoke('activity:list'),
   listTemplates: () => ipcRenderer.invoke('templates:list'),
+  getSettings: () => ipcRenderer.invoke('settings:get'),
+  setSettings: (patch) => ipcRenderer.invoke('settings:set', patch),
   createFromTemplate: (id, folderId) => ipcRenderer.invoke('templates:create', id, folderId),
   saveAsTemplate: (docId, name, description) => ipcRenderer.invoke('templates:save', docId, name, description),
   removeTemplate: (id) => ipcRenderer.invoke('templates:remove', id),

@@ -49,6 +49,8 @@ All payloads are sealed with the file key. One connection carries many files.
 
 Both have links (Ctrl/Cmd+click opens them in the browser), LaTeX math rendered with KaTeX, tables and images. Images are stored inside the document as data URLs, up to 8 MB each.
 
+**Writing tools (`packages/docs/src/extras.js`).** Find and replace highlights matches with decorations (never part of the document) and replaces in one transaction, so in suggesting mode replacements become suggestions like any edit. A footnote is an inline node holding its own text; a plugin numbers them by position and lists them under "Notes" at the end, and they export as Word footnotes and Markdown `[^n]` notes. The table of contents is a block whose view reads the headings on every change, so it never goes stale; it exports as a plain list. Headers and footers are a line of text in the page setup with `{page}`, `{pages}`, `{title}` and `{date}`, drawn on the sheets, filled in by Chromium's PDF printer and written as Word fields. Spelling uses Chromium's spellchecker (the operating system's on macOS); on Windows and Linux it downloads the dictionary for your language once.
+
 **Pagination (`packages/docs/src/pagination.js`).** The paged editor stays one continuous ProseMirror view. After each change it measures the natural layout (spacers hidden for the measurement, all within one frame) and decides where pages end. Paragraphs and headings split at the first line that doesn't fit, with widow and orphan control; images, tables, math, code and list items move whole. An invisible spacer widget (a view decoration, never part of the document or the CRDT) is inserted before the line or block, exactly tall enough to reach the next page's text area. Because measurement never sees the spacers, the result can't oscillate. Sheets are drawn behind the text from the page count; PDF export uses the same breaks.
 
 **Units and zoom.** Pages are 96 px per inch and text sizes are in points, so a page has the proportions of paper. Defaults (Georgia 12 pt, headings 20/16/13 pt, code Courier New 10 pt) match the .docx export. Zoom scales everything together; "Fit" uses 100% unless the window is narrower than the page.
@@ -132,7 +134,7 @@ Both have links (Ctrl/Cmd+click opens them in the browser), LaTeX math rendered 
 - In justified text, the line just before a page break isn't stretched to full width.
 - Math is exported to .docx as its LaTeX source in Cambria Math, not as Word equations.
 - .docx import keeps structure but not exact fonts, colors or alignment.
-- Headers, footers other than page numbers, columns and footnotes aren't supported yet.
+- Columns aren't supported yet. Footnotes are listed at the end of the document rather than at the bottom of each page (in .docx they're real footnotes). Headers and footers are one centered line, the same on every page.
 
 ## Roadmap
 

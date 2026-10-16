@@ -112,6 +112,8 @@ function openProfileDialog () {
   $('#profile-helpers').hidden = !state.me.hasChosenName
   $('#profile-recovery').hidden = !state.me.hasChosenName
   $('#profile-storage').hidden = !state.me.hasChosenName
+  $('#profile-writing').hidden = !state.me.hasChosenName
+  cp.getSettings().then((x) => { $('#setting-spellcheck').checked = x.spellcheck }).catch(() => {})
   $('#first-run-restore').hidden = state.me.hasChosenName
   if (state.me.hasChosenName) { renderComputers(); renderMyHelpers(); renderRecovery(); renderStorage() }
   d.showModal()
@@ -143,6 +145,8 @@ function storageAction (f) {
   if (!f.contentBytes || f.mine) return null
   return el('button', { type: 'button', class: 'btn btn-quiet', onclick: async () => { await cp.removeDownloadedCopy(f.docId); toast(`Freed ${formatBytes(f.contentBytes)}`); renderStorage() } }, 'Remove copy')
 }
+
+$('#setting-spellcheck').addEventListener('change', (e) => cp.setSettings({ spellcheck: e.target.checked }))
 
 $('#storage-auto').addEventListener('change', async (e) => {
   await cp.setStorageSettings({ autoBytes: Number(e.target.value) })

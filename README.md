@@ -20,7 +20,7 @@ Work on the same file at the same time, see each other's cursors, leave comments
 
 ![commonDrive in icon view: a document, a presentation and a spreadsheet](docs/images/drive.png)
 
-**commonDocs** has markdown documents for writing that flows, and paged documents with paper size, margins, fonts and colors. Both have links, LaTeX math, tables, images, comments, and a suggesting mode whose edits others accept or reject.
+**commonDocs** has markdown documents for writing that flows, and paged documents with paper size, margins, fonts and colors. Both have links, LaTeX math, tables, images, footnotes, a table of contents that keeps itself up to date, find and replace, a word count, spell checking, comments, and a suggesting mode whose edits others accept or reject. Paged documents have headers and footers ("Page {page} of {pages}").
 
 **commonSheets** has formulas (SUM, AVERAGE, IF, VLOOKUP, SUMIF and more), several sheets per file, number formats and styles.
 

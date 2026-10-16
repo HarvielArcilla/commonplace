@@ -22,10 +22,12 @@ import { Pagination, PageBreak } from './pagination.js'
 import { blockKey } from './index.js'
 import { Indent } from './indent.js'
 import { CommentMark, Suggestions, ReviewDocument } from './review.js'
+import { Search, Footnote, TableOfContents } from './extras.js'
 
 export { commentAnchors, suggestionList, isSuggesting, withoutSuggestions } from './review.js'
+export { wordCount, footnotesOf, headingsOf, countText } from './extras.js'
 
-export { pageGeometry, readPage, normalizePage, PAGE_SIZES, DEFAULT_PAGE } from './page.js'
+export { pageGeometry, readPage, normalizePage, PAGE_SIZES, DEFAULT_PAGE, fillPageLine } from './page.js'
 
 // What paged documents use when no font or size is set on the text. These
 // match the .docx export, so a file looks the same in Word.
@@ -118,7 +120,7 @@ const ConflictHighlight = Extension.create({
 })
 
 // kind: 'markdown' | 'paged'
-export function createDocsEditor ({ kind, element, ydoc, awareness, user, editable = true, onUpdate = () => {}, onEditMath, onOpenLink, getPageSetup, getZoom, getMaxImageWidth, onLayout, onNewSuggestion }) {
+export function createDocsEditor ({ kind, element, ydoc, awareness, user, editable = true, onUpdate = () => {}, onEditMath, onEditFootnote, onOpenLink, getPageSetup, getZoom, getMaxImageWidth, onLayout, onNewSuggestion }) {
   const paged = kind === 'paged'
   const extensions = [
     // The CRDT keeps its own undo history (per user), so disable the default one.
@@ -159,7 +161,10 @@ export function createDocsEditor ({ kind, element, ydoc, awareness, user, editab
     CommentMark,
     Suggestions.configure({ onNewSuggestion: onNewSuggestion || (() => {}) }),
     Markdown,
-    PageBreak
+    PageBreak,
+    Search,
+    Footnote.configure({ onEdit: onEditFootnote || null }),
+    TableOfContents
   ]
   if (paged) {
     extensions.push(

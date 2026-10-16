@@ -8,10 +8,10 @@
 
 import {
   Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType, ExternalHyperlink,
-  ImageRun, Table, TableRow, TableCell, WidthType, PageBreak, Footer, PageNumber,
-  LevelFormat, BorderStyle, ShadingType, PageOrientation
+  ImageRun, Table, TableRow, TableCell, WidthType, PageBreak, Header, Footer, PageNumber,
+  LevelFormat, BorderStyle, ShadingType, PageOrientation, FootnoteReferenceRun
 } from 'docx'
-import { normalizePage, pageInches } from '../page.js'
+import { normalizePage, pageInches, pageLine } from '../page.js'
 import { dataUrlToBuffer, imageType, imageSize } from './image-size.js'
 
 const TWIP = 1440 // per inch
@@ -25,13 +25,14 @@ const ALIGN = { left: AlignmentType.LEFT, center: AlignmentType.CENTER, right: A
 export async function exportDocx (json, pageSetup, { title = '' } = {}) {
   const setup = normalizePage(pageSetup)
   const { width, height } = pageInches(setup)
-  const ctx = { listInstance: 0, contentWidthPx: Math.round((width - setup.margins.left - setup.margins.right) * 96) }
+  const ctx = { listInstance: 0, contentWidthPx: Math.round((width - setup.margins.left - setup.margins.right) * 96), footnotes: {}, headings: headingsIn(json) }
   const children = blocks(json?.content || [], ctx)
   if (!children.length) children.push(new Paragraph(''))
 
   const doc = new Document({
     title,
     creator: 'commonplace',
+    footnotes: ctx.footnotes,
     styles: {
       default: {
         document: { run: { font: BODY_FONT, size: 24 }, paragraph: { spacing: { after: 160, line: 300 } } }
@@ -65,13 +66,33 @@ export async function exportDocx (json, pageSetup, { title = '' } = {}) {
           }
         }
       },
-      footers: setup.pageNumbers
-        ? { default: new Footer({ children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ children: [PageNumber.CURRENT], size: 18, color: '8A8F9B' })] })] }) }
-        : undefined,
+      headers: setup.header ? { default: new Header({ children: [pageLineParagraph(setup.header, title)] }) } : undefined,
+      footers: setup.footer ? { default: new Footer({ children: [pageLineParagraph(setup.footer, title)] }) } : undefined,
       children
     }]
   })
   return Packer.toBuffer(doc)
+}
+
+// A header or footer line, with Word fields for the page numbers.
+function pageLineParagraph (text, title) {
+  const look = { size: 18, color: '8A8F9B' }
+  return new Paragraph({
+    alignment: AlignmentType.CENTER,
+    children: pageLine(text).map((p) => {
+      if (typeof p === 'string') return new TextRun({ text: p, ...look })
+      if (p.field === 'page') return new TextRun({ children: [PageNumber.CURRENT], ...look })
+      if (p.field === 'pages') return new TextRun({ children: [PageNumber.TOTAL_PAGES], ...look })
+      return new TextRun({ text: p.field === 'title' ? title : new Date().toLocaleDateString(), ...look })
+    })
+  })
+}
+
+function headingsIn (json) {
+  const out = []
+  const text = (n) => (n.text || '') + (n.content || []).map(text).join('')
+  for (const n of json?.content || []) if (n.type === 'heading') out.push({ level: n.attrs?.level || 1, text: text(n).trim() })
+  return out
 }
 
 // ---- blocks ------------------------------------------------------------------
@@ -126,6 +147,12 @@ function block (node, ctx, para) {
       return [table(node, ctx)]
     case 'pageBreak':
       return [new Paragraph({ children: [new PageBreak()] })]
+    // The headings as they are now: a plain list Word shows as it is.
+    case 'tableOfContents':
+      return [
+        new Paragraph({ children: [new TextRun({ text: 'Contents', bold: true, size: 28 })], spacing: { after: 120 } }),
+        ...ctx.headings.map((h) => new Paragraph({ indent: { left: (h.level - 1) * 360 }, spacing: { after: 60 }, children: [new TextRun({ text: h.text || 'Untitled heading' })] }))
+      ]
     default:
       return node.content ? blocks(node.content, ctx, para) : []
   }
@@ -214,6 +241,11 @@ function inlineRun (node, ctx, isLink) {
   if (node.type === 'hardBreak') return new TextRun({ text: '', break: 1 })
   if (node.type === 'inlineMath') return new TextRun({ text: node.attrs?.latex || '', font: MATH_FONT, italics: true })
   if (node.type === 'image') return imageRun(node.attrs, ctx)
+  if (node.type === 'footnote') {
+    const id = Object.keys(ctx.footnotes).length + 1
+    ctx.footnotes[id] = { children: [new Paragraph({ children: [new TextRun({ text: node.attrs?.text || '', size: 20 })] })] }
+    return new FootnoteReferenceRun(id)
+  }
   if (node.type !== 'text') return null
   const opts = { text: node.text }
   for (const m of node.marks || []) {

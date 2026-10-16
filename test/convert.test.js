@@ -95,3 +95,35 @@ test('pagination: blocks move whole, paragraphs split by line, with widow and or
   const units = [{ top: 0, bottom: 700 }, { top: 710, bottom: 710 + 40 * 24, lines: lines(710, 40) }]
   assert.deepEqual(computeBreaks(units, geo), computeBreaks(units, geo))
 })
+
+test('docx export: footnotes, contents, headers and footers', async () => {
+  const JSZip = (await import('jszip')).default
+  const doc = {
+    type: 'doc',
+    content: [
+      { type: 'tableOfContents' },
+      { type: 'heading', attrs: { level: 1 }, content: [{ type: 'text', text: 'Soil' }] },
+      { type: 'paragraph', content: [{ type: 'text', text: 'Compost helps.' }, { type: 'footnote', attrs: { text: 'Six months at least.' } }] },
+      { type: 'heading', attrs: { level: 2 }, content: [{ type: 'text', text: 'Mulch' }] }
+    ]
+  }
+  const zip = await JSZip.loadAsync(await exportDocx(doc, normalizePage({ header: 'Garden notes', footer: 'Page {page} of {pages}' }), { title: 'Garden' }))
+  const body = await zip.file('word/document.xml').async('string')
+  assert.match(body, /Contents/)
+  assert.match(body, /<w:footnoteReference w:id="1"\/>/)
+  assert.match(await zip.file('word/footnotes.xml').async('string'), /Six months at least\./)
+  const files = Object.keys(zip.files)
+  const header = await zip.file(files.find((f) => /word\/header\d*\.xml/.test(f))).async('string')
+  const footer = await zip.file(files.find((f) => /word\/footer\d*\.xml/.test(f))).async('string')
+  assert.match(header, /Garden notes/)
+  assert.match(footer, /PAGE/)
+  assert.match(footer, /NUMPAGES/)
+})
+
+test('page setup: old files keep their page numbers; lines fill in', async () => {
+  const { fillPageLine } = await import('@commonplace/docs/page')
+  assert.equal(normalizePage({ pageNumbers: false }).footer, '')
+  assert.equal(normalizePage({ pageNumbers: true }).footer, '{page}')
+  assert.equal(normalizePage({}).footer, '{page}')
+  assert.equal(fillPageLine('Page {page} of {pages} · {title}', { page: 2, pages: 5, title: 'Plan' }), 'Page 2 of 5 · Plan')
+})

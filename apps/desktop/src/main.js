@@ -2,7 +2,8 @@
 // hosts the window. The window never touches the network or the disk; it
 // talks to this process over a narrow IPC surface defined in preload.cjs.
 
-import { app, BrowserWindow, ipcMain, clipboard, shell, dialog, Notification, nativeImage } from 'electron'
+import fsSync from 'node:fs'
+import { app, BrowserWindow, ipcMain, clipboard, shell, dialog, Notification, nativeImage, Menu } from 'electron'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -24,7 +25,7 @@ import { whiteboardApp } from '@commonplace/whiteboard'
 import { formServices } from './forms.js'
 import { Reminders } from './reminders.js'
 import { Updates } from './updates.js'
-import { readPage, PAGE_SIZES, DEFAULT_PAGE } from '@commonplace/docs/page'
+import { readPage, PAGE_SIZES, DEFAULT_PAGE, pageLine } from '@commonplace/docs/page'
 import { exportDocx, importDocx } from '@commonplace/docs/convert'
 
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024
@@ -82,6 +83,38 @@ app.on('open-url', (event, url) => { event.preventDefault(); deliverInvite(url) 
 app.on('second-instance', (_e, argv) => deliverInvite(findInvite(argv))) // Windows
 pendingInvite = findInvite(process.argv)
 
+// Settings that belong to this computer's app rather than to a Drive.
+const settingsFile = () => path.join(app.getPath('userData'), 'settings.json')
+function readSettings () {
+  try { return JSON.parse(fsSync.readFileSync(settingsFile(), 'utf8')) } catch { return {} }
+}
+function writeSettings (patch) {
+  const next = { ...readSettings(), ...patch }
+  try { fsSync.writeFileSync(settingsFile(), JSON.stringify(next, null, 2)) } catch {}
+  return next
+}
+
+// Right-click in text: spelling suggestions first, then cut, copy and paste.
+function editMenu (p) {
+  if (!win) return
+  const items = []
+  if (p.misspelledWord) {
+    for (const word of p.dictionarySuggestions.slice(0, 5)) items.push({ label: word, click: () => win?.webContents.replaceMisspelling(word) })
+    if (!items.length) items.push({ label: 'No suggestions', enabled: false })
+    items.push({ label: 'Add to dictionary', click: () => win?.webContents.session.addWordToSpellCheckerDictionary(p.misspelledWord) }, { type: 'separator' })
+  }
+  if (p.isEditable) items.push({ role: 'cut', enabled: p.editFlags.canCut }, { role: 'copy', enabled: p.editFlags.canCopy }, { role: 'paste', enabled: p.editFlags.canPaste }, { type: 'separator' }, { role: 'selectAll' })
+  else if (p.selectionText) items.push({ role: 'copy' })
+  if (items.length) Menu.buildFromTemplate(items).popup({ window: win })
+}
+
+// A header or footer for Chromium's PDF printer, which fills in the page numbers.
+function pdfPageLine (text, title) {
+  const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
+  const parts = pageLine(text).map((p) => typeof p === 'string' ? esc(p) : p.field === 'page' ? '<span class="pageNumber"></span>' : p.field === 'pages' ? '<span class="totalPages"></span>' : esc(p.field === 'title' ? title : new Date().toLocaleDateString()))
+  return `<div style="width:100%;text-align:center;font-size:9px;color:#8a8f9b;font-family:Georgia,serif">${parts.join('')}</div>`
+}
+
 function send (channel, ...args) {
   if (win && !win.isDestroyed()) win.webContents.send(channel, ...args)
 }
@@ -118,6 +151,8 @@ function createWindow () {
     return { action: 'deny' }
   })
   win.webContents.on('will-navigate', (e) => e.preventDefault())
+  win.webContents.session.setSpellCheckerEnabled(readSettings().spellcheck !== false)
+  win.webContents.on('context-menu', (_e, p) => editMenu(p))
   win.on('closed', () => { win = null; openDocs.clear() })
 }
 
@@ -204,7 +239,7 @@ function registerIpc () {
     if (!file || !doc) throw new Error('This file is no longer in your Drive.')
     if (format === 'md' && file.kind !== 'tasks') return saveAs(file.title, 'md', String(payload.markdown || ''), 'Markdown')
     if (format === 'docx') {
-      const setup = file.kind === 'paged' ? readPage(doc.ydoc) : { ...DEFAULT_PAGE, pageNumbers: false }
+      const setup = file.kind === 'paged' ? readPage(doc.ydoc) : { ...DEFAULT_PAGE, footer: '' }
       return saveAs(file.title, 'docx', await exportDocx(payload.json, setup, { title: file.title }), 'Word document')
     }
     if (format === 'xlsx') return saveAs(file.title, 'xlsx', await exportXlsx(doc.ydoc), 'Excel workbook')
@@ -228,9 +263,9 @@ function registerIpc () {
         landscape: setup.orientation === 'landscape',
         margins: setup.margins,
         printBackground: true,
-        displayHeaderFooter: setup.pageNumbers,
-        headerTemplate: '<span></span>',
-        footerTemplate: '<div style="width:100%;text-align:center;font-size:9px;color:#8a8f9b;font-family:Georgia,serif"><span class="pageNumber"></span></div>'
+        displayHeaderFooter: Boolean(setup.header || setup.footer),
+        headerTemplate: pdfPageLine(setup.header, file.title),
+        footerTemplate: pdfPageLine(setup.footer, file.title)
       })
       return saveAs(file.title, 'pdf', pdf, 'PDF')
     }
@@ -395,6 +430,12 @@ function registerIpc () {
   ipcMain.handle('storage:usage', () => drive.storageUsage())
   ipcMain.handle('storage:settings', (_e, patch) => drive.setStorageSettings(patch || {}))
   ipcMain.handle('drive:keepSyncing', (_e, docId) => drive.keepSyncing(docId))
+  ipcMain.handle('settings:get', () => ({ spellcheck: readSettings().spellcheck !== false }))
+  ipcMain.handle('settings:set', (_e, patch) => {
+    const next = writeSettings({ spellcheck: patch?.spellcheck !== false })
+    win?.webContents.session.setSpellCheckerEnabled(next.spellcheck)
+    return { spellcheck: next.spellcheck }
+  })
   ipcMain.handle('templates:list', () => drive.templates.list())
   ipcMain.handle('templates:create', (_e, id, folderId) => drive.templates.create(id, { folderId }))
   ipcMain.handle('templates:save', (_e, docId, name, description) => drive.templates.save(docId, { name, description }))

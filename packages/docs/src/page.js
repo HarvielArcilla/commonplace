@@ -12,7 +12,26 @@ export const DEFAULT_PAGE = {
   size: 'letter',
   orientation: 'portrait',
   margins: { top: 1, right: 1, bottom: 1, left: 1 }, // inches
-  pageNumbers: true
+  // A line of text at the top and bottom of every page. {page}, {pages},
+  // {title} and {date} are filled in.
+  header: '',
+  footer: '{page}'
+}
+
+export const PAGE_FIELDS = ['page', 'pages', 'title', 'date']
+
+// Splits header or footer text into text and fields:
+// 'Page {page} of {pages}' -> ['Page ', { field: 'page' }, ' of ', { field: 'pages' }]
+export function pageLine (text) {
+  return String(text || '').split(/(\{(?:page|pages|title|date)\})/).filter(Boolean).map((part) => {
+    const m = /^\{(page|pages|title|date)\}$/.exec(part)
+    return m ? { field: m[1] } : part
+  })
+}
+
+// Fills in a header or footer for one page.
+export function fillPageLine (text, { page, pages, title = '', date = new Date() }) {
+  return pageLine(text).map((p) => typeof p === 'string' ? p : { page: String(page), pages: String(pages), title, date: date.toLocaleDateString() }[p.field]).join('')
 }
 
 export const PX_PER_INCH = 96
@@ -27,7 +46,11 @@ export function normalizePage (setup) {
     const v = Number(s.margins[k])
     s.margins[k] = Number.isFinite(v) ? Math.min(Math.max(v, 0.25), 3) : 1
   }
-  s.pageNumbers = Boolean(s.pageNumbers)
+  // Files from before headers and footers had only "page numbers: yes/no".
+  if (setup && setup.footer == null && 'pageNumbers' in setup) s.footer = setup.pageNumbers ? '{page}' : ''
+  s.header = String(s.header || '').slice(0, 200)
+  s.footer = String(s.footer || '').slice(0, 200)
+  s.pageNumbers = /\{page\}/.test(s.footer) || /\{page\}/.test(s.header)
   return s
 }
 
@@ -51,7 +74,9 @@ export function pageGeometry (setup) {
     contentWidth: px(width) - m.left - m.right,
     contentHeight: px(height) - m.top - m.bottom,
     gap: PAGE_GAP,
-    pageNumbers: s.pageNumbers
+    pageNumbers: s.pageNumbers,
+    header: s.header,
+    footer: s.footer
   }
 }
 
