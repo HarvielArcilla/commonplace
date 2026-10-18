@@ -16,7 +16,8 @@ import {
   newDocSecret, deriveDocKeys, encodeInvite, parseInvite, initContainer, readMeta, updatePerson,
   findConflicts, conflictId, docFrom, History, restoreContent, BlobStore
 } from '@commonplace/core'
-import { Files, filesApp, GUARD_BYTES } from './files.js'
+import { Files, filesApp } from './files.js'
+import { Policy } from './policy.js'
 import { SharedFolders, folderApp, ITEMS } from './shared-folders.js'
 import { openThreadCount } from '@commonplace/core/threads'
 import { Activity } from './activity.js'
@@ -25,6 +26,7 @@ import { Templates } from './templates.js'
 export { sendDrive, receiveDrive, newMoveCode, parseMoveCode } from './move.js'
 export { Backups, readBackupFile, restoreBackup, newRecoveryKey, normalizeRecoveryKey } from './backup.js'
 export { MAX_FILE_BYTES, GUARD_BYTES, fileKind, safeFileName, formatBytes, filesApp } from './files.js'
+export { POLICY_FIELDS, POLICY_GROUPS, DEFAULT_POLICY, normalizePolicy } from './policy.js'
 
 // Where the index lived before it synced between computers (still used to
 // hand an index over when moving or linking a Drive).
@@ -38,17 +40,22 @@ export class Drive extends EventEmitter {
   // transport: sync over the internet (Hyperswarm). lan: also find computers
   // on the same network directly, with or without internet (options for tests).
   // makeThumb(path): a small JPEG data URL for an uploaded image (optional).
-  // guardBytes: how big someone else's file may grow before it pauses.
-  constructor ({ dataDir, apps = [], swarm = {}, transport = true, lan = true, history = {}, deviceName = defaultDeviceName(), makeThumb = null, guardBytes = GUARD_BYTES }) {
+  // policy: values that replace the default limits (see policy.js);
+  // guardBytes is the old name for policy.docGuardBytes.
+  constructor ({ dataDir, apps = [], swarm = {}, transport = true, lan = true, history = {}, deviceName = defaultDeviceName(), makeThumb = null, guardBytes = null, policy = {} }) {
     super()
     this.dataDir = dataDir
-    this.guardBytes = guardBytes
+    this.policy = new Policy(dataDir, { ...(guardBytes ? { docGuardBytes: guardBytes } : {}), ...policy })
     this.swarmOpts = swarm
     this.appsByType = new Map([...apps, filesApp, folderApp].map((a) => [a.type, a]))
     this.identity = loadOrCreateIdentity(dataDir)
     this.device = { id: loadDeviceId(dataDir), name: String(deviceName).slice(0, 60) }
     this.store = new FileStore(path.join(dataDir, 'files'))
     this.engine = new SyncEngine({ identity: this.identity, store: this.store, device: this.device, blobs: new BlobStore(path.join(dataDir, 'blobs')) })
+    // Each computer protects itself: it ignores people you've blocked and
+    // takes a limited number of answers to a form from any one person.
+    this.engine.isBlocked = (userId) => this.policy.isBlocked(userId)
+    this.engine.answerLimit = () => this.policy.get('answersPerPerson')
     this.uploads = new Files(this, { makeThumb })
     this.shared = new SharedFolders(this)
     this.activity = new Activity(this)
@@ -143,6 +150,7 @@ export class Drive extends EventEmitter {
 
   async stop () {
     clearInterval(this._seenTimer)
+    this.uploads.destroy()
     this.shared.destroy()
     this.activity.destroy()
     if (!this.signedOut) this._seen()
@@ -277,8 +285,8 @@ export class Drive extends EventEmitter {
       // Open comments and pending suggestions.
       review: !doc ? { comments: 0, suggestions: 0 } : app?.review ? safeCall(() => app.review(doc.ydoc), { comments: 0, suggestions: 0 }) : { comments: safeCall(() => openThreadCount(doc.ydoc), 0), suggestions: 0 },
       syncMode: entry.syncMode === 'open' ? 'open' : 'always',
-      // Paused because someone else's file grew past the size guard.
-      held: entry.held ? { bytes: entry.heldBytes || 0 } : null,
+      // Paused to protect this computer (see _guard), and why.
+      held: entry.held ? { bytes: entry.heldBytes || 0, reason: entry.heldReason || 'size', folderId: entry.viaFolder || null } : null,
       // Uploaded files: whether the contents are here, and why not.
       upload: entry.type === 'file' ? this.uploads.status(docId) : null,
       conflicts: doc ? openConflicts(doc.ydoc).map((c) => ({ id: c.id, kind: c.kind, unit: c.unit, names: c.versions.map((v) => nameOf(v.userId, v.name)) })) : [],
@@ -595,7 +603,13 @@ export class Drive extends EventEmitter {
   // Someone else's file, found in a shared folder of mine: join it with its
   // secret alone. Its owner adds me to it; until then nothing arrives.
   _joinFromFolder (docId, item, folderId) {
+    // Files from people you've blocked, and more files in a day than your
+    // limit, arrive paused: listed, but nothing syncs until you say so.
+    const mine = item.owner === this.identity.userId
+    const blocked = !mine && this.policy.isBlocked(item.owner)
+    const many = !mine && !blocked && !this.policy.allowJoin(folderId)
     this.files.set(docId, {
+      ...(blocked || many ? { held: true, heldReason: blocked ? 'blocked' : 'many', heldBytes: 0 } : {}),
       docId,
       secret: item.secret,
       invite: null,
@@ -957,8 +971,14 @@ export class Drive extends EventEmitter {
 
   // ---- protecting the disk ----------------------------------------------------------
 
-  // A shared file someone else made that grows past GUARD_BYTES (or past
-  // what I last agreed to) stops syncing until I say to keep going.
+  // A file stops syncing (until I say to keep going) when changes from
+  // others would hurt this computer:
+  //   'size'  someone else's file grew past my limit for one file;
+  //   'own'   my own file grew past my (higher) limit through others' edits;
+  //   'total' all the files others made, together, passed my limit;
+  //   'space' the disk got down to the free space I keep.
+  // Others: 'many' (a shared folder brought too many files today) and
+  // 'blocked' (from someone I've blocked).
   _guardSoon (docId) {
     this._guardTimers = this._guardTimers || new Map()
     if (this._guardTimers.has(docId)) return
@@ -967,20 +987,85 @@ export class Drive extends EventEmitter {
 
   _guard (docId) {
     const entry = this.files.get(docId)
-    if (!entry || entry.held || entry.owner?.userId === this.identity.userId) return
+    if (!entry || entry.held) return
+    const p = this.policy
+    const mine = this._ownerOf(docId) === this.identity.userId
     const bytes = this.store.sizeOf(docId)
-    if (bytes <= Math.max(this.guardBytes, entry.allowBytes || 0)) return
-    this._patch(docId, { held: true, heldBytes: bytes })
-    this._applyActive(docId)
-    this.emit('held', docId, bytes)
+    const allowed = entry.allowBytes || 0
+    let reason = null
+    if (this.uploads.freeBytes() < p.get('keepFreeBytes')) reason = 'space'
+    else if (bytes > Math.max(p.get(mine ? 'ownDocGuardBytes' : 'docGuardBytes'), allowed)) reason = mine ? 'own' : 'size'
+    else if (!mine && bytes > allowed && this._othersBytes() > p.get('othersDocsBytes')) reason = 'total'
+    if (reason) this._hold(docId, reason, bytes)
   }
 
-  // Keep syncing a file the size guard paused, until it doubles again.
+  _hold (docId, reason, bytes = this.store.sizeOf(docId)) {
+    this._patch(docId, { held: true, heldReason: reason, heldBytes: bytes })
+    this._applyActive(docId)
+    this.emit('held', docId, bytes, reason)
+  }
+
+  _ownerOf (docId) {
+    return this.engine.access(docId)?.owner || this.files.get(docId)?.owner?.userId || null
+  }
+
+  // Bytes of every document others made, together.
+  _othersBytes () {
+    let n = 0
+    for (const entry of this.files.values()) if (this._ownerOf(entry.docId) !== this.identity.userId) n += this.store.sizeOf(entry.docId)
+    return n
+  }
+
+  // Keep syncing a paused file. A size limit then lets it double before
+  // asking again.
   keepSyncing (docId) {
     const entry = this.files.get(docId)
     if (!entry?.held) return
-    this._patch(docId, { held: false, allowBytes: Math.max(this.guardBytes, (entry.heldBytes || 0) * 2) })
+    const owner = this._ownerOf(docId)
+    if (owner && this.policy.isBlocked(owner)) throw new Error('You’ve blocked the person who made this file. Unblock them in Settings first.')
+    const grows = ['size', 'own', 'total', 'space'].includes(entry.heldReason || 'size')
+    this._patch(docId, { held: false, heldReason: null, allowBytes: grows ? Math.max(entry.allowBytes || 0, (entry.heldBytes || 0) * 2) : entry.allowBytes || 0 })
     this._applyActive(docId)
+  }
+
+  // Everything a shared folder brought paused today, in one go.
+  keepSyncingFolder (folderId) {
+    for (const entry of [...this.files.values()]) if (entry.held && entry.heldReason === 'many' && entry.viaFolder === folderId) this.keepSyncing(entry.docId)
+  }
+
+  // ---- limits and blocking ------------------------------------------------------------
+
+  policySettings () { return { values: this.policy.all(), defaults: this.policy.defaults, blocked: this.policy.blocked } }
+
+  setPolicy (patch) {
+    this.policy.set(patch || {})
+    this._changed()
+    return this.policySettings()
+  }
+
+  resetPolicy () {
+    this.policy.reset()
+    this._changed()
+    return this.policySettings()
+  }
+
+  // Ignore someone everywhere: their files pause, their uploads never
+  // download, and this computer stops exchanging anything with them.
+  block (userId, name) {
+    if (userId === this.identity.userId) throw new Error('You can’t block yourself.')
+    this.policy.block({ userId, name })
+    for (const entry of [...this.files.values()]) if (!entry.held && this._ownerOf(entry.docId) === userId) this._hold(entry.docId, 'blocked')
+    this.engine.recheckUser(userId)
+    this.uploads.decideAll()
+    this._changed()
+  }
+
+  unblock (userId) {
+    this.policy.unblock(userId)
+    for (const entry of [...this.files.values()]) if (entry.held && entry.heldReason === 'blocked' && this._ownerOf(entry.docId) === userId) this.keepSyncing(entry.docId)
+    this.engine.recheckUser(userId)
+    this.uploads.decideAll()
+    this._changed()
   }
 
   // ---- uploads ---------------------------------------------------------------------

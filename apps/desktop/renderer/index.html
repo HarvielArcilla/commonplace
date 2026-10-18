@@ -117,17 +117,18 @@
       <section id="profile-storage" class="computers" hidden>
         <h3>Storage</h3>
         <p class="fineprint-plain" id="storage-summary"></p>
-        <label class="field field-inline">Download files others share automatically up to
-          <select id="storage-auto" aria-label="Automatic download limit">
-            <option value="0">Never</option>
-            <option value="1048576">1 MB</option>
-            <option value="10485760">10 MB</option>
-            <option value="26214400">25 MB</option>
-            <option value="104857600">100 MB</option>
-          </select>
-        </label>
-        <p class="fineprint-plain">Bigger files, and kinds that can run programs, always wait for you to say yes. Nothing is downloaded when less than 2 GB would be left free.</p>
         <ul class="people" id="storage-list" aria-label="What takes the most space"></ul>
+        <h4 class="settings-sub" id="storage-people-title" hidden>Whose files take the most space</h4>
+        <ul class="people" id="storage-people" aria-label="People whose files take the most space"></ul>
+        <h4 class="settings-sub" id="storage-blocked-title" hidden>Blocked</h4>
+        <p class="fineprint-plain" id="storage-blocked-note" hidden>This computer ignores them: their files pause, their uploads never download, and nothing is exchanged with them.</p>
+        <ul class="people" id="storage-blocked" aria-label="People you’ve blocked"></ul>
+      </section>
+      <section id="profile-limits" class="computers" hidden>
+        <h3>Limits and safety</h3>
+        <p class="fineprint-plain">How much the people you share with can make this computer download and keep. Each computer sets its own limits.</p>
+        <div id="limits-form" class="limits"></div>
+        <button type="button" class="btn btn-quiet" id="limits-reset">Restore the defaults</button>
       </section>
       <section id="profile-helpers" class="computers" hidden>
         <h3>Always-on helper</h3>

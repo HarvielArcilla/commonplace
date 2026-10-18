@@ -2,9 +2,10 @@
 // Bundled by build.mjs into renderer/dist/app.js.
 
 import { $, el, ago, toast, confirmAction, cleanError } from './ui.js'
-import { state, cp, formatBytes } from './state.js'
+import { state, cp } from './state.js'
 import { initDrive, renderDrive } from './drive-view.js'
 import { initDocView, openDocument, renderDocMargin } from './doc-view.js'
+import { renderStorage, renderLimits } from './settings-view.js'
 import { moveOutDialog, helperStatus } from './share.js'
 import { renderRecovery, restoreDialog } from './recovery-view.js'
 import { openActivity, showActivityCount } from './activity-view.js'
@@ -114,10 +115,11 @@ function openProfileDialog () {
   $('#profile-helpers').hidden = !state.me.hasChosenName
   $('#profile-recovery').hidden = !state.me.hasChosenName
   $('#profile-storage').hidden = !state.me.hasChosenName
+  $('#profile-limits').hidden = !state.me.hasChosenName
   $('#profile-writing').hidden = !state.me.hasChosenName
   cp.getSettings().then((x) => { $('#setting-spellcheck').checked = x.spellcheck }).catch(() => {})
   $('#first-run-restore').hidden = state.me.hasChosenName
-  if (state.me.hasChosenName) { renderComputers(); renderMyHelpers(); renderRecovery(); renderStorage() }
+  if (state.me.hasChosenName) { renderComputers(); renderMyHelpers(); renderRecovery(); renderStorage(); renderLimits() }
   d.showModal()
 }
 
@@ -129,31 +131,6 @@ async function renderComputers () {
       el('span', { class: 'person-note' }, dv.thisComputer ? 'This computer' : dv.online ? 'Online now' : `Last seen ${ago(dv.lastSeenAt)}`)),
     dv.thisComputer ? null : el('button', { type: 'button', class: 'btn btn-quiet btn-danger', onclick: () => unlink(dv) }, 'Unlink'))))
 }
-
-// What commonplace keeps on this computer, biggest first, with a way to
-// free each one: remove a downloaded copy, or resume a paused file.
-async function renderStorage () {
-  const u = await cp.storageUsage()
-  $('#storage-summary').textContent = `commonplace uses ${formatBytes(u.docs + u.uploads)} here (${formatBytes(u.uploads)} of it uploaded files). ${u.free != null ? `${formatBytes(u.free)} free on this disk.` : ''}`
-  $('#storage-auto').value = String(u.settings.autoBytes)
-  const top = u.files.filter((f) => f.bytes > 0).slice(0, 6)
-  $('#storage-list').replaceChildren(...top.map((f) => el('li', { class: 'person' },
-    el('span', { class: 'person-name' }, f.title || 'Untitled', el('span', { class: 'person-note' }, `${formatBytes(f.bytes)}${f.held ? ' · paused' : ''}`)),
-    storageAction(f))))
-}
-
-function storageAction (f) {
-  if (f.held) return el('button', { type: 'button', class: 'btn btn-quiet', onclick: async () => { await cp.keepSyncing(f.docId); renderStorage() } }, 'Keep syncing')
-  if (!f.contentBytes || f.mine) return null
-  return el('button', { type: 'button', class: 'btn btn-quiet', onclick: async () => { await cp.removeDownloadedCopy(f.docId); toast(`Freed ${formatBytes(f.contentBytes)}`); renderStorage() } }, 'Remove copy')
-}
-
-$('#setting-spellcheck').addEventListener('change', (e) => cp.setSettings({ spellcheck: e.target.checked }))
-
-$('#storage-auto').addEventListener('change', async (e) => {
-  await cp.setStorageSettings({ autoBytes: Number(e.target.value) })
-  toast('Saved')
-})
 
 async function renderMyHelpers () {
   const helpers = await cp.myHelpers()

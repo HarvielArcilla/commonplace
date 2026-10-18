@@ -54,13 +54,17 @@ Work on the same file at the same time, see each other's cursors, leave comments
 
 ### Your disk comes first
 
-Everything you share lives on the computers of the people you share it with, so commonplace is careful with space:
+Everything you share lives on the computers of the people you share it with, so each computer protects itself. Every limit below is a setting (your profile → **Limits and safety**), and these are the defaults:
 
-- Files others share download by themselves only when they're small (10 MB or less; change it, or turn it off, under **Storage** in your profile). Bigger files wait until you click **Download**.
+- Files others share download by themselves only when they're small (10 MB or less). Bigger ones wait until you click **Download**, and anything over your largest-file limit (100 MB) says so first.
 - Kinds of file that can run code (programs, scripts, installers, web pages, documents with macros) always wait for a yes, and are only ever saved, never opened from commonplace.
-- Nothing downloads if it would leave less than 2 GB free. Nobody can send a file over 100 MB, and your computer refuses any piece of a file it didn't ask for or whose contents don't match.
-- A shared document someone else made that grows past 100 MB pauses until you choose to keep syncing it.
-- **Storage** in your profile shows what takes space, biggest first. Remove this computer's copy of anything someone else uploaded; it stays in your Drive and won't come back unless you download it again.
+- Automatic downloads have a daily budget: 200 MB from any one person and 1 GB from everyone. After that, files wait for a yes until the next day.
+- A shared folder can bring 25 files a day; more than that arrive paused, with **Sync all** to take them.
+- A document someone else made pauses at 100 MB, your own pauses at 500 MB if others' edits grow it, and everything others made together is kept under 5 GB.
+- Nothing from others downloads or grows when the disk is down to 2 GB free.
+- A form takes up to 20 answers from one person.
+- Nobody can send you a piece of a file you didn't ask for, or one whose contents don't match.
+- **Storage** shows what takes space and whose files take the most, with **Block**: a blocked person's files pause, their uploads never download, and your computer stops exchanging anything with them.
 
 ![A large file someone shared, waiting for a yes before it takes space](docs/images/upload-large.png)
 

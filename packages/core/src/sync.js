@@ -20,7 +20,7 @@ import { deriveDocKeys, epochKeys, seal, open } from './crypto.js'
 import { MSG, encodeFrame, FrameReader, encodeHello, decodeHello, helloProof } from './protocol.js'
 import { verifySignature } from './identity.js'
 import { Membership, canEdit, canRespond } from './members.js'
-import { isResponseUpdate } from './respond.js'
+import { isResponseUpdate, RESPONSES } from './respond.js'
 import { ChunkExchange, BlobStore } from './chunks.js'
 import { stateVectorMap, hasOpsBeyond, sameState, docFrom } from './conflicts.js'
 
@@ -123,6 +123,10 @@ export class SyncEngine extends EventEmitter {
     this.device = device
     this.docs = new Map()
     this.connections = new Set()
+    // Set by the Drive from this computer's policy: people to ignore, and
+    // how many answers to a form to take from one person.
+    this.isBlocked = () => false
+    this.answerLimit = () => Infinity
     this.chunks = new ChunkExchange({
       blobs: blobs || new BlobStore(path.join(store.dir, '..', 'blobs')),
       types: MSG,
@@ -200,6 +204,29 @@ export class SyncEngine extends EventEmitter {
     doc.awareness.destroy()
     doc.ydoc.destroy()
     if (deleteLocalData) this.store.remove(docId)
+  }
+
+  // Whether to take another answer from this person (this computer's limit).
+  answerAllowed (doc, userId) {
+    const limit = this.answerLimit()
+    if (!Number.isFinite(limit)) return true
+    let n = 0
+    for (const key of doc.ydoc.getMap(RESPONSES).keys()) if (key.startsWith(`${userId}.`) && ++n >= limit) return false
+    return true
+  }
+
+  // Stops or restarts exchanging content with someone just blocked or
+  // unblocked (isBlocked already says which), on every file.
+  recheckUser (userId) {
+    for (const doc of this.docs.values()) {
+      for (const [conn, link] of doc.links) {
+        if (link.user?.userId !== userId) continue
+        if (this._mayExchange(doc, link)) {
+          this._startContent(doc, conn, link)
+          this._sendHello(doc, conn, doc.contentEpoch, { again: true }) // what they sent while ignored
+        } else this._stopContent(doc, conn, link)
+      }
+    }
   }
 
   // Turns syncing for one document on or off without closing it.
@@ -514,8 +541,11 @@ export class SyncEngine extends EventEmitter {
     for (const epoch of doc.epochs.keys()) this._sendHello(doc, conn, epoch)
   }
 
-  _sendHello (doc, conn, epoch) {
+  // again: ask the peer to send what I'm missing, even though we're already
+  // exchanging (after I ignored them for a while, say).
+  _sendHello (doc, conn, epoch, { again = false } = {}) {
     const info = {
+      ...(again ? { again: true } : {}),
       userId: this.identity.userId,
       name: this.identity.name,
       color: this.identity.color,
@@ -565,7 +595,7 @@ export class SyncEngine extends EventEmitter {
         if (!canEdit(link.role)) {
           // Viewers can't change the document; respondents can only add
           // their own sealed answers to a form.
-          if (canRespond(link.role) && isResponseUpdate(plain, link.user.userId)) {
+          if (canRespond(link.role) && isResponseUpdate(plain, link.user.userId) && this.answerAllowed(doc, link.user.userId)) {
             try { Y.applyUpdate(doc.ydoc, plain, conn) } catch {}
           }
           return
@@ -642,6 +672,7 @@ export class SyncEngine extends EventEmitter {
 
     // Content flows only on the current epoch, between people with access.
     link.sv = hello.stateVector
+    if (info.again === true && epoch === doc.contentEpoch) link.contentEpoch = null // send it all again
     if (epoch === doc.contentEpoch && this._mayExchange(doc, link)) this._startContent(doc, conn, link)
     this._scheduleStatus(doc)
   }
@@ -656,7 +687,7 @@ export class SyncEngine extends EventEmitter {
   }
 
   _mayExchange (doc, link) {
-    return Boolean(link.role) && !link.gated && doc.contentEpoch != null && link.epochs.has(doc.contentEpoch)
+    return Boolean(link.role) && !this.isBlocked(link.user?.userId) && !link.gated && doc.contentEpoch != null && link.epochs.has(doc.contentEpoch)
   }
 
   // As owner: let in people holding a valid invite (or note their request,

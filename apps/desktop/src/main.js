@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url'
 import * as Y from 'yjs'
 import * as awarenessProtocol from 'y-protocols/awareness'
 import DHT from 'hyperdht'
-import { Drive, sendDrive, receiveDrive, newMoveCode, Backups, readBackupFile, restoreBackup, fileKind, safeFileName } from '@commonplace/drive'
+import { Drive, sendDrive, receiveDrive, newMoveCode, Backups, readBackupFile, restoreBackup, fileKind, safeFileName, POLICY_FIELDS, POLICY_GROUPS } from '@commonplace/drive'
 import { docsApps } from '@commonplace/docs'
 import { sheetsApp } from '@commonplace/sheets'
 import { exportXlsx, importXlsx, exportCsv, importCsv } from '@commonplace/sheets/convert'
@@ -456,6 +456,12 @@ function registerIpc () {
   ipcMain.handle('storage:usage', () => drive.storageUsage())
   ipcMain.handle('storage:settings', (_e, patch) => drive.setStorageSettings(patch || {}))
   ipcMain.handle('drive:keepSyncing', (_e, docId) => drive.keepSyncing(docId))
+  ipcMain.handle('drive:keepSyncingFolder', (_e, folderId) => drive.keepSyncingFolder(folderId))
+  ipcMain.handle('policy:get', () => ({ ...drive.policySettings(), fields: POLICY_FIELDS, groups: POLICY_GROUPS }))
+  ipcMain.handle('policy:set', (_e, patch) => drive.setPolicy(patch))
+  ipcMain.handle('policy:reset', () => drive.resetPolicy())
+  ipcMain.handle('people:block', (_e, userId, name) => drive.block(userId, name))
+  ipcMain.handle('people:unblock', (_e, userId) => drive.unblock(userId))
   ipcMain.handle('settings:get', () => ({ spellcheck: readSettings().spellcheck !== false }))
   ipcMain.handle('settings:set', (_e, patch) => {
     const next = writeSettings({ spellcheck: patch?.spellcheck !== false })
@@ -601,7 +607,8 @@ app.whenReady().then(async () => {
     version: app.getVersion(),
     packaged: app.isPackaged,
     logDir: app.getPath('logs'),
-    onChange: (state) => send('updates:changed', state)
+    onChange: (state) => send('updates:changed', state),
+    enabled: () => drive?.policy.get('updateCheck') !== false
   })
   const last = updates.takeLastResult()
   if (last) pendingNotice = last.ok ? 'commonplace was updated to the newest version.' : `commonplace couldn’t update itself. Run the install command again, or see ${last.log}.`

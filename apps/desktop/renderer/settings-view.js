@@ -1,0 +1,106 @@
+// Storage, the people whose files take space here, blocking, and this
+// computer's limits (Settings → Limits and safety). The limits screen is
+// drawn from the policy's own list of fields, so a new limit added in
+// drive/policy.js shows up here by itself.
+
+import { $, el, toast, confirmAction, cleanError } from './ui.js'
+import { cp, formatBytes } from './state.js'
+
+const MB = 1024 * 1024
+const GB = 1024 * MB
+
+// ---- storage -------------------------------------------------------------------
+
+export async function renderStorage () {
+  const u = await cp.storageUsage()
+  $('#storage-summary').textContent = `commonplace uses ${formatBytes(u.docs + u.uploads)} here (${formatBytes(u.uploads)} of it uploaded files). ${u.free != null ? `${formatBytes(u.free)} free on this disk.` : ''}`
+  const top = u.files.filter((f) => f.bytes > 0).slice(0, 6)
+  $('#storage-list').replaceChildren(...top.map((f) => el('li', { class: 'person' },
+    el('span', { class: 'person-name' }, f.title || 'Untitled', el('span', { class: 'person-note' }, `${formatBytes(f.bytes)}${f.held ? ' · paused' : ''}`)),
+    storageAction(f))))
+
+  const people = u.people.filter((p) => !u.blocked.some((b) => b.userId === p.userId)).slice(0, 5)
+  $('#storage-people-title').hidden = !people.length
+  $('#storage-people').replaceChildren(...people.map((p) => el('li', { class: 'person' },
+    el('span', { class: 'person-name' }, p.name, el('span', { class: 'person-note' }, `${formatBytes(p.bytes)} in ${p.files} file${p.files === 1 ? '' : 's'}`)),
+    el('button', { type: 'button', class: 'btn btn-quiet btn-danger', onclick: () => block(p) }, 'Block'))))
+
+  $('#storage-blocked-title').hidden = $('#storage-blocked-note').hidden = !u.blocked.length
+  $('#storage-blocked').replaceChildren(...u.blocked.map((b) => el('li', { class: 'person' },
+    el('span', { class: 'person-name' }, b.name, el('span', { class: 'person-note' }, `Blocked ${new Date(b.at).toLocaleDateString()}`)),
+    el('button', { type: 'button', class: 'btn btn-quiet', onclick: async () => { await cp.unblockPerson(b.userId); toast(`Unblocked ${b.name}`); renderStorage() } }, 'Unblock'))))
+}
+
+function storageAction (f) {
+  if (f.held && f.heldReason !== 'blocked') return el('button', { type: 'button', class: 'btn btn-quiet', onclick: async () => { try { await cp.keepSyncing(f.docId) } catch (err) { toast(cleanError(err)) } renderStorage() } }, 'Keep syncing')
+  if (!f.contentBytes || f.mine) return null
+  return el('button', { type: 'button', class: 'btn btn-quiet', onclick: async () => { await cp.removeDownloadedCopy(f.docId); toast(`Freed ${formatBytes(f.contentBytes)}`); renderStorage() } }, 'Remove copy')
+}
+
+async function block (p) {
+  const ok = await confirmAction({
+    title: `Block ${p.name}?`,
+    body: 'Their files pause on this computer, their uploads never download, and it stops exchanging anything with them. Files they edit that others own keep their changes, because those arrive through everyone else. You can unblock them here later.',
+    confirm: 'Block'
+  })
+  if (!ok) return
+  try { await cp.blockPerson(p.userId, p.name); toast(`Blocked ${p.name}`) } catch (err) { toast(cleanError(err)) }
+  renderStorage()
+}
+
+// ---- limits ------------------------------------------------------------------------
+
+export async function renderLimits () {
+  const p = await cp.getPolicy()
+  const form = $('#limits-form')
+  const groups = Object.entries(p.groups).map(([group, title]) => {
+    const fields = Object.entries(p.fields).filter(([, f]) => f.group === group)
+    return el('fieldset', { class: 'limits-group' },
+      el('legend', {}, title),
+      ...fields.map(([key, f]) => fieldRow(key, f, p.values[key], p.defaults[key])))
+  })
+  form.replaceChildren(...groups)
+}
+
+function fieldRow (key, f, value, fallback) {
+  const save = async (v) => {
+    try {
+      const next = await cp.setPolicy({ [key]: v })
+      toast(next.values[key] !== v ? `Kept within ${describe(f, f.min)} to ${describe(f, f.max)}` : 'Saved')
+      renderLimits()
+    } catch (err) { toast(cleanError(err)) }
+  }
+  const hint = [f.hint, value !== fallback ? `Default: ${describe(f, fallback)}.` : null].filter(Boolean).join(' ')
+  if (f.kind === 'bool') {
+    return el('div', { class: 'limit' },
+      el('label', { class: 'check' }, el('input', { type: 'checkbox', checked: value || null, onchange: (e) => save(e.target.checked) }), f.label),
+      hint ? el('p', { class: 'limit-hint' }, hint) : null)
+  }
+  if (f.kind === 'count') {
+    return el('div', { class: 'limit' },
+      el('label', { class: 'limit-label' }, f.label,
+        el('input', { type: 'number', class: 'limit-number', min: String(f.min), max: String(f.max), step: '1', value: String(value), onchange: (e) => save(Number(e.target.value)) })),
+      hint ? el('p', { class: 'limit-hint' }, hint) : null)
+  }
+  // Bytes: a number and a unit.
+  const unit = value >= GB && value % GB === 0 ? GB : MB
+  const number = el('input', { type: 'number', class: 'limit-number', min: '0', step: 'any', value: String(+(value / unit).toFixed(2)), 'aria-label': `${f.label} (amount)` })
+  const units = el('select', { class: 'limit-unit', 'aria-label': `${f.label} (unit)` },
+    el('option', { value: String(MB), selected: unit === MB || null }, 'MB'),
+    el('option', { value: String(GB), selected: unit === GB || null }, 'GB'))
+  const commit = () => save(Math.round(Number(number.value) * Number(units.value)))
+  number.addEventListener('change', commit)
+  units.addEventListener('change', commit)
+  return el('div', { class: 'limit' },
+    el('label', { class: 'limit-label' }, f.label, el('span', { class: 'limit-amount' }, number, units)),
+    hint ? el('p', { class: 'limit-hint' }, hint) : null)
+}
+
+const describe = (f, v) => (f.kind === 'bool' ? (v ? 'on' : 'off') : f.kind === 'count' ? String(v) : formatBytes(v))
+
+$('#limits-reset').addEventListener('click', async () => {
+  if (!await confirmAction({ title: 'Restore the default limits?', body: 'Your blocked people stay blocked.', confirm: 'Restore', danger: false })) return
+  await cp.resetPolicy()
+  toast('Restored the defaults')
+  renderLimits()
+})

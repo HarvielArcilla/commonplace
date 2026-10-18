@@ -55,7 +55,7 @@ function render (v) {
     }
     if (st.by !== state.me.userId) actions.push(el('button', { type: 'button', class: 'btn btn-quiet', onclick: () => removeCopy(v, st) }, 'Remove from this computer'))
   } else if (st.hold) {
-    actions.push(el('button', { type: 'button', class: 'btn btn-primary', disabled: st.hold === 'space' || null, onclick: () => run(() => cp.approveDownload(v.o.docId)) }, `Download (${formatBytes(st.size)})`))
+    actions.push(el('button', { type: 'button', class: 'btn btn-primary', disabled: st.hold === 'space' || st.hold === 'blocked' || null, onclick: () => run(() => cp.approveDownload(v.o.docId)) }, `Download (${formatBytes(st.size)})`))
   }
   if (v.writable) actions.push(el('button', { type: 'button', class: 'btn btn-quiet', onclick: () => run(() => cp.uploadVersion(v.o.docId), (ok) => ok && toast('New version uploaded')) }, 'Upload a new version…'))
 
@@ -75,7 +75,10 @@ const HOLD_NOTES = {
   large: (st) => `This file is ${formatBytes(st.size)}, so it waits for you to say yes before it takes space on this computer.`,
   risky: () => 'This kind of file can run programs. Download it only if you trust the person who shared it. It will be saved, never opened from here.',
   space: () => 'There isn’t enough free space on this computer. commonplace keeps some free for everything else.',
-  removed: () => 'You removed this computer’s copy.'
+  removed: () => 'You removed this computer’s copy.',
+  limit: (st) => `This file is ${formatBytes(st.size)}, more than your largest-file limit in Settings. Download it anyway only if you expected it.`,
+  budget: () => 'You’ve had a lot from this person today, so their files wait for a yes until tomorrow (a limit in Settings).',
+  blocked: () => 'You’ve blocked the person who shared this. Unblock them in Settings to download it.'
 }
 
 function holdNote (st, pct) {

@@ -3,31 +3,33 @@
 // A file is a document of type 'file' whose `versions` list says, for each
 // upload, its name, size, SHA-256 and the hashes of its 256 KB chunks. The
 // chunks themselves move separately (core/chunks.js) and only when this
-// computer decides to fetch them:
+// computer decides to fetch them. With the default limits (all of them
+// settings, see policy.js):
 //
 //   - your own uploads are kept, of course;
 //   - other people's files download by themselves only if they're small
-//     (10 MB or less unless you change it) and of an ordinary kind;
-//   - anything bigger, or a kind that can run code (.exe, .dmg, .sh, web
-//     pages, documents with macros, ...),
-//     waits for you to say yes, and then is never opened directly, only saved;
-//   - nothing downloads if it would leave less than 2 GB free on the disk.
+//     (10 MB or less) and of an ordinary kind, and only within a daily
+//     budget per person (200 MB) and in all (1 GB);
+//   - anything bigger, over your largest-file limit, or a kind that can run
+//     code (.exe, .dmg, .sh, web pages, documents with macros, ...), waits
+//     for you to say yes, and then is never opened directly, only saved;
+//   - nothing downloads if it would leave less than 2 GB free on the disk;
+//   - nothing at all comes from people you've blocked.
 //
-// Nobody can send you a file over 100 MB, and chunks you didn't ask for are
-// refused, so the network can't fill your disk. Shared documents are
-// guarded too (see Drive._guard): one that someone else made grows past
-// 100 MB stops syncing until you say to keep going.
+// Chunks you didn't ask for are refused, so the network can't fill your
+// disk. Shared documents are guarded too (see Drive._guard).
 
 import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
 import { EventEmitter } from 'node:events'
 import { CHUNK_SIZE } from '@commonplace/core'
+import { HARD_MAX_FILE_BYTES, DEFAULT_POLICY } from './policy.js'
 
-export const MAX_FILE_BYTES = 100 * 1024 * 1024
-export const GUARD_BYTES = 100 * 1024 * 1024
-const DEFAULTS = { autoBytes: 10 * 1024 * 1024, keepFreeBytes: 2 * 1024 ** 3 }
+export const MAX_FILE_BYTES = DEFAULT_POLICY.maxFileBytes
+export const GUARD_BYTES = DEFAULT_POLICY.docGuardBytes
 const VERSIONS = 'versions'
+const HOUR = 3600e3
 
 // Kinds of file that can run code when opened.
 const RISKY = new Set('exe msi msp com scr pif bat cmd ps1 psm1 vbs vbe js jse wsf wsh hta cpl msc jar app command sh bash zsh csh ksh fish pkg mpkg dmg apk ipa deb rpm run bin reg lnk url iso img dll so dylib sys drv py pyw rb pl php scpt workflow appimage xpi crx desktop terminal inf cab vb ws application appx appxbundle msix msixbundle html htm xhtml mht mhtml svg docm dotm xlsm xltm xlam pptm potm ppam'.split(' '))
@@ -75,7 +77,7 @@ export const currentVersion = (ydoc) => {
 }
 
 function validVersion (v) {
-  return v && typeof v.id === 'string' && Number.isInteger(v.size) && v.size >= 0 && v.size <= MAX_FILE_BYTES &&
+  return v && typeof v.id === 'string' && Number.isInteger(v.size) && v.size >= 0 && v.size <= HARD_MAX_FILE_BYTES &&
     Array.isArray(v.chunks) && v.chunks.length === Math.ceil(v.size / CHUNK_SIZE) && v.chunks.every((h) => /^[0-9a-f]{64}$/.test(h)) &&
     /^[0-9a-f]{64}$/.test(v.sha256)
 }
@@ -84,7 +86,7 @@ export const filesApp = {
   type: 'file',
   kind: 'file',
   name: 'Uploaded file',
-  description: 'Any file you upload. Up to 100 MB.',
+  description: 'Any file you upload, up to your largest-file limit (100 MB unless you change it).',
   hidden: true, // made by uploading, not from the New menu
   schemaVersion: 1,
   exports: [],
@@ -110,22 +112,35 @@ export class Files extends EventEmitter {
     this.engine = drive.engine
     this.blobs = drive.engine.chunks.blobs
     this.makeThumb = makeThumb
+    this.policy = drive.policy
     this.file = path.join(drive.dataDir, 'storage.json')
-    this.state = { settings: { ...DEFAULTS }, approved: {}, removed: {}, ...readJson(this.file) }
-    this.state.settings = { ...DEFAULTS, ...this.state.settings }
+    this.state = { approved: {}, removed: {}, ...readJson(this.file) }
+    // Settings from before limits moved to the policy.
+    if (this.state.settings) {
+      if (this.policy.fresh && this.state.settings.autoBytes != null) this.policy.set({ autoBytes: this.state.settings.autoBytes })
+      delete this.state.settings
+    }
     this.watched = new Set()
+    // Limits changed, or a new day's budget: look again at what's waiting.
+    this.policy.onChange(() => this.decideAll())
+    this.timer = setInterval(() => this.decideAll(), HOUR)
+    this.timer.unref?.()
     // Only serve chunks that belong to the file being asked about.
     this.engine.allowChunk = (docId, hash) => this._versionsOf(docId).some((v) => v.chunks.includes(hash))
     this.engine.chunks.on('chunk', (docId) => this._progress(docId))
   }
 
-  get settings () { return { ...this.state.settings } }
+  get settings () { return this.policy.all() }
 
-  setSettings (patch) {
-    const s = this.state.settings
-    if (patch.autoBytes != null) s.autoBytes = Math.max(0, Math.min(MAX_FILE_BYTES, Number(patch.autoBytes) || 0))
-    this._save()
-    for (const docId of this.watched) this._decide(docId)
+  setSettings (patch) { this.policy.set(patch) }
+
+  decideAll () { for (const docId of this.watched) this._decide(docId) }
+
+  destroy () { clearInterval(this.timer) }
+
+  // Who answers for a file: its owner, as signed in its membership log.
+  ownerOf (docId) {
+    return this.engine.access(docId)?.owner || this.drive.files.get(docId)?.owner?.userId || null
   }
 
   // Called for every file in the Drive; acts only on uploaded files.
@@ -165,7 +180,8 @@ export class Files extends EventEmitter {
   async _read (filePath, name) {
     const stat = await fs.promises.stat(filePath)
     if (!stat.isFile()) throw new Error('That isn’t a file.')
-    if (stat.size > MAX_FILE_BYTES) throw new Error(`That file is ${formatBytes(stat.size)}. Files can be up to ${formatBytes(MAX_FILE_BYTES)}, since everyone who opens it keeps a copy.`)
+    const max = this.policy.get('maxFileBytes')
+    if (stat.size > max) throw new Error(`That file is ${formatBytes(stat.size)}. Files can be up to ${formatBytes(max)} (your limit in Settings), since everyone who opens it keeps a copy.`)
     this._checkSpace(stat.size)
     const chunks = []
     const whole = crypto.createHash('sha256')
@@ -210,22 +226,32 @@ export class Files extends EventEmitter {
     if (!missing.length) { this.engine.chunks.cancel(docId); return }
     const why = this._holdReason(docId, v)
     if (why) { this.engine.chunks.cancel(docId); return }
+    // Downloading by itself counts against today's budgets.
+    if (this.state.approved[docId] !== v.id) this.policy.spendDownload(`${docId}:${v.id}`, this.ownerOf(docId) || v.by, v.size)
     this.engine.chunks.want(docId, missing)
   }
 
   // Why a file isn't downloading by itself, or null.
   _holdReason (docId, v) {
+    const p = this.policy
+    const owner = this.ownerOf(docId)
     if (this.state.removed[docId] === v.id) return 'removed'
+    if (owner && p.isBlocked(owner)) return 'blocked'
     if (this.state.approved[docId] === v.id) return this._spaceProblem(v.size) ? 'space' : null
-    if (fileKind(v.name).risky) return 'risky'
-    if (v.size > this.state.settings.autoBytes) return 'large'
-    return this._spaceProblem(v.size) ? 'space' : null
+    if (v.size > p.get('maxFileBytes')) return 'limit'
+    if (p.get('askRisky') && fileKind(v.name).risky) return 'risky'
+    if (v.size > p.get('autoBytes')) return 'large'
+    if (this._spaceProblem(v.size)) return 'space'
+    if (!p.alreadyCounted(`${docId}:${v.id}`) && !p.fitsDownload(owner || v.by, v.size)) return 'budget'
+    return null
   }
 
   // Says yes to downloading the current version of a file.
   approve (docId) {
     const v = this._current(docId)
     if (!v) return
+    const owner = this.ownerOf(docId)
+    if (owner && this.policy.isBlocked(owner)) throw new Error('You’ve blocked the person who shared this. Unblock them in Settings first.')
     this.state.approved[docId] = v.id
     delete this.state.removed[docId]
     this._save()
@@ -332,11 +358,11 @@ export class Files extends EventEmitter {
   }
 
   _spaceProblem (bytes) {
-    return this.freeBytes() - bytes < this.state.settings.keepFreeBytes
+    return this.freeBytes() - bytes < this.policy.get('keepFreeBytes')
   }
 
   _checkSpace (bytes) {
-    if (this._spaceProblem(bytes)) throw new Error(`There isn’t enough free space. commonplace keeps at least ${formatBytes(this.state.settings.keepFreeBytes)} free on your disk.`)
+    if (this._spaceProblem(bytes)) throw new Error(`There isn’t enough free space. commonplace keeps at least ${formatBytes(this.policy.get('keepFreeBytes'))} free on your disk (a setting).`)
   }
 
   // What commonplace takes on this computer, file by file.
@@ -348,9 +374,27 @@ export class Files extends EventEmitter {
       docs += docBytes
       const v = entry.type === 'file' ? this._current(entry.docId) : null
       const local = v ? v.chunks.filter((h) => this.blobs.has(h)).reduce((n, h) => n + this.blobs.size(h), 0) : 0
-      files.push({ docId: entry.docId, title: entry.title, type: entry.type, bytes: docBytes + local, contentBytes: local, mine: entry.owner?.userId === this.drive.identity.userId, held: Boolean(entry.held) })
+      const owner = this.ownerOf(entry.docId) || entry.owner?.userId || null
+      files.push({ docId: entry.docId, title: entry.title, type: entry.type, bytes: docBytes + local, contentBytes: local, mine: owner === this.drive.identity.userId, owner, ownerName: entry.owner?.name || null, held: Boolean(entry.held), heldReason: entry.heldReason || null })
     }
-    return { docs, uploads: this.blobs.totalBytes(), free: this.freeBytes(), settings: this.settings, files: files.sort((a, b) => b.bytes - a.bytes) }
+    // Who your space goes to: the people whose files take the most here.
+    const people = new Map()
+    for (const f of files) {
+      if (f.mine || !f.owner) continue
+      const p = people.get(f.owner) || { userId: f.owner, name: f.ownerName || 'Someone', bytes: 0, files: 0 }
+      p.bytes += f.bytes
+      p.files++
+      people.set(f.owner, p)
+    }
+    return {
+      docs,
+      uploads: this.blobs.totalBytes(),
+      free: this.freeBytes(),
+      settings: this.settings,
+      files: files.sort((a, b) => b.bytes - a.bytes),
+      people: [...people.values()].sort((a, b) => b.bytes - a.bytes),
+      blocked: this.policy.blocked
+    }
   }
 
   _save () {

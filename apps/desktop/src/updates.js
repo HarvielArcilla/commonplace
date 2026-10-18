@@ -2,8 +2,8 @@
 // copies installed from source (the install scripts), updates them.
 //
 // The only thing sent is an ordinary request to GitHub's public API for the
-// project's commits. Nothing about you or your files goes with it. Set
-// COMMONPLACE_NO_UPDATE_CHECK=1 to turn it off.
+// project's commits. Nothing about you or your files goes with it. Turn it
+// off in Settings (Limits and safety), or set COMMONPLACE_NO_UPDATE_CHECK=1.
 
 import fs from 'node:fs'
 import path from 'node:path'
@@ -14,7 +14,9 @@ const EVERY_MS = 6 * 3600e3
 
 export class Updates {
   // root: the folder of the git checkout (or of the app, when packaged).
-  constructor ({ root, version, packaged, logDir, onChange }) {
+  // enabled(): whether checking is on (a setting), asked before each check.
+  constructor ({ root, version, packaged, logDir, onChange, enabled = () => true }) {
+    this.enabled = enabled
     this.root = root
     this.version = version
     this.packaged = packaged
@@ -38,6 +40,7 @@ export class Updates {
   }
 
   async check () {
+    if (!this.enabled()) return
     try {
       const head = gitHead(this.root)
       this.state = head ? await this.checkSource(head) : await this.checkRelease()

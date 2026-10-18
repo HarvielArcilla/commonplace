@@ -164,10 +164,10 @@ export class HelperClient extends EventEmitter {
       this.engine.mergeMembers(doc.docId, entries)
       return
     }
-    if (head.k !== 'u') return
+    if (head.k !== 'u' || this.engine.isBlocked(head.by)) return
     const role = doc.members.exists ? doc.members.roleOf(head.by, head.inv && typeof head.inv === 'object' ? head.inv : null)?.role : 'editor'
     // Editors may change anything; respondents may only add their answers.
-    if (!canEdit(role) && !(canRespond(role) && isResponseUpdate(data, head.by))) return
+    if (!canEdit(role) && !(canRespond(role) && isResponseUpdate(data, head.by) && this.engine.answerAllowed(doc, head.by))) return
     try { Y.applyUpdate(doc.ydoc, data, this) } catch { return }
     try { mergeSV(state.sv, Y.decodeStateVector(Y.encodeStateVectorFromUpdate(data))) } catch {}
   }

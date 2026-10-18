@@ -34,6 +34,16 @@ export const state = {
 // exchanging changes in the background.
 export const formatBytes = (n) => (n < 1024 ? `${n} B` : n < 1024 ** 2 ? `${Math.round(n / 1024)} KB` : n < 1024 ** 3 ? `${(n / 1024 ** 2).toFixed(n < 10 * 1024 ** 2 ? 1 : 0)} MB` : `${(n / 1024 ** 3).toFixed(1)} GB`)
 
+// Why a file stopped syncing to protect this computer (see Drive._guard).
+const HELD = {
+  size: (h) => `Paused at ${formatBytes(h.bytes)} so it doesn’t fill this computer.`,
+  own: (h) => `Paused: others’ edits made it ${formatBytes(h.bytes)}, past your limit for your own files.`,
+  total: () => 'Paused: files others made already take all the space you allow them.',
+  space: () => 'Paused: this disk is down to the free space you keep.',
+  many: () => 'Paused: a shared folder brought more files today than you allow.',
+  blocked: () => 'Paused: it’s from someone you’ve blocked.'
+}
+
 export function statusNotes (file, { detailed = false } = {}) {
   const notes = []
   const isMe = (p) => p.userId === state.me?.userId
@@ -64,7 +74,9 @@ export function statusNotes (file, { detailed = false } = {}) {
     return notes
   }
   if (file.held) {
-    notes.push({ text: `Paused at ${formatBytes(file.held.bytes)} so it doesn’t fill this computer.`, cls: 'warn', action: { label: 'Keep syncing', run: () => cp.keepSyncing(file.docId) } })
+    const why = HELD[file.held.reason] || HELD.size
+    notes.push({ text: why(file.held), cls: 'warn', action: file.held.reason === 'blocked' ? null : { label: 'Keep syncing', run: () => cp.keepSyncing(file.docId) } })
+    if (file.held.reason === 'many' && file.held.folderId) notes.push({ text: 'Everything this folder brought today', action: { label: 'Sync all', run: () => cp.keepSyncingFolder(file.held.folderId) } })
     return notes
   }
   const up = file.upload
@@ -72,6 +84,9 @@ export function statusNotes (file, { detailed = false } = {}) {
     if (up.hold === 'large') notes.push({ text: `Large file (${formatBytes(up.size)}). Not downloaded yet.`, cls: 'warn', action: { label: 'Download', run: () => cp.approveDownload(file.docId) } })
     else if (up.hold === 'risky') notes.push({ text: 'Can run programs. Download only if you trust who shared it.', cls: 'warn' })
     else if (up.hold === 'space') notes.push({ text: 'Not enough free space to download', cls: 'warn' })
+    else if (up.hold === 'limit') notes.push({ text: `Over your largest-file limit (${formatBytes(up.size)}).`, cls: 'warn', action: { label: 'Download anyway', run: () => cp.approveDownload(file.docId) } })
+    else if (up.hold === 'budget') notes.push({ text: 'Waiting: today’s download limit for this person is used up.', cls: 'warn', action: { label: 'Download', run: () => cp.approveDownload(file.docId) } })
+    else if (up.hold === 'blocked') notes.push({ text: 'From someone you’ve blocked', cls: 'warn' })
     else if (up.hold === 'removed') notes.push({ text: 'Not on this computer', action: { label: 'Download', run: () => cp.approveDownload(file.docId) } })
     else if (up.downloading) notes.push({ text: `Downloading ${Math.round(up.progress * 100)}%`, cls: 'live' })
   }
