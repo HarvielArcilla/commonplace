@@ -22,6 +22,7 @@ contextBridge.exposeInMainWorld('commonplace', {
   shareFolder: (id) => ipcRenderer.invoke('folder:share', id),
   renameFolder: (id, name) => ipcRenderer.invoke('folder:rename', id, name),
   deleteFolder: (id) => ipcRenderer.invoke('folder:delete', id),
+  restoreRemoved: (folderId) => ipcRenderer.invoke('folder:restoreRemoved', folderId),
   moveFolder: (id, parentId) => ipcRenderer.invoke('folder:move', id, parentId),
   moveFile: (docId, folderId) => ipcRenderer.invoke('file:move', docId, folderId),
   importFile: (folderId) => ipcRenderer.invoke('file:import', folderId),

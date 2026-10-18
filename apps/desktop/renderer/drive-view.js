@@ -531,6 +531,7 @@ function sharedFolderMenu (anchor, f) {
     { label: 'Share…', icon: icons.share, onSelect: () => shareDialog(f.id) },
     canChange(f) ? { label: 'Rename…', onSelect: async () => { const name = await promptText({ title: 'Rename shared folder', label: 'Name', value: f.name, confirm: 'Rename', body: 'Everyone in the folder sees the new name.' }); if (name) cp.renameFolder(f.id, name) } } : null,
     { label: 'Move to…', onSelect: () => moveDialog({ kind: 'folder', id: f.id, name: f.name, current: f.parentId }) },
+    f.removed ? { label: `Bring back ${plural(f.removed, 'file')} you removed`, onSelect: async () => { await cp.restoreRemoved(f.id); toast('They’ll come back from the folder') } } : null,
     { sep: true },
     {
       label: 'Remove from my Drive…',
@@ -605,9 +606,12 @@ function fileMenu (anchor, f) {
       label: 'Remove from your Drive…',
       danger: true,
       onSelect: async () => {
-        const body = f.role === 'owner'
-          ? 'This deletes your copy, on each of your computers. Anyone you shared it with keeps theirs.'
-          : `Shared by ${f.owner?.name || 'someone'}. This deletes your copy only, on each of your computers.`
+        const body = [
+          f.role === 'owner'
+            ? 'This deletes your copy, on each of your computers. Anyone you shared it with keeps theirs.'
+            : `Shared by ${f.owner?.name || 'someone'}. This deletes your copy only, on each of your computers.`,
+          f.folderId && folderById(f.folderId)?.shared ? 'It won’t come back from the shared folder unless you ask for it.' : null
+        ].filter(Boolean).join(' ')
         if (await confirmAction({ title: `Remove “${f.title}”?`, body, confirm: 'Remove' })) {
           await cp.removeFile(f.docId)
           toast('Removed from your Drive')

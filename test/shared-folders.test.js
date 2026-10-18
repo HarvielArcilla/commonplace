@@ -97,3 +97,26 @@ test('sharing one of my folders brings its subfolders and my files along', async
   const other = maya.createFolder('Other')
   assert.throws(() => maya.moveFolder(other, shared), /Share this folder first/)
 })
+
+test('a file removed from a shared folder stays removed until you ask for it back', async (t) => {
+  const testnet = await createTestnet(3)
+  const swarm = () => ({ dht: new DHT({ bootstrap: testnet.bootstrap, host: '127.0.0.1' }), refreshMs: 500 })
+  const make = async (name) => { const d = new Drive({ dataDir: tmp(), apps: [docsApp], swarm: swarm(), lan: false }); d.setProfile({ name }); await d.start(); return d }
+  const maya = await make('Maya')
+  const sam = await make('Sam')
+  t.after(async () => { await maya.stop(); await sam.stop(); await testnet.destroy() })
+  const folderId = await maya.createSharedFolder('Recipes')
+  const docId = await maya.create('docs', 'Soup')
+  maya.moveFile(docId, folderId)
+  await sam.join(maya.invite(folderId, 'viewer'))
+  await until(() => sam.describe(docId)?.role === 'viewer', 40000, 'Sam to get the file')
+  await sam.remove(docId)
+  assert.equal(sam.describe(docId), null)
+  sam.shared.reconcile()
+  await sleep(1500)
+  assert.equal(sam.describe(docId), null) // the folder doesn't bring it back
+  assert.equal(sam.listFolders().find((f) => f.id === folderId).removed, 1)
+  sam.restoreRemoved(folderId)
+  sam.shared.reconcile()
+  await until(() => sam.describe(docId)?.role === 'viewer', 40000, 'the file back after asking')
+})

@@ -189,7 +189,7 @@ export class SharedFolders {
     for (const f of this.folders()) {
       if (!this.roleIn(f.docId)) continue
       for (const [childId, it] of this.items(f.docId)) {
-        if (this.drive.files.has(childId) || childId === this.drive.indexId) continue
+        if (this.drive.files.has(childId) || childId === this.drive.indexId || this.drive.dismissed.has(childId)) continue
         this.drive._joinFromFolder(childId, it, f.docId)
       }
     }

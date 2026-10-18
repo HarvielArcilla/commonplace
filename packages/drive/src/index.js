@@ -107,6 +107,10 @@ export class Drive extends EventEmitter {
     this.files = this.index.getMap('files')
     // Personal folders: they organize your Drive only and are never shared.
     this.folders = this.index.getMap('folders')
+    // Files I removed that a shared folder would otherwise bring back:
+    // docId -> { at, folderId }. Kept in the index, so none of my computers
+    // brings them back either.
+    this.dismissed = this.index.getMap('dismissed')
     // My computers: deviceId -> { name, platform, linkedAt, lastSeenAt, unlinked }
     this.devicesMap = this.index.getMap('devices')
     // My always-on relays: key -> { addedAt }. They keep my Drive index (so
@@ -204,6 +208,7 @@ export class Drive extends EventEmitter {
         role: access.role || null,
         owner: e.owner || null,
         people: this.engine.membersDetailed(e.docId).length,
+        removed: this.removedFrom(e.docId).length,
         createdAt: e.addedAt
       }
     })
@@ -351,6 +356,7 @@ export class Drive extends EventEmitter {
     if (!parsed.token) throw new Error('This invite link is from an older version of commonplace. Ask for a new one.')
     if (parsed.token.x != null && !(Date.now() < parsed.token.x)) throw new Error('This invite link has expired. Ask for a new one.')
     const { docId } = deriveDocKeys(parsed.secret)
+    this.dismissed.delete(docId) // asked for it again
     const existing = this.files.get(docId)
     if (existing) {
       // A newer invite (say, with edit rights) replaces the one I had.
@@ -582,10 +588,31 @@ export class Drive extends EventEmitter {
 
   // Removes the file from my Drive, on each of my computers. Other
   // collaborators keep theirs.
+  // Removing is always possible, whatever my access: it only deletes this
+  // Drive's copy. A file a shared folder brought stays gone until I ask
+  // for it back.
   async remove (docId) {
+    const entry = this.files.get(docId)
     if (this.shared.isFolder(docId)) this._leaveFolder(docId)
+    if (entry?.viaFolder || this._inMyFolders(docId)) this.dismissed.set(docId, { at: Date.now(), folderId: entry?.viaFolder || this._inMyFolders(docId) })
     this.files.delete(docId)
     await this._forget(docId)
+    this.shared.soon()
+  }
+
+  // The shared folder of mine that lists a file, if any.
+  _inMyFolders (docId) {
+    for (const f of this.shared.folders()) if (this.shared.items(f.docId).has(docId)) return f.docId
+    return null
+  }
+
+  // Files I removed from a shared folder, and bringing them back.
+  removedFrom (folderId) {
+    return [...this.dismissed.entries()].filter(([, d]) => d?.folderId === folderId).map(([docId]) => docId)
+  }
+
+  restoreRemoved (folderId) {
+    for (const docId of this.removedFrom(folderId)) this.dismissed.delete(docId)
     this.shared.soon()
   }
 

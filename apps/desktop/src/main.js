@@ -208,6 +208,7 @@ function registerIpc () {
   ipcMain.handle('folder:share', (_e, id) => drive.shareFolder(id))
   ipcMain.handle('folder:rename', (_e, id, name) => drive.renameFolder(id, name))
   ipcMain.handle('folder:delete', (_e, id) => drive.deleteFolder(id))
+  ipcMain.handle('folder:restoreRemoved', (_e, id) => drive.restoreRemoved(id))
   ipcMain.handle('folder:move', (_e, id, parentId) => drive.moveFolder(id, parentId))
   ipcMain.handle('file:move', (_e, docId, folderId) => drive.moveFile(docId, folderId))
   ipcMain.handle('link:open', (_e, url) => openExternal(url))
