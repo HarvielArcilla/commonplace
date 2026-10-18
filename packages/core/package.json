@@ -5,7 +5,7 @@
   "main": "src/index.js",
   "exports": {
     ".": "./src/index.js",
-    "./helper-protocol": "./src/helper-protocol.js",
+    "./relay-protocol": "./src/relay-protocol.js",
     "./threads": "./src/threads.js"
   },
   "dependencies": {

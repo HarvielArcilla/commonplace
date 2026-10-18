@@ -1,6 +1,6 @@
-// The always-on helper: a blind mailbox store that keeps encrypted copies of
+// The always-on relay: a blind mailbox store that keeps encrypted copies of
 // files for people who aren't online at the same time, and passes new
-// changes along live to whoever is connected. See core/src/helper-protocol.js
+// changes along live to whoever is connected. See core/src/relay-protocol.js
 // for what it can and can't see.
 //
 // Storage, one folder per box:
@@ -13,13 +13,13 @@ import path from 'node:path'
 import Hyperswarm from 'hyperswarm'
 import DHT from 'hyperdht'
 import {
-  MsgReader, encodeMsg, verifyBox, putProof, compactProof, dropProof, formatHelperAddress
-} from '@commonplace/core/helper-protocol'
+  MsgReader, encodeMsg, verifyBox, putProof, compactProof, dropProof, formatRelayAddress
+} from '@commonplace/core/relay-protocol'
 
 const BOX = /^[0-9a-f]{64}$/
 
-export class HelperServer extends EventEmitter {
-  // quotaBytes: the most this helper stores in total, across every box.
+export class RelayServer extends EventEmitter {
+  // quotaBytes: the most this relay stores in total, across every box.
   constructor ({ dir, swarm = {}, quotaBytes = 4 * 1024 ** 3 } = {}) {
     super()
     this.dir = dir
@@ -29,7 +29,7 @@ export class HelperServer extends EventEmitter {
     this.connections = new Set()
   }
 
-  get address () { return formatHelperAddress(this.swarm.keyPair.publicKey.toString('hex')) }
+  get address () { return formatRelayAddress(this.swarm.keyPair.publicKey.toString('hex')) }
 
   get usedBytes () {
     let n = 0
@@ -166,7 +166,7 @@ function frame (seq, blob) {
   return Buffer.concat([head, blob])
 }
 
-// The helper's address is its public key, so it must stay the same.
+// The relay's address is its public key, so it must stay the same.
 function loadKeyPair (dir) {
   const file = path.join(dir, 'key.json')
   try {

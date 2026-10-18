@@ -45,7 +45,7 @@ async function uploadFiles (dropped) {
   } catch (err) { toast(cleanError(err)) }
 }
 
-// ---- data helpers ------------------------------------------------------------
+// ---- data relays ------------------------------------------------------------
 
 const folderById = (id) => state.folders.find((f) => f.id === id) || null
 // Files proper: shared folders are documents too, but show as folders.

@@ -12,7 +12,7 @@ import path from 'node:path'
 import { randomBytes } from 'node:crypto'
 import * as Y from 'yjs'
 import {
-  FileStore, SyncEngine, SwarmTransport, LanTransport, HelperClient, formatHelperAddress, parseHelperAddress, loadOrCreateIdentity, canEdit,
+  FileStore, SyncEngine, SwarmTransport, LanTransport, RelayClient, formatRelayAddress, parseRelayAddress, loadOrCreateIdentity, canEdit,
   newDocSecret, deriveDocKeys, encodeInvite, parseInvite, initContainer, readMeta, updatePerson,
   findConflicts, conflictId, docFrom, History, restoreContent, BlobStore
 } from '@commonplace/core'
@@ -22,6 +22,10 @@ import { SharedFolders, folderApp, ITEMS } from './shared-folders.js'
 import { openThreadCount } from '@commonplace/core/threads'
 import { Activity } from './activity.js'
 import { Templates } from './templates.js'
+
+// Relays used to be called helpers; files and Drives made then keep their
+// relay list under this name, so it stays.
+const RELAYS_MAP = 'helpers'
 
 export { sendDrive, receiveDrive, newMoveCode, parseMoveCode } from './move.js'
 export { Backups, readBackupFile, restoreBackup, newRecoveryKey, normalizeRecoveryKey } from './backup.js'
@@ -73,18 +77,18 @@ export class Drive extends EventEmitter {
           const status = this.engine.status(this._topicToDoc.get(topicHex))
           return !status || (status.peers.length === 0 && status.devices.length === 0)
         },
-        // Connections to always-on helpers go to the helper client.
+        // Connections to always-on relays go to the relay client.
         route: (socket, remote) => {
-          if (!this.helpers?.isHelper(remote)) return false
-          this.helpers.addConnection(socket, remote)
+          if (!this.relays?.isRelay(remote)) return false
+          this.relays.addConnection(socket, remote)
           return true
         }
       })
       : null
-    this.helpers = this.transport
-      ? new HelperClient(this.engine, { connect: (key) => this.transport.joinPeer(key), disconnect: (key) => this.transport.leavePeer(key) })
+    this.relays = this.transport
+      ? new RelayClient(this.engine, { connect: (key) => this.transport.joinPeer(key), disconnect: (key) => this.transport.leavePeer(key) })
       : null
-    this.helpers?.on('status', () => this._changed())
+    this.relays?.on('status', () => this._changed())
     this.lan = lan
       ? new LanTransport(this.engine, {
         ...(typeof lan === 'object' ? lan : {}),
@@ -105,10 +109,10 @@ export class Drive extends EventEmitter {
     this.folders = this.index.getMap('folders')
     // My computers: deviceId -> { name, platform, linkedAt, lastSeenAt, unlinked }
     this.devicesMap = this.index.getMap('devices')
-    // My always-on helpers: key -> { addedAt }. They keep my Drive index (so
+    // My always-on relays: key -> { addedAt }. They keep my Drive index (so
     // my computers sync through them) and new files I make.
-    this.myHelpersMap = this.index.getMap('helpers')
-    this.myHelpersMap.observe(() => { this._applyHelpers(this.indexId); this._changed() })
+    this.myRelaysMap = this.index.getMap(RELAYS_MAP)
+    this.myRelaysMap.observe(() => { this._applyRelays(this.indexId); this._changed() })
     this._attached = new Set()
     // Files added or removed on my other computers.
     this.files.observe((event, tr) => {
@@ -137,7 +141,7 @@ export class Drive extends EventEmitter {
 
   async start () {
     this._joinTopics(this.indexId)
-    this._applyHelpers(this.indexId)
+    this._applyRelays(this.indexId)
     if (this.lan) await this.lan.start().catch((err) => { this.lan = null; this.emit('error', err) })
     for (const entry of this.files.values()) this._attach(entry)
     this.shared.soon()
@@ -302,8 +306,8 @@ export class Drive extends EventEmitter {
         lastSyncedDevice: status.lastSyncedDevice || null,
         // My own other computers connected for this file.
         devices: status.devices || [],
-        // Always-on helpers keeping a copy: [{ key, online, lastSyncedAt }].
-        helpers: (this.helpers?.status(docId) || []).map((h) => ({ ...h, address: formatHelperAddress(h.key) })),
+        // Always-on relays keeping a copy: [{ key, online, lastSyncedAt }].
+        relays: (this.relays?.status(docId) || []).map((h) => ({ ...h, address: formatRelayAddress(h.key) })),
         pending: status.pending
       }
     }
@@ -322,7 +326,7 @@ export class Drive extends EventEmitter {
     initContainer(doc.ydoc, { type, title, owner: this.identity, schemaVersion: app.schemaVersion })
     if (build) doc.ydoc.transact(() => build(doc.ydoc), 'local')
     else app.initContent?.(doc.ydoc)
-    doc.ydoc.transact(() => { for (const key of this.myHelpersMap.keys()) doc.ydoc.getMap('helpers').set(key, { addedBy: this.identity.userId, at: Date.now() }) }, 'local')
+    doc.ydoc.transact(() => { for (const key of this.myRelaysMap.keys()) doc.ydoc.getMap(RELAYS_MAP).set(key, { addedBy: this.identity.userId, at: Date.now() }) }, 'local')
     this.engine.ensureMembership(docId)
     this.files.set(docId, {
       docId,
@@ -361,7 +365,7 @@ export class Drive extends EventEmitter {
       docId,
       secret: parsed.secret.toString('base64'),
       invite: parsed.token,
-      inviteHelpers: Array.isArray(parsed.token.h) ? parsed.token.h.filter((k) => /^[0-9a-f]{64}$/.test(k)).slice(0, 4) : [],
+      inviteRelays: Array.isArray(parsed.token.h) ? parsed.token.h.filter((k) => /^[0-9a-f]{64}$/.test(k)).slice(0, 4) : [],
       type: null,
       title: 'Waiting for a peer…',
       owner: { userId: parsed.token.by, name: typeof parsed.token.n === 'string' ? parsed.token.n.slice(0, 40) : null },
@@ -384,45 +388,45 @@ export class Drive extends EventEmitter {
     if (!doc.members.exists && readMeta(doc.ydoc)?.owner?.userId === this.identity.userId) this.engine.ensureMembership(docId)
     if (doc.members.owner !== this.identity.userId) throw new Error('Only the owner can invite people to this file.')
     const expiresAt = expiresIn ? Date.now() + expiresIn : null
-    const helpers = [...doc.ydoc.getMap('helpers').keys()]
-    return encodeInvite(Buffer.from(entry.secret, 'base64'), this.engine.createInvite(docId, role, { expiresAt, once, ask, helpers }))
+    const relays = [...doc.ydoc.getMap(RELAYS_MAP).keys()]
+    return encodeInvite(Buffer.from(entry.secret, 'base64'), this.engine.createInvite(docId, role, { expiresAt, once, ask, relays }))
   }
 
-  // ---- always-on helpers ------------------------------------------------------
+  // ---- always-on relays ------------------------------------------------------
 
-  myHelpers () {
-    return [...this.myHelpersMap.keys()].map((key) => ({ key, address: formatHelperAddress(key), ...(this.helpers?.status(this.indexId).find((h) => h.key === key) || {}) }))
+  myRelays () {
+    return [...this.myRelaysMap.keys()].map((key) => ({ key, address: formatRelayAddress(key), ...(this.relays?.status(this.indexId).find((h) => h.key === key) || {}) }))
   }
 
-  // Adds a helper for my computers' Drive and for new files. `everywhere`
+  // Adds a relay for my computers' Drive and for new files. `everywhere`
   // also adds it to every file I own now.
-  addMyHelper (address, { everywhere = false } = {}) {
-    const key = parseHelperAddress(address)
-    if (!key) throw new Error('That isn\u2019t a helper address. It starts with cph1.')
-    this.myHelpersMap.set(key, { addedAt: Date.now() })
-    if (everywhere) for (const f of this.list()) if (f.role === 'owner') this.addHelper(f.docId, address)
+  addMyRelay (address, { everywhere = false } = {}) {
+    const key = parseRelayAddress(address)
+    if (!key) throw new Error('That isn\u2019t a relay address. It starts with cpr1.')
+    this.myRelaysMap.set(key, { addedAt: Date.now() })
+    if (everywhere) for (const f of this.list()) if (f.role === 'owner') this.addRelay(f.docId, address)
     return key
   }
 
-  removeMyHelper (key) {
-    this.myHelpersMap.delete(key)
+  removeMyRelay (key) {
+    this.myRelaysMap.delete(key)
   }
 
-  // Helpers for one file are part of the file, so everyone working on it
+  // Relays for one file are part of the file, so everyone working on it
   // uses them.
-  addHelper (docId, address) {
-    const key = parseHelperAddress(address)
-    if (!key) throw new Error('That isn\u2019t a helper address. It starts with cph1.')
+  addRelay (docId, address) {
+    const key = parseRelayAddress(address)
+    if (!key) throw new Error('That isn\u2019t a relay address. It starts with cpr1.')
     const doc = this.engine.getDoc(docId)
-    if (!doc || !canEdit(this.engine.access(docId)?.role)) throw new Error('Only people who can edit can add a helper.')
-    doc.ydoc.transact(() => doc.ydoc.getMap('helpers').set(key, { addedBy: this.identity.userId, at: Date.now() }), 'local')
+    if (!doc || !canEdit(this.engine.access(docId)?.role)) throw new Error('Only people who can edit can add a relay.')
+    doc.ydoc.transact(() => doc.ydoc.getMap(RELAYS_MAP).set(key, { addedBy: this.identity.userId, at: Date.now() }), 'local')
     return key
   }
 
-  removeHelper (docId, key) {
+  removeRelay (docId, key) {
     const doc = this.engine.getDoc(docId)
-    if (!doc || !canEdit(this.engine.access(docId)?.role)) throw new Error('Only people who can edit can remove a helper.')
-    doc.ydoc.transact(() => doc.ydoc.getMap('helpers').delete(key), 'local')
+    if (!doc || !canEdit(this.engine.access(docId)?.role)) throw new Error('Only people who can edit can remove a relay.')
+    doc.ydoc.transact(() => doc.ydoc.getMap(RELAYS_MAP).delete(key), 'local')
   }
 
   approveRequest (docId, userId, role) { this.engine.approveRequest(docId, userId, role) }
@@ -806,7 +810,7 @@ export class Drive extends EventEmitter {
 
   // A file was removed on another of my computers: remove it here too.
   async _forget (docId) {
-    this.helpers?.setHelpers(docId, [])
+    this.relays?.setRelays(docId, [])
     clearTimeout(this._checkpoints.get(docId)?.timer)
     this._checkpoints.delete(docId)
     this._attached.delete(docId)
@@ -935,7 +939,7 @@ export class Drive extends EventEmitter {
     doc.meta.observe(refresh)
     doc.ydoc.getMap('authors').observe(refresh)
     doc.ydoc.getMap('people').observe(refresh)
-    doc.ydoc.getMap('helpers').observe(() => this._applyHelpers(entry.docId))
+    doc.ydoc.getMap(RELAYS_MAP).observe(() => this._applyRelays(entry.docId))
     // A shared folder's contents decide who gets what.
     let watching = false
     const watchItems = () => {
@@ -950,18 +954,18 @@ export class Drive extends EventEmitter {
     this.activity.watch(entry.docId)
     refresh()
     this._syncTopics(entry.docId)
-    this._applyHelpers(entry.docId)
+    this._applyRelays(entry.docId)
   }
 
-  // Tells the helper client which helpers a file (or my index) uses.
-  _applyHelpers (docId) {
-    if (!this.helpers) return
-    if (docId === this.indexId) { this.helpers.setHelpers(docId, [...this.myHelpersMap.keys()]); return }
+  // Tells the relay client which relays a file (or my index) uses.
+  _applyRelays (docId) {
+    if (!this.relays) return
+    if (docId === this.indexId) { this.relays.setRelays(docId, [...this.myRelaysMap.keys()]); return }
     const entry = this.files.get(docId)
     const doc = this.engine.getDoc(docId)
     if (!entry || !doc) return
-    const keys = new Set([...doc.ydoc.getMap('helpers').keys(), ...(entry.inviteHelpers || [])])
-    this.helpers.setHelpers(docId, this._shouldSync(entry) ? [...keys] : [])
+    const keys = new Set([...doc.ydoc.getMap(RELAYS_MAP).keys(), ...(entry.inviteRelays || entry.inviteHelpers || [])])
+    this.relays.setRelays(docId, this._shouldSync(entry) ? [...keys] : [])
   }
 
   _shouldSync (entry) {
@@ -1082,7 +1086,7 @@ export class Drive extends EventEmitter {
     if (!entry) return
     const active = this._shouldSync(entry)
     this.engine.setActive(docId, active)
-    this._applyHelpers(docId)
+    this._applyRelays(docId)
     if (active) this._syncTopics(docId)
     else this._leaveTopics(docId)
     this._changed()

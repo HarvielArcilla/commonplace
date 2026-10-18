@@ -140,7 +140,7 @@ function sentNote (v) {
   const file = state.files.find((f) => f.docId === v.o.docId)
   const owner = file?.owner?.name || 'the form’s owner'
   if ((file?.sync?.peers || []).some((p) => p.role === 'owner' || p.role === 'editor')) return `${owner} has it.`
-  return (file?.sync?.helpers || []).length
+  return (file?.sync?.relays || []).length
     ? `It reaches ${owner} through the relay, even if they’re offline now.`
     : `It reaches ${owner} the next time you’re both online. Keep commonplace open until then, or come back later.`
 }

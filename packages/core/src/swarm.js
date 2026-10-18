@@ -12,7 +12,7 @@ export class SwarmTransport {
   // Lonely topics are re-looked-up periodically: two peers that join at
   // nearly the same moment can miss each other's announcements otherwise.
   // route(socket, remoteKeyHex): return true to take a connection for
-  // something other than the sync engine (an always-on helper).
+  // something other than the sync engine (an always-on relay).
   constructor (engine, { isLonely = () => true, refreshMs = 15000, route = () => false, ...swarmOpts } = {}) {
     this.engine = engine
     this.swarm = new Hyperswarm(swarmOpts)
@@ -28,7 +28,7 @@ export class SwarmTransport {
     })
   }
 
-  // Keeps a direct connection to one peer by its key (a helper).
+  // Keeps a direct connection to one peer by its key (a relay).
   joinPeer (key) { this.swarm.joinPeer(key) }
   leavePeer (key) { this.swarm.leavePeer(key) }
 

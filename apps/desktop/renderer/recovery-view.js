@@ -16,7 +16,7 @@ export async function renderRecovery () {
     return
   }
   box.replaceChildren(
-    el('p', { class: 'backup-where' }, el('span', { class: 'person-note' }, 'Backing up to'), el('code', { class: 'helper-key', title: s.path }, s.path)),
+    el('p', { class: 'backup-where' }, el('span', { class: 'person-note' }, 'Backing up to'), el('code', { class: 'relay-key', title: s.path }, s.path)),
     el('p', { class: s.error ? 'error' : 'fineprint-plain' }, s.error || (s.lastAt ? `Last backed up ${ago(s.lastAt)}.` : 'Backs up within the hour.')),
     el('div', { class: 'computer-actions' },
       el('button', { type: 'button', class: 'btn', onclick: async () => { await cp.refreshBackup(); renderRecovery(); toast('Backed up') } }, 'Back up now'),

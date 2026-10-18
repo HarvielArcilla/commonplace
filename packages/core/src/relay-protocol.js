@@ -1,21 +1,21 @@
-// The always-on helper's wire format and keys, shared by the helper itself
-// (packages/helper) and the computers that use one (helper-client.js).
+// The always-on relay's wire format and keys, shared by the relay itself
+// (packages/relay) and the computers that use one (relay-client.js).
 //
-// A helper is a dumb, blind mailbox store. Each mailbox ("box") is named by
+// A relay is a dumb, blind mailbox store. Each mailbox ("box") is named by
 // an Ed25519 public key derived from one key epoch of one file, so:
 //   - only people holding that epoch's key can find the box or write to it
 //     (every put is signed with the matching private key),
-//   - what's inside is sealed with the file's key, so the helper can't read
+//   - what's inside is sealed with the file's key, so the relay can't read
 //     it, and every blob is also signed by the person who wrote it, so the
-//     helper can't forge edits,
+//     relay can't forge edits,
 //   - people removed from a file never learn the next epoch's box.
 //
 // Messages: u32 length | u32 headLength | JSON head | binary payload
-//   client -> helper  { t: 'get', box, after }          stream blobs after seq, then keep sending new ones
+//   client -> relay  { t: 'get', box, after }          stream blobs after seq, then keep sending new ones
 //                     { t: 'put', box, sig, id }        payload = blob; sig = writer's signature
 //                     { t: 'compact', box, upTo, sig }  payload replaces every blob up to seq upTo
 //                     { t: 'drop', box, sig }           delete the box (an old epoch)
-//   helper -> client  { t: 'blob', box, seq }           payload = blob
+//   relay -> client  { t: 'blob', box, seq }           payload = blob
 //                     { t: 'end', box, last, count }    caught up
 //                     { t: 'ok', box, seq, id }  /  { t: 'error', box, id, reason }
 
@@ -56,7 +56,7 @@ export class MsgReader {
         if (this.size < 4) return
         if (this.chunks[0].length < 4) this.chunks = [Buffer.concat(this.chunks)]
         const len = this.chunks[0].readUInt32BE(0)
-        if (len < 4 || len > MAX_MESSAGE) throw new Error('invalid helper message')
+        if (len < 4 || len > MAX_MESSAGE) throw new Error('invalid relay message')
         this.need = 4 + len
       }
       if (this.size < this.need) return
@@ -67,7 +67,7 @@ export class MsgReader {
       this.size = rest.length
       this.need = null
       const jsonLen = msg.readUInt32BE(4)
-      if (jsonLen > msg.length - 8) throw new Error('invalid helper message')
+      if (jsonLen > msg.length - 8) throw new Error('invalid relay message')
       this.onMessage(JSON.parse(msg.subarray(8, 8 + jsonLen).toString('utf8')), msg.subarray(8 + jsonLen))
     }
   }
@@ -75,7 +75,7 @@ export class MsgReader {
 
 // The box for one key epoch of a file: a key pair derived from its secret.
 export function boxKeys (epochSecret) {
-  const seed = crypto.createHash('sha256').update('commonplace/v1/helper-box').update(epochSecret).digest()
+  const seed = crypto.createHash('sha256').update('commonplace/v1/relay-box').update(epochSecret).digest()
   const privateKey = crypto.createPrivateKey({ key: Buffer.concat([ED25519_PKCS8_SEED, seed]), format: 'der', type: 'pkcs8' })
   const box = crypto.createPublicKey(privateKey).export({ type: 'spki', format: 'der' }).subarray(-32).toString('hex')
   return { box, sign: (text) => crypto.sign(null, Buffer.from(text), privateKey).toString('base64') }
@@ -91,15 +91,16 @@ export function verifyBox (box, text, sig) {
 }
 
 // What each signature covers.
-export const putProof = (box, payload) => `commonplace/helper/v1/put|${box}|${sha256hex(payload)}`
-export const compactProof = (box, upTo, payload) => `commonplace/helper/v1/compact|${box}|${upTo}|${sha256hex(payload)}`
-export const dropProof = (box) => `commonplace/helper/v1/drop|${box}`
+export const putProof = (box, payload) => `commonplace/relay/v1/put|${box}|${sha256hex(payload)}`
+export const compactProof = (box, upTo, payload) => `commonplace/relay/v1/compact|${box}|${upTo}|${sha256hex(payload)}`
+export const dropProof = (box) => `commonplace/relay/v1/drop|${box}`
 
-// Helper addresses are the helper's public key: cph1.<base64url>.
-const PREFIX = 'cph1.'
-export const formatHelperAddress = (keyHex) => PREFIX + Buffer.from(keyHex, 'hex').toString('base64url')
-export function parseHelperAddress (text) {
-  const m = String(text || '').trim().match(/cph1\.([A-Za-z0-9_-]{43})/)
+// Relay addresses are the relay's public key: cpr1.<base64url>. Addresses
+// from when relays were called helpers (cph1.) still work.
+const PREFIX = 'cpr1.'
+export const formatRelayAddress = (keyHex) => PREFIX + Buffer.from(keyHex, 'hex').toString('base64url')
+export function parseRelayAddress (text) {
+  const m = String(text || '').trim().match(/cp[hr]1\.([A-Za-z0-9_-]{43})/)
   if (m) return Buffer.from(m[1], 'base64url').toString('hex')
   return /^[0-9a-f]{64}$/i.test(String(text || '').trim()) ? String(text).trim().toLowerCase() : null
 }

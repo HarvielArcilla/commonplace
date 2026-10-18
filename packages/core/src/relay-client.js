@@ -1,5 +1,5 @@
-// Using always-on helpers (see helper-protocol.js). For every file that lists
-// a helper, this computer keeps the file's current box on that helper up to
+// Using always-on relays (see relay-protocol.js). For every file that lists
+// a relay, this computer keeps the file's current box on that relay up to
 // date and reads what others left there, so two people never need to be
 // online at the same time.
 //
@@ -11,9 +11,9 @@
 // that arrive from a peer.
 //
 // Catching up: on connecting, read everything after the last blob seen,
-// then send whatever the helper doesn't have yet, judged from the state
+// then send whatever the relay doesn't have yet, judged from the state
 // vectors of what's there. While connected, every change goes up live and
-// the helper passes it on to everyone else connected.
+// the relay passes it on to everyone else connected.
 
 import { EventEmitter } from 'node:events'
 import crypto from 'node:crypto'
@@ -22,13 +22,13 @@ import { seal, open } from './crypto.js'
 import { canEdit, canRespond } from './members.js'
 import { isResponseUpdate } from './respond.js'
 import { verifySignature } from './identity.js'
-import { MsgReader, encodeMsg, boxKeys, putProof, compactProof, sha256hex } from './helper-protocol.js'
+import { MsgReader, encodeMsg, boxKeys, putProof, compactProof, sha256hex } from './relay-protocol.js'
 
-const blobProof = (docId, box, data) => `commonplace/helper/v1/blob|${docId}|${box}|${sha256hex(data)}`
+const blobProof = (docId, box, data) => `commonplace/relay/v1/blob|${docId}|${box}|${sha256hex(data)}`
 
-export class HelperClient extends EventEmitter {
+export class RelayClient extends EventEmitter {
   // connect(keyBuffer) / disconnect(keyBuffer) ask the transport to keep a
-  // connection to a helper open (the transport hands it back via addConnection).
+  // connection to a relay open (the transport hands it back via addConnection).
   // compactAfter: blobs in a box before someone rewrites it as one.
   constructor (engine, { connect, disconnect, compactAfter = 200 }) {
     super()
@@ -36,8 +36,8 @@ export class HelperClient extends EventEmitter {
     this.compactAfter = compactAfter
     this.connect = connect
     this.disconnect = disconnect
-    this.docHelpers = new Map() // docId -> Set(helperKey)
-    this.links = new Map() // helperKey -> { send, boxes: Map(box -> state) }
+    this.docRelays = new Map() // docId -> Set(relayKey)
+    this.links = new Map() // relayKey -> { send, boxes: Map(box -> state) }
     this.boxCache = new Map() // epoch secret (hex) -> boxKeys
     engine.on('update', (docId, update, origin) => { if (origin !== this && origin !== 'disk') this._pushUpdate(docId, update) })
     engine.on('members', (docId) => this._pushMembers(docId))
@@ -45,30 +45,30 @@ export class HelperClient extends EventEmitter {
     engine.on('topics', (docId) => this._refreshDoc(docId))
   }
 
-  isHelper (keyHex) {
-    for (const set of this.docHelpers.values()) if (set.has(keyHex)) return true
+  isRelay (keyHex) {
+    for (const set of this.docRelays.values()) if (set.has(keyHex)) return true
     return false
   }
 
-  // Which helpers a file uses (from the file itself, or the invite).
-  setHelpers (docId, keys) {
+  // Which relays a file uses (from the file itself, or the invite).
+  setRelays (docId, keys) {
     const next = new Set(keys.filter((k) => /^[0-9a-f]{64}$/.test(k)))
-    const before = new Set([...this.docHelpers.values()].flatMap((s) => [...s]))
-    if (next.size) this.docHelpers.set(docId, next)
-    else this.docHelpers.delete(docId)
-    const after = new Set([...this.docHelpers.values()].flatMap((s) => [...s]))
+    const before = new Set([...this.docRelays.values()].flatMap((s) => [...s]))
+    if (next.size) this.docRelays.set(docId, next)
+    else this.docRelays.delete(docId)
+    const after = new Set([...this.docRelays.values()].flatMap((s) => [...s]))
     for (const k of after) if (!before.has(k)) this.connect(Buffer.from(k, 'hex'))
     for (const k of before) if (!after.has(k)) { this.disconnect(Buffer.from(k, 'hex')); this.links.get(k)?.socket.destroy() }
     this._refreshDoc(docId)
   }
 
-  helpersOf (docId) {
-    return [...(this.docHelpers.get(docId) || [])]
+  relaysOf (docId) {
+    return [...(this.docRelays.get(docId) || [])]
   }
 
-  // { key, online, lastSyncedAt } for each helper a file uses.
+  // { key, online, lastSyncedAt } for each relay a file uses.
   status (docId) {
-    return this.helpersOf(docId).map((key) => {
+    return this.relaysOf(docId).map((key) => {
       const link = this.links.get(key)
       const state = link && [...link.boxes.values()].find((s) => s.docId === docId)
       const saved = this._saved(docId)[key]
@@ -88,7 +88,7 @@ export class HelperClient extends EventEmitter {
       if (this.links.get(keyHex) === link) this.links.delete(keyHex)
       for (const s of link.boxes.values()) this._status(s.docId)
     })
-    for (const [docId, keys] of this.docHelpers) if (keys.has(keyHex)) this._refreshDoc(docId)
+    for (const [docId, keys] of this.docRelays) if (keys.has(keyHex)) this._refreshDoc(docId)
   }
 
   // ---- per file ------------------------------------------------------------------
@@ -103,12 +103,12 @@ export class HelperClient extends EventEmitter {
     return this.boxCache.get(id)
   }
 
-  // Starts (or moves to) the file's current box on each connected helper.
+  // Starts (or moves to) the file's current box on each connected relay.
   _refreshDoc (docId) {
     const doc = this.engine.getDoc(docId)
     if (!doc) return
     const box = this._box(doc)
-    for (const key of this.helpersOf(docId)) {
+    for (const key of this.relaysOf(docId)) {
       const link = this.links.get(key)
       if (!link) continue
       for (const [b, s] of link.boxes) if (s.docId === docId && b !== box?.box) link.boxes.delete(b)
@@ -150,7 +150,7 @@ export class HelperClient extends EventEmitter {
     }
   }
 
-  // Applies one blob from the helper, if it's genuine and its writer may edit.
+  // Applies one blob from the relay, if it's genuine and its writer may edit.
   _receive (doc, state, sealed) {
     const plain = open(doc.keyFor(state.epoch), sealed)
     if (!plain || plain.length < 4) return
@@ -172,7 +172,7 @@ export class HelperClient extends EventEmitter {
     try { mergeSV(state.sv, Y.decodeStateVector(Y.encodeStateVectorFromUpdate(data))) } catch {}
   }
 
-  // After reading everything: send what the helper is missing, and rewrite
+  // After reading everything: send what the relay is missing, and rewrite
   // the box as one blob when it has grown long.
   _catchUp (key, link, doc, state, head) {
     if (canRespond(doc.myAccess?.role)) { this._putAnswers(key, link, doc, state); return }
@@ -194,7 +194,7 @@ export class HelperClient extends EventEmitter {
   _pushUpdate (docId, update) {
     const doc = this.engine.getDoc(docId)
     if (!doc || !this._mayWrite(doc)) return
-    for (const key of this.helpersOf(docId)) {
+    for (const key of this.relaysOf(docId)) {
       const link = this.links.get(key)
       const state = link && [...link.boxes.values()].find((s) => s.docId === docId && s.caughtUp)
       if (!state) continue
@@ -220,7 +220,7 @@ export class HelperClient extends EventEmitter {
   _pushResponse (docId, update) {
     const doc = this.engine.getDoc(docId)
     if (!doc) return
-    for (const key of this.helpersOf(docId)) {
+    for (const key of this.relaysOf(docId)) {
       const link = this.links.get(key)
       const state = link && [...link.boxes.values()].find((s) => s.docId === docId && s.caughtUp)
       if (state) this._putAnswers(key, link, doc, state)
@@ -231,7 +231,7 @@ export class HelperClient extends EventEmitter {
     const doc = this.engine.getDoc(docId)
     if (!doc?.members.exists) return
     this._refreshDoc(docId) // the key may have changed
-    for (const key of this.helpersOf(docId)) {
+    for (const key of this.relaysOf(docId)) {
       const link = this.links.get(key)
       const state = link && [...link.boxes.values()].find((s) => s.docId === docId && s.caughtUp)
       if (state && this._mayWrite(doc)) this._put(link, doc, state, 'm', Buffer.from(JSON.stringify(doc.members.entries)))
@@ -270,7 +270,7 @@ export class HelperClient extends EventEmitter {
   _save (key, state) {
     const all = this._saved(state.docId)
     all[key] = { box: state.keys.box, after: state.after, sv: Buffer.from(Y.encodeStateVector(state.sv)).toString('base64'), lastHash: state.lastHash, answers: state.answers, at: Date.now() }
-    this.engine.store.writeJSON(state.docId, 'helpers', all)
+    this.engine.store.writeJSON(state.docId, 'helpers', all) // (stored under its old name)
     this._status(state.docId)
   }
 

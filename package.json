@@ -14,7 +14,7 @@
     "dist": "npm run dist -w @commonplace/desktop",
     "test": "node --test --test-concurrency=1 test/*.test.js",
     "start": "npm run dev -w @commonplace/desktop",
-    "helper": "node packages/helper/bin/commonplace-helper.js"
+    "relay": "node packages/relay/bin/commonplace-relay.js"
   },
   "engines": {
     "node": ">=20"

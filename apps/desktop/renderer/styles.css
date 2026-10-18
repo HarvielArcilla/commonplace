@@ -695,8 +695,8 @@ body.margin-folded :is(.grid-margin, .margin-inner) { padding-left: 0; padding-r
 /* ---- your computers ------------------------------------------------------ */
 .computers h3 { font: 500 15px/1.3 var(--serif); margin: 16px 0 6px; }
 .computer-actions { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
-.helper-input { flex: 1; min-width: 220px; font: 13px var(--mono); border: 1px solid var(--rule); border-radius: 6px; padding: 6px 8px; background: var(--paper); color: var(--ink); }
-.helper-key { font: 12px var(--mono); }
+.relay-input { flex: 1; min-width: 220px; font: 13px var(--mono); border: 1px solid var(--rule); border-radius: 6px; padding: 6px 8px; background: var(--paper); color: var(--ink); }
+.relay-key { font: 12px var(--mono); }
 
 /* ---- commonSheets ------------------------------------------------------------ */
 .tool-text { font: 600 13px var(--ui); }

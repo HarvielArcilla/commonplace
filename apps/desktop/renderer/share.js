@@ -69,7 +69,7 @@ function shareLists (docId, f) {
       controls))
   }
   out.push(el('h3', {}, 'People with access'), list)
-  out.push(...helperSection(docId, f))
+  out.push(...relaySection(docId, f))
   if (isOwner && f.access.managed) {
     out.push(el('div', { class: 'share-footer' },
       el('button', { type: 'button', class: 'btn btn-quiet', onclick: () => resetLinks(docId) }, 'Stop all invite links…'),
@@ -78,30 +78,30 @@ function shareLists (docId, f) {
   return out
 }
 
-// ---- always-on helpers ---------------------------------------------------------
+// ---- always-on relays ---------------------------------------------------------
 
-export function helperStatus (h) {
+export function relayStatus (h) {
   return h.online ? 'Connected' : h.lastSyncedAt ? `Last reached ${ago(h.lastSyncedAt)}` : 'Not reached yet'
 }
 
-function helperSection (docId, f) {
+function relaySection (docId, f) {
   const writable = f.role === 'owner' || f.role === 'editor'
-  const helpers = f.sync.helpers || []
-  if (!writable && !helpers.length) return []
-  const list = el('ul', { class: 'people', 'aria-label': 'Always-on helpers' }, ...helpers.map((h) => el('li', { class: 'person' },
+  const relays = f.sync.relays || []
+  if (!writable && !relays.length) return []
+  const list = el('ul', { class: 'people', 'aria-label': 'Always-on relays' }, ...relays.map((h) => el('li', { class: 'person' },
     el('span', { class: `presence-dot${h.online ? ' on' : ''}`, 'aria-hidden': 'true' }),
-    el('span', { class: 'person-name' }, el('code', { class: 'helper-key', title: h.address }, `${h.address.slice(0, 18)}…`), el('span', { class: 'person-note' }, helperStatus(h))),
-    writable ? el('button', { type: 'button', class: 'btn btn-quiet btn-danger', onclick: () => act(() => cp.removeHelper(docId, h.key)) }, 'Remove') : null)))
-  const input = el('input', { class: 'helper-input', placeholder: 'Paste a helper address (cph1.…)', 'aria-label': 'Helper address', spellcheck: 'false' })
+    el('span', { class: 'person-name' }, el('code', { class: 'relay-key', title: h.address }, `${h.address.slice(0, 18)}…`), el('span', { class: 'person-note' }, relayStatus(h))),
+    writable ? el('button', { type: 'button', class: 'btn btn-quiet btn-danger', onclick: () => act(() => cp.removeRelay(docId, h.key)) }, 'Remove') : null)))
+  const input = el('input', { class: 'relay-input', placeholder: 'Paste a relay address (cpr1.…)', 'aria-label': 'Relay address', spellcheck: 'false' })
   const add = async () => {
-    try { await cp.addHelper(docId, input.value); input.value = ''; toast('Helper added. It keeps an encrypted copy from now on.') } catch (err) { toast(cleanError(err)) }
+    try { await cp.addRelay(docId, input.value); input.value = ''; toast('Relay added. It keeps an encrypted copy from now on.') } catch (err) { toast(cleanError(err)) }
   }
   input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); add() } })
   return [
-    el('h3', {}, 'Always-on helper'),
+    el('h3', {}, 'Always-on relay'),
     el('p', { class: 'fineprint-plain' }, 'A computer that stays on and keeps an encrypted copy it can\u2019t read, so this file syncs even when nobody else who has it is online. Anyone can run one; see the README.'),
-    helpers.length ? list : null,
-    writable ? el('div', { class: 'invite-row' }, input, el('button', { type: 'button', class: 'btn', onclick: add }, 'Add helper')) : null
+    relays.length ? list : null,
+    writable ? el('div', { class: 'invite-row' }, input, el('button', { type: 'button', class: 'btn', onclick: add }, 'Add relay')) : null
   ].filter(Boolean)
 }
 

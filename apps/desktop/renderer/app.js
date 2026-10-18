@@ -6,7 +6,7 @@ import { state, cp } from './state.js'
 import { initDrive, renderDrive } from './drive-view.js'
 import { initDocView, openDocument, renderDocMargin } from './doc-view.js'
 import { renderStorage, renderLimits } from './settings-view.js'
-import { moveOutDialog, helperStatus } from './share.js'
+import { moveOutDialog, relayStatus } from './share.js'
 import { renderRecovery, restoreDialog } from './recovery-view.js'
 import { openActivity, showActivityCount } from './activity-view.js'
 import { showThread } from './comments-view.js'
@@ -112,14 +112,14 @@ function openProfileDialog () {
   }
   $('#profile-id').textContent = `Your ID: ${state.me.userId}`
   $('#profile-computers').hidden = !state.me.hasChosenName // not during first-run setup
-  $('#profile-helpers').hidden = !state.me.hasChosenName
+  $('#profile-relays').hidden = !state.me.hasChosenName
   $('#profile-recovery').hidden = !state.me.hasChosenName
   $('#profile-storage').hidden = !state.me.hasChosenName
   $('#profile-limits').hidden = !state.me.hasChosenName
   $('#profile-writing').hidden = !state.me.hasChosenName
   cp.getSettings().then((x) => { $('#setting-spellcheck').checked = x.spellcheck }).catch(() => {})
   $('#first-run-restore').hidden = state.me.hasChosenName
-  if (state.me.hasChosenName) { renderComputers(); renderMyHelpers(); renderRecovery(); renderStorage(); renderLimits() }
+  if (state.me.hasChosenName) { renderComputers(); renderMyRelays(); renderRecovery(); renderStorage(); renderLimits() }
   d.showModal()
 }
 
@@ -132,21 +132,21 @@ async function renderComputers () {
     dv.thisComputer ? null : el('button', { type: 'button', class: 'btn btn-quiet btn-danger', onclick: () => unlink(dv) }, 'Unlink'))))
 }
 
-async function renderMyHelpers () {
-  const helpers = await cp.myHelpers()
-  $('#profile-helper-list').hidden = !helpers.length
-  $('#profile-helper-list').replaceChildren(...helpers.map((h) => el('li', { class: 'person' },
+async function renderMyRelays () {
+  const relays = await cp.myRelays()
+  $('#profile-relay-list').hidden = !relays.length
+  $('#profile-relay-list').replaceChildren(...relays.map((h) => el('li', { class: 'person' },
     el('span', { class: `presence-dot${h.online ? ' on' : ''}`, 'aria-hidden': 'true' }),
-    el('span', { class: 'person-name' }, el('code', { class: 'helper-key', title: h.address }, `${h.address.slice(0, 18)}…`), el('span', { class: 'person-note' }, helperStatus(h))),
-    el('button', { type: 'button', class: 'btn btn-quiet btn-danger', onclick: async () => { await cp.removeMyHelper(h.key); renderMyHelpers() } }, 'Remove'))))
+    el('span', { class: 'person-name' }, el('code', { class: 'relay-key', title: h.address }, `${h.address.slice(0, 18)}…`), el('span', { class: 'person-note' }, relayStatus(h))),
+    el('button', { type: 'button', class: 'btn btn-quiet btn-danger', onclick: async () => { await cp.removeMyRelay(h.key); renderMyRelays() } }, 'Remove'))))
 }
 
-$('#profile-helper-add').addEventListener('click', async () => {
+$('#profile-relay-add').addEventListener('click', async () => {
   try {
-    await cp.addMyHelper($('#profile-helper-input').value, { everywhere: $('#profile-helper-all').checked })
-    $('#profile-helper-input').value = ''
-    toast('Helper added')
-    renderMyHelpers()
+    await cp.addMyRelay($('#profile-relay-input').value, { everywhere: $('#profile-relay-all').checked })
+    $('#profile-relay-input').value = ''
+    toast('Relay added')
+    renderMyRelays()
   } catch (err) { toast(cleanError(err)) }
 })
 
@@ -222,7 +222,7 @@ cp.onDriveChanged((files, me, folders, unread) => {
   state.me = me
   if (folders) state.folders = folders
   if (unread != null) showActivityCount(unread)
-  if ($('#profile-dialog').open && !$('#profile-computers').hidden) { renderComputers(); renderMyHelpers() }
+  if ($('#profile-dialog').open && !$('#profile-computers').hidden) { renderComputers(); renderMyRelays() }
   if (state.open) renderDocMargin()
   else renderDrive()
 })

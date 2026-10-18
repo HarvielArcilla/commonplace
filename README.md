@@ -102,7 +102,7 @@ Use the same Drive on several computers: **Link another computer** in your profi
 - Your identity is a keypair created on first launch. Your name and cursor color are yours to pick. Each file's owner signs who may read or edit it, and every computer checks those signatures.
 - Computers on the same network find each other directly and sync without internet.
 
-The tradeoff, chosen on purpose: changes travel only while at least one other person (or computer) that has the file is online. If you'd rather not wait for that, run an always-on helper (below). It's optional and needs nothing but a computer you leave on.
+The tradeoff, chosen on purpose: changes travel only while at least one other person (or computer) that has the file is online. If you'd rather not wait for that, run an always-on relay (below). It's optional and needs nothing but a computer you leave on.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the design and roadmap.
 
@@ -153,16 +153,16 @@ Create a document in one window, open **Share**, copy an invite link, and paste 
 
 To run on a private network instead of the public DHT, set `COMMONPLACE_BOOTSTRAP=host:port` (and optionally `COMMONPLACE_DHT_HOST`).
 
-## Always-on helper (optional)
+## Always-on relay (optional)
 
-A helper is a small program you leave running on any computer that stays on: an old laptop, a Raspberry Pi, a free cloud VM. It keeps encrypted copies of files it can't read, so people who are never online at the same time still sync, and it passes changes along live when two computers can't reach each other directly. It can't forge edits either: every change is signed by the person who made it and checked against the file's members.
+A relay is a small program you leave running on any computer that stays on: an old laptop, a Raspberry Pi, a free cloud VM. It keeps encrypted copies of files it can't read, so people who are never online at the same time still sync, and it passes changes along live when two computers can't reach each other directly. It can't forge edits either: every change is signed by the person who made it and checked against the file's members.
 
 ```sh
-npm run helper                     # from a clone of this repo, or:
-node packages/helper/bin/commonplace-helper.js --dir ~/helper-data --quota 4
+npm run relay                     # from a clone of this repo, or:
+node packages/relay/bin/commonplace-relay.js --dir ~/relay-data --quota 4
 ```
 
-It prints an address starting with `cph1.`. Paste it into your profile in commonplace (used for new files and to sync your own computers), or into a file's **Share** dialog. Everyone working on that file then uses it.
+It prints an address starting with `cpr1.`. Paste it into your profile in commonplace (used for new files and to sync your own computers), or into a file's **Share** dialog. Everyone working on that file then uses it.
 
 ## Build installers
 
@@ -187,10 +187,10 @@ packages/tasks   commonTasks: lists and cards, .csv and Markdown
 packages/calendar commonCalendar: events, repeats, .ics
 packages/whiteboard commonBoard: shapes, drawing them as SVG
 packages/forms   commonForms: questions, sealed answers, .csv
-packages/helper  the optional always-on helper
+packages/relay  the optional always-on relay
 apps/desktop     Electron shell (background process + window UI)
 scripts/         one-step installers and launchers
-test/            end-to-end sync, access, conflict, history, helper, recovery and app tests
+test/            end-to-end sync, access, conflict, history, relay, recovery and app tests
 ```
 
 ## License

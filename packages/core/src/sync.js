@@ -376,7 +376,7 @@ export class SyncEngine extends EventEmitter {
   }
 
   // Adopts a copy of a file's membership log from anywhere (a peer, a
-  // helper). The log checks its own signatures.
+  // relay). The log checks its own signatures.
   mergeMembers (docId, entries) {
     const doc = this.docs.get(docId)
     if (!doc || !doc.members.merge(entries)) return false

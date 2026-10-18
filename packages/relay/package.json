@@ -1,10 +1,10 @@
 {
-  "name": "@commonplace/helper",
+  "name": "@commonplace/relay",
   "version": "0.1.0",
-  "description": "An always-on helper for commonplace: keeps encrypted copies it can't read, so files sync even when nobody else is online.",
+  "description": "An always-on relay for commonplace: keeps encrypted copies it can't read, so files sync even when nobody else is online.",
   "type": "module",
   "main": "src/server.js",
-  "bin": { "commonplace-helper": "bin/commonplace-helper.js" },
+  "bin": { "commonplace-relay": "bin/commonplace-relay.js" },
   "exports": { ".": "./src/server.js" },
   "dependencies": {
     "@commonplace/core": "0.1.0",

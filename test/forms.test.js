@@ -10,7 +10,7 @@ import createTestnet from 'hyperdht/testnet.js'
 import DHT from 'hyperdht'
 import * as Y from 'yjs'
 import { Drive } from '@commonplace/drive'
-import { HelperServer } from '@commonplace/helper'
+import { RelayServer } from '@commonplace/relay'
 import { formsApp } from '@commonplace/forms'
 import { readQuestions, addQuestion, updateQuestion, missingAnswers } from '@commonplace/forms/model'
 import { responsesCsv } from '@commonplace/forms/convert'
@@ -102,7 +102,7 @@ test('respondents answer, editors read, and nobody else can', async (t) => {
 test('answers wait on a relay until someone who can edit comes online', async (t) => {
   const testnet = await createTestnet(3)
   const swarm = () => ({ dht: new DHT({ bootstrap: testnet.bootstrap, host: '127.0.0.1' }), refreshMs: 500 })
-  const relay = new HelperServer({ dir: tmp(), swarm: { dht: new DHT({ bootstrap: testnet.bootstrap, host: '127.0.0.1' }) } })
+  const relay = new RelayServer({ dir: tmp(), swarm: { dht: new DHT({ bootstrap: testnet.bootstrap, host: '127.0.0.1' }) } })
   const address = await relay.start()
   const ownerDir = tmp()
   const opts = { apps: [formsApp], lan: false }
@@ -113,13 +113,13 @@ test('answers wait on a relay until someone who can edit comes online', async (t
   sam.setProfile({ name: 'Sam' })
   await owner.start()
   await sam.start()
-  owner.addMyHelper(address)
+  owner.addMyRelay(address)
   const docId = await owner.create('form', 'Survey')
   formServices(owner).setup(docId)
   const link = owner.invite(docId, 'respondent')
   await sam.join(link)
   await until(() => sam.describe(docId)?.role === 'respondent' && readQuestions(sam.getDoc(docId).ydoc).length, 30000, 'sam admitted with the questions')
-  await until(() => owner.describe(docId).sync.helpers[0]?.online && sam.describe(docId).sync.helpers[0]?.online, 30000, 'both on the relay')
+  await until(() => owner.describe(docId).sync.relays[0]?.online && sam.describe(docId).sync.relays[0]?.online, 30000, 'both on the relay')
   await owner.stop()
 
   // Sam answers while Maya is offline; the answer waits on the relay.
