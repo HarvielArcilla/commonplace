@@ -2,7 +2,7 @@
 // another computer.
 
 import { $, el, ago, toast, dialog, confirmAction, cleanError, listNames } from './ui.js'
-import { state, cp } from './state.js'
+import { state, cp, when } from './state.js'
 
 const ROLE_LABEL = { owner: 'Owner', editor: 'Can edit', viewer: 'Can view', respondent: 'Can answer' }
 
@@ -57,6 +57,7 @@ function shareLists (docId, f) {
       const select = el('select', { class: 'tool-select', 'aria-label': `Role for ${m.name}`, onchange: (e) => act(() => cp.setMemberRole(docId, m.userId, e.target.value)) },
         ...roleOptions(f.kind, m.role))
       controls.append(select,
+        m.via ? null : el('button', { type: 'button', class: 'btn btn-quiet', title: 'When their access ends', onclick: () => accessDialog(docId, m) }, m.until ? 'Change end' : 'Set an end'),
         el('button', { type: 'button', class: 'btn btn-quiet', title: 'Make this person the owner', onclick: () => transfer(docId, m) }, 'Make owner'),
         el('button', { type: 'button', class: 'btn btn-quiet btn-danger', onclick: () => removePerson(docId, m) }, 'Remove'))
     } else {
@@ -65,15 +66,17 @@ function shareLists (docId, f) {
     list.append(el('li', { class: 'person' },
       el('span', { class: `presence-dot${m.online ? ' on' : ''}`, title: m.online ? 'Online' : 'Offline', 'aria-hidden': 'true' }),
       el('span', { class: 'person-name' }, isMe ? `${m.name} (you)` : m.name,
-        m.pending ? el('span', { class: 'person-note' }, 'Joining with a link') : m.via ? el('span', { class: 'person-note' }, m.via.name ? `Through the shared folder “${m.via.name}”` : 'Through a shared folder') : null),
+        m.pending ? el('span', { class: 'person-note' }, 'Joining with a link') : m.via ? el('span', { class: 'person-note' }, m.via.name ? `Through the shared folder “${m.via.name}”` : 'Through a shared folder') : null,
+        m.until ? el('span', { class: 'person-note' }, `Until ${when(m.until)}${m.after === 'hide' ? ', then their copy is removed' : ', then read-only'}`) : null),
       controls))
   }
   out.push(el('h3', {}, 'People with access'), list)
+  if (isOwner && f.guests?.length) out.push(el('h3', {}, 'Guests, only while you’re online'), guestList(f.guests, f.kind))
   out.push(...relaySection(docId, f))
   if (isOwner && f.access.managed) {
     out.push(el('div', { class: 'share-footer' },
       el('button', { type: 'button', class: 'btn btn-quiet', onclick: () => resetLinks(docId) }, 'Stop all invite links…'),
-      el('span', { class: 'fineprint-plain' }, 'Removing someone stops sending them changes. Anything they already have stays on their computer.')))
+      el('span', { class: 'fineprint-plain' }, 'Removing someone, or their access ending, stops sending them changes and moves everyone else to a new key. commonplace can remove their copy if you choose, but can’t stop someone who saved it another way.')))
   }
   return out
 }
@@ -115,8 +118,9 @@ const EXPIRY = [
   { value: '2592000000', label: 'Works for 30 days' },
   { value: '', label: 'Never expires' }
 ]
+const INVITE_DEFAULTS = { role: 'editor', expiresIn: '604800000', once: false, ask: false, access: 'always', after: 'keep' }
 const loadInviteOptions = () => {
-  try { return { role: 'editor', expiresIn: '604800000', once: false, ask: false, ...JSON.parse(localStorage.getItem(INVITE_KEY) || '{}') } } catch { return { role: 'editor', expiresIn: '604800000', once: false, ask: false } }
+  try { return { ...INVITE_DEFAULTS, ...JSON.parse(localStorage.getItem(INVITE_KEY) || '{}') } } catch { return { ...INVITE_DEFAULTS } }
 }
 const saveInviteOptions = (o) => { try { localStorage.setItem(INVITE_KEY, JSON.stringify(o)) } catch {} }
 
@@ -128,34 +132,95 @@ function inviteControls (docId, kind) {
     ...EXPIRY.map((e) => el('option', { value: e.value, selected: e.value === String(o.expiresIn || '') || null }, e.label)))
   const once = el('input', { type: 'checkbox', checked: o.once || null })
   const ask = el('input', { type: 'checkbox', checked: o.ask || null })
+  // How long the access the link gives lasts, and what happens after.
+  const access = el('select', { class: 'tool-select', 'aria-label': 'How long their access lasts' },
+    ...ACCESS.map(([value, label]) => el('option', { value, selected: value === o.access || null }, label)))
+  const untilInput = el('input', { type: 'datetime-local', class: 'tool-select', 'aria-label': 'Access ends', value: localInput(Date.now() + 7 * 864e5) })
+  const after = el('select', { class: 'tool-select', 'aria-label': 'When access ends' },
+    ...AFTER.map(([value, label]) => el('option', { value, selected: value === o.after || null }, label)))
+  const accessRow = el('div', { class: 'invite-row invite-access' }, el('span', { class: 'invite-label' }, 'Access'), access, untilInput, after)
   const note = el('p', { class: 'fineprint-plain' })
-  const options = () => ({ role: role.value, expiresIn: expiry.value, once: once.checked, ask: ask.checked })
+  const options = () => ({ role: role.value, expiresIn: expiry.value, once: once.checked, ask: ask.checked, access: access.value, until: access.value === 'until' ? new Date(untilInput.value).getTime() : null, after: after.value })
   const explain = () => {
     const v = options()
-    note.textContent = v.ask
-      ? 'Each person who opens the link shows up here, and gets nothing until you approve them. You need to be online to approve.'
-      : v.once
-        ? 'The first person you let in uses up the link. They get the file once you\u2019re online.'
-        : 'People who open the link join right away, from you or anyone else who has the file.'
+    untilInput.hidden = v.access !== 'until'
+    after.hidden = v.access === 'always'
+    // A guest link is for one person, admitted by your computer.
+    once.disabled = ask.disabled = v.access === 'online'
+    const ends = v.access === 'online'
+      ? ` They never get the file\u2019s keys: your computer passes changes to them while it\u2019s on, and ${v.after === 'hide' ? 'their copy is removed while you\u2019re away' : 'their copy is read-only while you\u2019re away'}.`
+      : v.access === 'until' ? ` Their access ends on its own; then ${v.after === 'hide' ? 'commonplace removes their copy' : 'they keep a read-only copy'}.` : ''
+    note.textContent = (v.access === 'online'
+      ? 'A guest link works for one person.'
+      : v.ask
+        ? 'Each person who opens the link shows up here, and gets nothing until you approve them. You need to be online to approve.'
+        : v.once
+          ? 'The first person you let in uses up the link. They get the file once you\u2019re online.'
+          : 'People who open the link join right away, from you or anyone else who has the file.') + ends
   }
   // Remember the choices, but not a form's role as the default for other files.
-  for (const c of [role, expiry, once, ask]) c.addEventListener('change', () => { saveInviteOptions({ ...options(), role: kind === 'form' ? loadInviteOptions().role : role.value }); explain() })
+  for (const c of [role, expiry, once, ask, access, after, untilInput]) c.addEventListener('change', () => { const v = options(); saveInviteOptions({ role: kind === 'form' ? loadInviteOptions().role : v.role, expiresIn: v.expiresIn, once: v.once, ask: v.ask, access: v.access, after: v.after }); explain() })
   explain()
   return el('div', { class: 'invite-box' },
     el('div', { class: 'invite-row' }, el('span', { class: 'invite-label' }, 'Invite link'), role, expiry,
       el('button', { type: 'button', class: 'btn btn-primary', onclick: () => copyLink(docId, options()) }, 'Copy invite link')),
+    kind === 'folder' ? null : accessRow,
     el('div', { class: 'invite-options' },
       el('label', { class: 'check' }, once, 'One person only'),
       el('label', { class: 'check' }, ask, 'I approve each person')),
     note)
 }
 
-async function copyLink (docId, { role, expiresIn, once, ask }) {
+const ACCESS = [['always', 'Until I remove them'], ['until', 'Until a date'], ['online', 'Only while I’m online']]
+const AFTER = [['keep', 'Then they keep a read-only copy'], ['hide', 'Then their copy is removed']]
+// A time as a datetime-local value, in this computer's time zone.
+const localInput = (ms) => { const d = new Date(ms); d.setMinutes(d.getMinutes() - d.getTimezoneOffset(), 0, 0); return d.toISOString().slice(0, 16) }
+
+async function copyLink (docId, { role, expiresIn, once, ask, access, until, after }) {
+  if (access === 'until' && !(until > Date.now())) { toast('Choose when their access ends, later than now.'); return }
   try {
-    await cp.copyInvite(docId, role, { expiresIn: Number(expiresIn) || null, once, ask })
-    const what = role === 'viewer' ? 'View-only invite link copied.' : role === 'respondent' ? 'Link to answer the form copied.' : 'Invite link copied.'
-    toast(ask ? `${what} You\u2019ll approve each person.` : what)
+    await cp.copyInvite(docId, role, { expiresIn: Number(expiresIn) || null, once, ask, access, until, after })
+    const what = access === 'online' ? 'Guest link copied. It works for one person, while you’re online.' : role === 'viewer' ? 'View-only invite link copied.' : role === 'respondent' ? 'Link to answer the form copied.' : 'Invite link copied.'
+    toast(ask && access !== 'online' ? `${what} You\u2019ll approve each person.` : what)
   } catch (err) { toast(cleanError(err)) }
+}
+
+// People using guest links on this file.
+function guestList (guests, kind) {
+  return el('ul', { class: 'people', 'aria-label': 'Guests' }, ...guests.map((g) => el('li', { class: 'person' },
+    el('span', { class: `presence-dot${g.online ? ' on' : ''}`, 'aria-hidden': 'true' }),
+    el('span', { class: 'person-name' }, g.guest?.name || 'A guest link nobody has used yet',
+      el('span', { class: 'person-note' }, `${ROLE_LABEL[g.role] || g.role} · ${g.after === 'hide' ? 'copy removed while you’re away' : 'read-only while you’re away'}`)),
+    el('div', { class: 'person-controls' },
+      el('button', { type: 'button', class: 'btn btn-quiet btn-danger', onclick: () => endGuest(g) }, g.guest ? 'End access' : 'Cancel link')))))
+}
+
+async function endGuest (g) {
+  const name = g.guest?.name
+  if (name && !await confirmAction({ title: `End ${name}’s access?`, body: g.after === 'hide' ? `${name}’s copy is removed by commonplace.` : `${name} keeps a read-only copy as it is now.`, confirm: 'End access' })) return
+  if (await act(() => cp.endGuest(g.mirrorId))) toast(name ? `${name}’s access ended` : 'Link cancelled')
+}
+
+// When a member's access ends, and what happens to their copy then.
+async function accessDialog (docId, m) {
+  const ends = el('select', { name: 'ends' }, el('option', { value: 'never', selected: !m.until || null }, 'Never (until I remove them)'), el('option', { value: 'at', selected: Boolean(m.until) || null }, 'At a date and time'))
+  const at = el('input', { type: 'datetime-local', name: 'at', value: localInput(m.until || Date.now() + 7 * 864e5) })
+  const after = el('select', { name: 'after' }, ...AFTER.map(([value, label]) => el('option', { value, selected: value === (m.after || 'keep') || null }, label)))
+  const show = () => { at.hidden = after.hidden = ends.value !== 'at' }
+  ends.addEventListener('change', show)
+  show()
+  const res = await dialog({
+    title: `${m.name}’s access`,
+    fields: [
+      el('label', { class: 'field' }, 'Ends', ends), at, el('label', { class: 'field' }, 'Then', after),
+      el('p', { class: 'fineprint-plain' }, 'Every computer stops syncing with them at that moment, and the next time you’re online everyone else moves to a new key.')
+    ],
+    confirm: 'Save',
+    validate: (d) => (d.ends === 'at' && !(new Date(d.at).getTime() > Date.now()) ? 'Choose a time later than now, or remove them instead.' : null)
+  })
+  if (res?.action !== 'confirm') return
+  const d = res.data
+  if (await act(() => cp.setMemberAccess(docId, m.userId, d.ends === 'at' ? { until: new Date(d.at).getTime(), after: d.after } : { until: null }))) toast('Saved')
 }
 
 function requestList (docId, requests, kind) {
@@ -175,12 +240,15 @@ async function act (fn) {
 }
 
 async function removePerson (docId, m) {
-  const ok = await confirmAction({
+  const after = el('select', { name: 'after' }, ...AFTER.map(([value, label]) => el('option', { value, selected: value === 'keep' || null }, label.replace(/^Then t/, 'T'))))
+  const res = await dialog({
     title: `Remove ${m.name}?`,
-    body: `${m.name} stops receiving changes and can no longer edit. What they already have stays on their computer. Everyone else moves to a new key automatically, and existing invite links stop working.`,
-    confirm: 'Remove'
+    body: `${m.name} stops receiving changes and can no longer edit. Everyone else moves to a new key automatically, and existing invite links stop working.`,
+    fields: [el('label', { class: 'field' }, 'Their copy', after)],
+    confirm: 'Remove',
+    danger: true
   })
-  if (ok && await act(() => cp.removeMember(docId, m.userId))) toast(`${m.name} was removed`)
+  if (res?.action === 'confirm' && await act(() => cp.removeMember(docId, m.userId, { after: res.data.after }))) toast(`${m.name} was removed`)
 }
 
 async function transfer (docId, m) {

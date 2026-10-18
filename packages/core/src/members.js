@@ -7,9 +7,11 @@
 //   create  - the document's first owner (and, for documents made before
 //             membership existed, everyone already working on it)
 //   add     - give someone a role; may carry the current key, sealed to them,
-//             and the shared folder that gave it (folder), if any
+//             the shared folder that gave it (folder), and when their access
+//             ends (until) and what happens to their copy then (after)
 //   role    - change someone's role (viewer, respondent, editor)
-//   remove  - take someone out
+//   access  - change when someone's access ends, and what happens then
+//   remove  - take someone out (after: what happens to their copy)
 //   rotate  - start a new key epoch; the new key is sealed to each remaining
 //             member, and every invite link issued before it stops working
 //   owner   - hand ownership to another member
@@ -22,9 +24,17 @@
 // holding a single-use or approval link get nothing until the owner has
 // admitted them, so those links only work while the owner is online.
 //
-// What this can and can't do: once someone is removed, honest peers stop
-// sending them anything new and stop accepting their edits. Whatever they
-// already had stays on their computer. That is the contract.
+// Access that ends: a member's `until` (ms) is signed in the log like
+// everything else. From then on every honest computer treats them as having
+// no access, by its own clock, and the owner's computer removes them and
+// moves everyone else to a new key as soon as it runs. `after` says what
+// their own computer does with its copy then: 'keep' it (read-only, the
+// default) or 'hide' it (delete it).
+//
+// What this can and can't do: once someone's access ends, honest peers stop
+// sending them anything new and stop accepting their edits. A copy they
+// already have can be deleted by commonplace ('hide'), but nothing can stop
+// someone who saved it some other way. That is the contract.
 
 import crypto from 'node:crypto'
 import { verifySignature } from './identity.js'
@@ -36,6 +46,9 @@ export const ROLES = ['viewer', 'respondent', 'editor', 'owner']
 export const GIVEN_ROLES = ['viewer', 'respondent', 'editor']
 export const canEdit = (role) => role === 'editor' || role === 'owner'
 export const canRespond = (role) => role === 'respondent'
+export const AFTER = ['keep', 'hide']
+const cleanUntil = (v) => (Number.isFinite(v) && v > 0 ? Math.floor(v) : null)
+const cleanAfter = (v) => (AFTER.includes(v) ? v : 'keep')
 
 export function canonical (value) {
   if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`
@@ -55,8 +68,8 @@ function emptyState (docId) {
     docId,
     owner: null,
     owners: new Set(), // everyone who has ever been owner (their invites stay valid)
-    members: new Map(), // userId -> { role, enc }
-    removed: new Set(),
+    members: new Map(), // userId -> { role, enc, folder, until, after }
+    removed: new Map(), // userId -> { after, at }
     epoch: 0,
     grants: new Map(), // userId -> Map(epoch -> sealed key)
     invitesValidFrom: 0,
@@ -99,21 +112,39 @@ function apply (s, e, i) {
       s.members.set(e.owner, { role: 'owner', enc: e.ownerEnc || null })
       if (e.legacy === false) s.legacyLinks = false
       break
-    case 'add':
+    case 'add': {
       if (!GIVEN_ROLES.includes(e.role) && !(e.userId === s.owner && e.role === 'owner')) throw new Error('bad role')
-      s.members.set(e.userId, { role: e.userId === s.owner ? 'owner' : e.role, enc: e.enc || s.members.get(e.userId)?.enc || null, folder: typeof e.folder === 'string' ? e.folder : null })
+      // Adding someone again (to hand them a new key) keeps when their
+      // access ends unless the entry says otherwise.
+      const prev = s.members.get(e.userId)
+      const owner = e.userId === s.owner
+      s.members.set(e.userId, {
+        role: owner ? 'owner' : e.role,
+        enc: e.enc || prev?.enc || null,
+        folder: typeof e.folder === 'string' ? e.folder : null,
+        until: owner ? null : 'until' in e ? cleanUntil(e.until) : prev?.until ?? null,
+        after: 'after' in e ? cleanAfter(e.after) : prev?.after || 'keep'
+      })
       s.removed.delete(e.userId)
       if (e.key) grant(s, e.userId, e.key.epoch, e.key.sealed)
       if (typeof e.via === 'string' && !s.usedInvites.has(e.via)) s.usedInvites.set(e.via, e.userId)
       break
+    }
+    case 'access': {
+      const m = s.members.get(e.userId)
+      if (!m || e.userId === s.owner) throw new Error('bad access change')
+      m.until = cleanUntil(e.until)
+      m.after = cleanAfter(e.after)
+      break
+    }
     case 'role':
       if (!s.members.has(e.userId) || e.userId === s.owner || !GIVEN_ROLES.includes(e.role)) throw new Error('bad role change')
       s.members.get(e.userId).role = e.role
       break
     case 'remove':
       if (e.userId === s.owner) throw new Error('the owner cannot be removed')
+      s.removed.set(e.userId, { after: cleanAfter(e.after || s.members.get(e.userId)?.after), at: e.at || 0 })
       s.members.delete(e.userId)
-      s.removed.add(e.userId)
       break
     case 'rotate':
       if (e.epoch !== s.epoch + 1) throw new Error('epochs must increase by one')
@@ -127,7 +158,7 @@ function apply (s, e, i) {
       s.members.get(s.owner).role = 'editor'
       s.owner = e.userId
       s.owners.add(e.userId)
-      s.members.get(e.userId).role = 'owner'
+      Object.assign(s.members.get(e.userId), { role: 'owner', until: null })
       break
     case 'revoke-invites':
       s.invitesValidFrom = i + 1
@@ -210,6 +241,30 @@ export class Membership {
     return this.state.removed.has(userId)
   }
 
+  // { after, at } for someone taken out, or null.
+  removal (userId) {
+    return this.state.removed.get(userId) || null
+  }
+
+  // Whether someone's access has run out (they're still in the log until
+  // the owner's computer removes them).
+  hasEnded (userId, now = Date.now()) {
+    const m = this.member(userId)
+    return Boolean(m?.until) && now >= m.until
+  }
+
+  // Members whose access has run out, for the owner to remove.
+  lapsed (now = Date.now()) {
+    return [...this.state.members].filter(([userId]) => this.hasEnded(userId, now)).map(([userId, m]) => ({ userId, after: m.after }))
+  }
+
+  // The soonest end of anyone's access still to come, or null.
+  nextEnd (now = Date.now()) {
+    let next = null
+    for (const m of this.state.members.values()) if (m.until && m.until > now && (next == null || m.until < next)) next = m.until
+    return next
+  }
+
   sealedKeyFor (userId, epoch) {
     return this.state.grants.get(userId)?.get(epoch) || null
   }
@@ -221,7 +276,7 @@ export class Membership {
   roleOf (userId, invite, now = Date.now()) {
     if (!this.exists) return { role: 'editor', pending: false, gated: false } // no membership yet: invite link = editor
     const m = this.member(userId)
-    if (m) return { role: m.role, pending: false, gated: false }
+    if (m) return this.hasEnded(userId, now) ? null : { role: m.role, pending: false, gated: false, until: m.until || null }
     if (this.validInvite(invite, { userId, now })) return { role: invite.r, pending: true, gated: Boolean(invite.once || invite.ask) }
     if (this.isRemoved(userId)) return null
     if (!invite && this.state.legacyLinks) return { role: 'editor', pending: true, gated: false }
@@ -236,6 +291,7 @@ export class Membership {
     if (!this.state.owners.has(body.by) || !verifyWith(body.by, body, sig)) return 'invalid'
     if (!(body.q >= this.state.invitesValidFrom)) return 'revoked'
     if (body.x != null && !(now < body.x)) return 'expired'
+    if (body.u != null && !(now < body.u)) return 'expired' // the access it gives has ended
     if (body.once) {
       const usedBy = this.state.usedInvites.get(body.i)
       if (usedBy && usedBy !== userId) return 'used'
@@ -251,7 +307,10 @@ export class Membership {
   // the person joining knows whose file it is before anything arrives.
   // relays: always-on relays the file uses, so a joiner can fetch it from
   // one even when nobody who has it is online.
-  createInvite (identity, role, { expiresAt = null, once = false, ask = false, relays = [] } = {}) {
+  // until, after: when the access it gives ends, and what happens then.
+  // guest: this is a guest link (see drive/guests.js): access only while
+  // the owner is online.
+  createInvite (identity, role, { expiresAt = null, once = false, ask = false, relays = [], until = null, after = 'keep', guest = false } = {}) {
     if (identity.userId !== this.state.owner) throw new Error('Only the owner can invite people.')
     const body = {
       d: this.docId,
@@ -263,7 +322,10 @@ export class Membership {
       x: expiresAt ? Math.floor(expiresAt) : undefined,
       once: once || undefined,
       ask: ask || undefined,
-      h: relays.length ? relays.slice(0, 4) : undefined
+      h: relays.length ? relays.slice(0, 4) : undefined,
+      u: cleanUntil(until) || undefined,
+      a: (until || guest) && after === 'hide' ? 'hide' : undefined,
+      g: guest ? 1 : undefined
     }
     return { ...body, sig: signWith(identity, body) }
   }
@@ -273,11 +335,19 @@ export class Membership {
   // Admits someone with a role, sealing the current key to them if needed.
   // `via` is the id of the single-use invite this uses up, if any; `folder`
   // the shared folder whose members get this file, if that's why.
-  admit (identity, { userId, role, enc, epochSecret, via, folder }) {
+  // `until`, `after`: when their access ends and what happens then
+  // (leave both out to keep what they had).
+  admit (identity, { userId, role, enc, epochSecret, via, folder, until, after }) {
     const key = this.state.epoch > 0 && enc && epochSecret
       ? { epoch: this.state.epoch, sealed: sealTo(enc, epochSecret) }
       : undefined
-    return [this.append(identity, { type: 'add', userId, role: userId === this.state.owner ? 'owner' : role, enc, key, via, folder })]
+    const ends = until !== undefined ? { until: cleanUntil(until), after: cleanAfter(after) } : {}
+    return [this.append(identity, { type: 'add', userId, role: userId === this.state.owner ? 'owner' : role, enc, key, via, folder, ...ends })]
+  }
+
+  // Changes when someone's access ends (null: never) and what happens then.
+  setAccess (identity, userId, { until = null, after = 'keep' } = {}) {
+    return [this.append(identity, { type: 'access', userId, until: cleanUntil(until), after: cleanAfter(after) })]
   }
 
   setRole (identity, userId, role) {
@@ -285,15 +355,17 @@ export class Membership {
   }
 
   // Removes someone and moves everyone else to a fresh key.
-  remove (identity, userId, newEpochSecret) {
-    const out = [this.append(identity, { type: 'remove', userId })]
+  // after: what their computer does with its copy ('keep' or 'hide').
+  remove (identity, userId, newEpochSecret, { after } = {}) {
+    const out = [this.append(identity, { type: 'remove', userId, after: after ? cleanAfter(after) : undefined })]
     out.push(this.rotate(identity, newEpochSecret))
     return out
   }
 
+  // Members whose access has ended don't get the new key.
   rotate (identity, newEpochSecret) {
     const keys = {}
-    for (const [id, m] of this.state.members) if (m.enc) keys[id] = sealTo(m.enc, newEpochSecret)
+    for (const [id, m] of this.state.members) if (m.enc && !this.hasEnded(id)) keys[id] = sealTo(m.enc, newEpochSecret)
     return this.append(identity, { type: 'rotate', epoch: this.state.epoch + 1, keys })
   }
 
@@ -315,6 +387,6 @@ export class Membership {
 
   // With each member's encryption key and the shared folder that added them.
   detailed () {
-    return [...this.state.members].map(([userId, m]) => ({ userId, role: m.role, enc: m.enc, folder: m.folder || null }))
+    return [...this.state.members].map(([userId, m]) => ({ userId, role: m.role, enc: m.enc, folder: m.folder || null, until: m.until || null, after: m.after || 'keep' }))
   }
 }

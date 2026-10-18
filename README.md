@@ -84,6 +84,14 @@ Everything you share lives on the computers of the people you share it with, so 
 
 Invite people to edit, only view, or (for forms) answer; change their role, remove them, or hand ownership to someone else. Invite links expire (after 7 days unless you choose otherwise) and can be limited to one person or need your approval for each person.
 
+**How long access lasts.** Each invite link, and each person in the Share dialog, can have access:
+
+- **until you remove them** (the default);
+- **until a date and time**, when it ends on its own on every computer;
+- **only while you're online**, as a *guest*: they never receive the file's keys, and your computer passes changes to them only while it's running.
+
+For the last two, you choose what happens to their copy when access ends (or, for a guest, while you're away): they keep a **read-only copy** as it was, or commonplace **removes it**. Their edits stop being accepted either way. commonplace removes its own copy as asked, but can't stop someone who saved one another way; ending access stops everything new, and that part can't be worked around. Anyone can always remove any file from their own Drive, whatever their access.
+
 ![The share dialog: invite link options and the people with access](docs/images/share.png)
 
 **Shared folders.** Make one with New → Shared folder, or share one of your folders (with its subfolders). Everyone in it gets everything inside: what you put there and what the others do. Folder editors can edit the files, viewers can view them and answer forms. Moving a file in shares it; moving it out, or removing someone from the folder, takes away what they had only through it. Each file's owner does the granting from their own computer whenever it runs, so nobody needs to be online at the same time.
@@ -108,25 +116,40 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the design and roadmap.
 
 ## Install
 
-One command installs everything it needs (Git and Node.js too, if they're missing) into `commonplace` in your home folder, and adds a launcher. Run it again later to update.
+**Download the app.** No Git, Node.js or Terminal needed:
 
-**macOS or Linux** (Terminal):
+| | |
+|---|---|
+| macOS, Apple Silicon (M1 and later) | [commonplace-mac-arm64.dmg](https://github.com/HarvielArcilla/commonplace/releases/latest/download/commonplace-mac-arm64.dmg) |
+| macOS, Intel | [commonplace-mac-x64.dmg](https://github.com/HarvielArcilla/commonplace/releases/latest/download/commonplace-mac-x64.dmg) |
+| Windows 10 and 11 (x64 and ARM) | [commonplace-windows-setup.exe](https://github.com/HarvielArcilla/commonplace/releases/latest/download/commonplace-windows-setup.exe) |
+| Linux | [commonplace-linux-x86_64.AppImage](https://github.com/HarvielArcilla/commonplace/releases/latest/download/commonplace-linux-x86_64.AppImage) |
+
+Every version is on the [releases page](https://github.com/HarvielArcilla/commonplace/releases). The builds aren't signed with a paid developer certificate, so the first time:
+
+- **macOS:** open the `.dmg` and drag commonplace to Applications. Open it; when macOS says it can't check the developer, open **System Settings → Privacy & Security** and choose **Open Anyway**.
+- **Windows:** run the installer; if SmartScreen appears, choose **More info**, then **Run anyway**.
+- **Linux:** make the AppImage executable (`chmod +x`) and run it.
+
+When your computer asks whether commonplace may use the network, allow it (on Windows, for private networks too, for same-network sync), or other people's computers can't reach yours. The app tells you when a new version is out and links to it.
+
+**Or install from source**, to always have the newest work on `main`. One command installs everything it needs (Git and Node.js too, if they're missing) into `commonplace` in your home folder, adds a launcher, and from then on **Update and restart** in the app updates it in place.
+
+macOS or Linux (Terminal):
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/HarvielArcilla/commonplace/main/scripts/install.sh | bash
 ```
 
-**Windows** (PowerShell):
+Windows (PowerShell):
 
 ```powershell
 powershell -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/HarvielArcilla/commonplace/main/scripts/install.ps1 | iex"
 ```
 
-Then double-click **commonplace** on your Desktop (or in the app menu on Linux). When your computer asks whether commonplace may use the network, allow it (on Windows, for private networks too, for same-network sync), or other people's computers can't reach yours.
-
-When a new version is on GitHub, the Drive shows **A new version of commonplace is available**; choose **Update and restart** to update in place (or run the install command again). The check asks GitHub's public API about this project's commits, and sends nothing about you or your files; set `COMMONPLACE_NO_UPDATE_CHECK=1` to turn it off. Closing the window quits commonplace, and files stop syncing until you open it again.
-
 The scripts are short and commented: read [install.sh](scripts/install.sh) or [install.ps1](scripts/install.ps1) before running them if you like. Settings: `COMMONPLACE_DIR` (install location), `COMMONPLACE_NO_SHORTCUT=1`.
+
+Either way, the update check only asks GitHub's public API about this project's releases or commits, and sends nothing about you or your files. Turn it off in Settings → Limits and safety. Closing the window quits commonplace, and files stop syncing until you open it again.
 
 ### By hand
 
@@ -167,13 +190,14 @@ It prints an address starting with `cpr1.`. Paste it into your profile in common
 ## Build installers
 
 ```sh
-npm run dist:mac -w @commonplace/desktop   # .dmg and .zip, Apple Silicon and Intel (run on a Mac)
-npm run dist:win -w @commonplace/desktop   # .exe installer, x64 and ARM64 (run on Windows)
+npm run dist:mac -w @commonplace/desktop     # .dmg and .zip, Apple Silicon and Intel (run on a Mac)
+npm run dist:win -w @commonplace/desktop     # one .exe installer for x64 and ARM64 (run on Windows)
+npm run dist:linux -w @commonplace/desktop   # .AppImage
 ```
 
-GitHub Actions (`.github/workflows/build.yml`) runs the tests and builds both on every push to `main`.
+GitHub Actions (`.github/workflows/build.yml`) runs the tests and builds all three on every push to `main`. Pushing a version tag (`git tag v0.2.0 && git push origin v0.2.0`) also publishes them as a GitHub release, which is where the Download links and the installed app's update check look.
 
-Builds are unsigned, because signing requires paid certificates. On macOS, right-click the app and choose Open the first time. On Windows, choose More info, then Run anyway in the SmartScreen prompt.
+Builds aren't signed with paid certificates. The macOS app is signed ad hoc (Apple Silicon won't run an app with no signature at all), so macOS asks you to approve it once rather than calling it damaged.
 
 ## Layout
 

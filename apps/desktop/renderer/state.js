@@ -34,6 +34,14 @@ export const state = {
 // exchanging changes in the background.
 export const formatBytes = (n) => (n < 1024 ? `${n} B` : n < 1024 ** 2 ? `${Math.round(n / 1024)} KB` : n < 1024 ** 3 ? `${(n / 1024 ** 2).toFixed(n < 10 * 1024 ** 2 ? 1 : 0)} MB` : `${(n / 1024 ** 3).toFixed(1)} GB`)
 
+// A moment in words: "today at 5:00 PM", "Oct 20 at 9:30 AM".
+export function when (ms) {
+  const d = new Date(ms)
+  const time = d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+  if (d.toDateString() === new Date().toDateString()) return `today at ${time}`
+  return `${d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: d.getFullYear() === new Date().getFullYear() ? undefined : 'numeric' })} at ${time}`
+}
+
 // Why a file stopped syncing to protect this computer (see Drive._guard).
 const HELD = {
   size: (h) => `Paused at ${formatBytes(h.bytes)} so it doesn’t fill this computer.`,
@@ -49,6 +57,17 @@ export function statusNotes (file, { detailed = false } = {}) {
   const isMe = (p) => p.userId === state.me?.userId
   const here = (file.sync.here || []).filter((p) => !isMe(p))
   const syncing = file.sync.peers.filter((p) => !isMe(p) && !here.some((h) => h.userId === p.userId))
+  if (file.ended) {
+    notes.push({ text: file.ended.after === 'hide' ? 'Your access ended, and its owner asked for your copy to be removed.' : `Your access ended ${ago(file.ended.at)}. This is a read-only copy as it was then.`, cls: 'warn' })
+    return notes
+  }
+  if (file.guest) {
+    const owner = file.owner?.name || 'the owner'
+    notes.push(file.guest.away
+      ? { text: `You can open this only while ${owner} is online, and they’re away${file.guest.after === 'hide' ? ', so it’s empty for now' : '. This copy is read-only until they’re back'}.`, cls: 'warn' }
+      : { text: `A guest: you can open this while ${owner} is online.` })
+  }
+  if (file.accessUntil && !file.ended) notes.push({ text: `Your access ends ${when(file.accessUntil)}.` })
   if (file.access?.removed) {
     notes.push({ text: 'You no longer have access. This copy stays as it was.', cls: 'warn' })
     return notes

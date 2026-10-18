@@ -199,7 +199,8 @@ function applyAccess () {
   const o = state.open
   if (!o?.view) return
   const file = state.files.find((f) => f.docId === o.docId)
-  const writable = Boolean(file) && (file.role === 'owner' || file.role === 'editor') && !file.access?.removed
+  // Not after my access ended, nor as a guest while the owner is away.
+  const writable = Boolean(file) && (file.role === 'owner' || file.role === 'editor') && !file.access?.removed && !file.ended && !file.guest?.away
   o.view.setEditable(writable)
   $('#doc-title').readOnly = !writable || Boolean(o.closePreview)
   $('[data-action="comments"]').hidden = !o.view.comments || file?.role === 'respondent'

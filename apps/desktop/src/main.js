@@ -329,6 +329,7 @@ function registerIpc () {
   // From then on, updates flow both ways as small binary messages.
   ipcMain.handle('doc:open', (_e, docId, clientId) => {
     const doc = drive.getDoc(docId)
+    if (!doc && drive.describe(docId)?.ended) throw new Error('Your access to this file ended, and its owner asked for your copy to be removed. You can remove it from your Drive.')
     if (!doc) throw new Error('This file is no longer in your Drive.')
     openDocs.add(docId)
     drive.setOpen(docId, true)
@@ -347,7 +348,9 @@ function registerIpc () {
 
   // Sharing and access (owner actions are checked again in the engine).
   ipcMain.handle('member:role', (_e, docId, userId, role) => drive.setMemberRole(docId, userId, role))
-  ipcMain.handle('member:remove', (_e, docId, userId) => drive.removeMember(docId, userId))
+  ipcMain.handle('member:remove', (_e, docId, userId, options) => drive.removeMember(docId, userId, options || {}))
+  ipcMain.handle('member:access', (_e, docId, userId, options) => drive.setMemberAccess(docId, userId, options || {}))
+  ipcMain.handle('guests:end', (_e, mirrorId) => drive.guests.end(mirrorId))
   ipcMain.handle('member:transfer', (_e, docId, userId) => drive.transferOwnership(docId, userId))
   ipcMain.handle('invites:reset', (_e, docId) => drive.resetInvites(docId))
   ipcMain.handle('file:syncMode', (_e, docId, mode) => drive.setSyncMode(docId, mode))

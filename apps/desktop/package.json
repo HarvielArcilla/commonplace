@@ -1,7 +1,7 @@
 {
   "name": "@commonplace/desktop",
   "productName": "commonplace",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "A free office suite with no servers and no accounts: documents, spreadsheets, presentations, tasks, calendars, whiteboards, forms and a shared drive.",
   "author": "Harviel Arcilla",
   "license": "MIT",
@@ -13,7 +13,8 @@
     "dist": "node build.mjs && electron-builder",
     "dist:mac": "node build.mjs && electron-builder --mac",
     "dist:win": "node build.mjs && electron-builder --win",
-    "postinstall": "node scripts/brand.mjs"
+    "postinstall": "node scripts/brand.mjs",
+    "dist:linux": "node build.mjs && electron-builder --linux"
   },
   "dependencies": {
     "@commonplace/core": "0.1.0",
@@ -81,7 +82,8 @@
         }
       ],
       "category": "public.app-category.productivity",
-      "identity": null
+      "identity": "-",
+      "artifactName": "commonplace-mac-${arch}.${ext}"
     },
     "win": {
       "target": [
@@ -97,14 +99,16 @@
     "nsis": {
       "oneClick": false,
       "perMachine": false,
-      "allowToChangeInstallationDirectory": true
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "commonplace-windows-setup.${ext}"
     },
     "linux": {
       "target": [
         "AppImage"
       ],
       "category": "Office",
-      "executableName": "commonplace"
+      "executableName": "commonplace",
+      "artifactName": "commonplace-linux-${arch}.${ext}"
     }
   },
   "repository": {

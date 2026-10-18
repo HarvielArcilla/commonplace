@@ -1,7 +1,7 @@
 {
   "name": "commonplace",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "A free, open-source collaborative office suite (docs, sheets, slides, tasks, calendars, whiteboards, forms and a shared drive) with no server and no account.",
   "license": "MIT",
   "workspaces": [

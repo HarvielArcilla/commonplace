@@ -27,6 +27,8 @@ jobs:
             script: dist:mac
           - os: windows-latest
             script: dist:win
+          - os: ubuntu-latest
+            script: dist:linux
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -37,6 +39,11 @@ jobs:
       - run: npm run ${{ matrix.script }} -w @commonplace/desktop -- --publish never
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      # Apple Silicon refuses to run an app with no signature at all, so the
+      # build is signed ad hoc; check it holds up.
+      - name: signature (macOS)
+        if: runner.os == 'macOS'
+        run: for app in apps/desktop/release/mac*/commonplace.app; do codesign --verify --deep --strict "$app"; done
       - uses: actions/upload-artifact@v4
         with:
           name: commonplace-${{ runner.os }}
@@ -44,7 +51,24 @@ jobs:
             apps/desktop/release/*.dmg
             apps/desktop/release/*.zip
             apps/desktop/release/*.exe
+            apps/desktop/release/*.AppImage
           if-no-files-found: error
+
+  # A tag like v0.2.0 publishes the installers as a GitHub release, which
+  # is what the Download links in the README and the app's update check use.
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { path: dist, merge-multiple: true }
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
 
   # Runs the one-step installers on clean macOS and Windows machines.
   installers:

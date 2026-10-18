@@ -18,10 +18,15 @@ import {
 } from '@commonplace/core'
 import { Files, filesApp } from './files.js'
 import { Policy } from './policy.js'
+import { Guests } from './guests.js'
 import { SharedFolders, folderApp, ITEMS } from './shared-folders.js'
 import { openThreadCount } from '@commonplace/core/threads'
 import { Activity } from './activity.js'
 import { Templates } from './templates.js'
+
+// How long a guest waits for the owner before treating them as offline.
+const GUEST_GRACE_MS = 60e3
+const guestOf = (token) => (token?.g ? { after: token.a === 'hide' ? 'hide' : 'keep' } : null)
 
 // Relays used to be called helpers; files and Drives made then keep their
 // relay list under this name, so it stays.
@@ -46,7 +51,7 @@ export class Drive extends EventEmitter {
   // makeThumb(path): a small JPEG data URL for an uploaded image (optional).
   // policy: values that replace the default limits (see policy.js);
   // guardBytes is the old name for policy.docGuardBytes.
-  constructor ({ dataDir, apps = [], swarm = {}, transport = true, lan = true, history = {}, deviceName = defaultDeviceName(), makeThumb = null, guardBytes = null, policy = {} }) {
+  constructor ({ dataDir, apps = [], swarm = {}, transport = true, lan = true, history = {}, deviceName = defaultDeviceName(), makeThumb = null, guardBytes = null, policy = {}, guestGraceMs = GUEST_GRACE_MS }) {
     super()
     this.dataDir = dataDir
     this.policy = new Policy(dataDir, { ...(guardBytes ? { docGuardBytes: guardBytes } : {}), ...policy })
@@ -122,10 +127,22 @@ export class Drive extends EventEmitter {
     this.files.observe((event, tr) => {
       if (!(tr.origin && typeof tr.origin === 'object')) return // only changes that came from my other computers
       for (const [docId, change] of event.changes.keys) {
-        if (change.action === 'add' && this.files.get(docId)?.secret) this._attach(this.files.get(docId))
+        const entry = this.files.get(docId)
+        if (change.action === 'add' && entry?.secret) this._attach(entry)
         else if (change.action === 'delete') this._forget(docId)
+        else if (change.action === 'update' && entry?.ended?.after === 'hide' && this._attached.has(docId)) this._wipe(docId)
       }
     })
+    // Guests (people who can open a file only while I'm online), and what
+    // happens here when my own access to something ends.
+    this.guests = new Guests(this)
+    this.engine.on('access-ended', (docId, { after }) => this._accessEnded(docId, after))
+    this.engine.on('members', (docId) => this._checkMyAccess(docId))
+    this.engine.on('status', (status) => this._watchGuestHost(status))
+    this.guestGraceMs = guestGraceMs
+    this._hostSeen = new Map() // guest file -> when its owner was last connected
+    this._guestTimer = setInterval(() => this._checkGuestHosts(), Math.min(15e3, guestGraceMs / 2))
+    this._guestTimer.unref?.()
     this.devicesMap.observe(() => { this._checkUnlinked(); this._changed() })
 
     this.engine.on('status', (status) => { this._rememberNames(status); this._changed() })
@@ -148,6 +165,7 @@ export class Drive extends EventEmitter {
     this._applyRelays(this.indexId)
     if (this.lan) await this.lan.start().catch((err) => { this.lan = null; this.emit('error', err) })
     for (const entry of this.files.values()) this._attach(entry)
+    this.guests.reconcile()
     this.shared.soon()
     this._seen()
     this._checkUnlinked()
@@ -158,6 +176,8 @@ export class Drive extends EventEmitter {
 
   async stop () {
     clearInterval(this._seenTimer)
+    clearInterval(this._guestTimer)
+    this.guests.destroy()
     this.uploads.destroy()
     this.shared.destroy()
     this.activity.destroy()
@@ -242,9 +262,11 @@ export class Drive extends EventEmitter {
     const changeBy = (recent?.at || 0) >= (entry.lastChangedAt || 0) ? (recent?.by || entry.lastChangedBy) : entry.lastChangedBy
     const changeAt = Math.max(remoteAt, entry.lastEditedAt || 0)
     const members = doc?.members.exists
-      ? doc.members.detailed().map(({ userId, role, folder }) => ({
+      ? doc.members.detailed().map(({ userId, role, folder, until, after }) => ({
         userId,
         role,
+        until,
+        after,
         name: userId === this.identity.userId ? this.identity.name : nameOf(userId),
         online: userId === this.identity.userId || status.peers.some((p) => p.userId === userId),
         // Has it through this shared folder (its name, if I'm in it).
@@ -269,6 +291,8 @@ export class Drive extends EventEmitter {
         managed: Boolean(access.hasMembership)
       },
       members: [...members, ...waiting],
+      // People who can open it only while I'm online (I own it).
+      guests: isOwner ? this.guests.list(docId) : [],
       // People with an approval link asking the owner to let them in.
       requests: isOwner ? this.engine.requests(docId).map((r) => ({ ...r, name: nameOf(r.userId, r.name) })) : [],
       contributed: Boolean(entry.contributed),
@@ -294,6 +318,11 @@ export class Drive extends EventEmitter {
       // Open comments and pending suggestions.
       review: !doc ? { comments: 0, suggestions: 0 } : app?.review ? safeCall(() => app.review(doc.ydoc), { comments: 0, suggestions: 0 }) : { comments: safeCall(() => openThreadCount(doc.ydoc), 0), suggestions: 0 },
       syncMode: entry.syncMode === 'open' ? 'open' : 'always',
+      // My access ended ({ at, after }), or ends at `until`.
+      ended: entry.ended || null,
+      accessUntil: doc?.members.member(this.identity.userId)?.until || null,
+      // A guest: only while the owner is online. away: they aren't now.
+      guest: entry.guest ? { after: entry.guest.after, away: Boolean(entry.guestAway) } : null,
       // Paused to protect this computer (see _guard), and why.
       held: entry.held ? { bytes: entry.heldBytes || 0, reason: entry.heldReason || 'size', folderId: entry.viaFolder || null } : null,
       // Uploaded files: whether the contents are here, and why not.
@@ -359,9 +388,11 @@ export class Drive extends EventEmitter {
     this.dismissed.delete(docId) // asked for it again
     const existing = this.files.get(docId)
     if (existing) {
-      // A newer invite (say, with edit rights) replaces the one I had.
+      // A newer invite (say, with edit rights) replaces the one I had, and
+      // gives back access that had ended.
       if (parsed.token) {
-        this._patch(docId, { invite: parsed.token })
+        this._patch(docId, { invite: parsed.token, ended: null, guest: guestOf(parsed.token) })
+        if (!this._attached.has(docId)) this._attach(this.files.get(docId))
         const doc = this.engine.getDoc(docId)
         if (doc) { doc.invite = parsed.token; this.engine.setActive(docId, false); this._applyActive(docId) }
       }
@@ -376,6 +407,7 @@ export class Drive extends EventEmitter {
       title: 'Waiting for a peer…',
       owner: { userId: parsed.token.by, name: typeof parsed.token.n === 'string' ? parsed.token.n.slice(0, 40) : null },
       folderId: this.folders.has(folderId) ? folderId : null,
+      guest: guestOf(parsed.token),
       addedAt: Date.now()
     })
     this._attach(this.files.get(docId))
@@ -387,15 +419,21 @@ export class Drive extends EventEmitter {
   //   expiresIn  milliseconds until the link stops working (null: never)
   //   once       the first person admitted uses it up
   //   ask        the owner approves each person who uses it
-  invite (docId, role = 'editor', { expiresIn = null, once = false, ask = false } = {}) {
+  // access: 'always' (default), 'until' (with `until`, ms) or 'online'
+  // (a guest link: see guests.js). after: what the person's computer does
+  // with its copy when their access ends: 'keep' (read-only) or 'hide'.
+  invite (docId, role = 'editor', { expiresIn = null, once = false, ask = false, access = 'always', until = null, after = 'keep' } = {}) {
     const entry = this.files.get(docId)
     const doc = this.engine.getDoc(docId)
     if (!entry || !doc) return null
     if (!doc.members.exists && readMeta(doc.ydoc)?.owner?.userId === this.identity.userId) this.engine.ensureMembership(docId)
     if (doc.members.owner !== this.identity.userId) throw new Error('Only the owner can invite people to this file.')
+    if (access === 'online') return this.guests.createInvite(docId, role, { after, expiresIn })
+    if (access === 'until' && !(until > Date.now())) throw new Error('Choose when their access ends, later than now.')
     const expiresAt = expiresIn ? Date.now() + expiresIn : null
     const relays = [...doc.ydoc.getMap(RELAYS_MAP).keys()]
-    return encodeInvite(Buffer.from(entry.secret, 'base64'), this.engine.createInvite(docId, role, { expiresAt, once, ask, relays }))
+    const ends = access === 'until' ? { until, after } : {}
+    return encodeInvite(Buffer.from(entry.secret, 'base64'), this.engine.createInvite(docId, role, { expiresAt, once, ask, relays, ...ends }))
   }
 
   // ---- always-on relays ------------------------------------------------------
@@ -536,16 +574,105 @@ export class Drive extends EventEmitter {
 
   // Someone who has a file through a shared folder they're still in would
   // only get it back: say so instead.
-  removeMember (docId, userId) {
+  // after: 'keep' (their copy stays, read-only) or 'hide' (their computer deletes it).
+  removeMember (docId, userId, { after } = {}) {
+    this._refuseIfFromFolder(docId, userId)
+    this.engine.removeMember(docId, userId, { after })
+  }
+
+  _refuseIfFromFolder (docId, userId) {
     const m = this.engine.membersDetailed(docId).find((x) => x.userId === userId)
     const folder = m?.folder && this.shared.containers().get(docId)?.includes(m.folder) ? this.files.get(m.folder) : null
     if (folder && this.engine.membersDetailed(folder.docId).some((x) => x.userId === userId)) {
       throw new Error(`They have this through the shared folder “${folder.title}”. Remove them from the folder, or move the file out of it.`)
     }
-    this.engine.removeMember(docId, userId)
   }
 
-  transferOwnership (docId, userId) { this.engine.transferOwnership(docId, userId) }
+  // ---- when my own access ends ------------------------------------------------------
+
+  // The owner took me out, or my time ran out: stop, and keep a read-only
+  // copy or delete it, as the owner chose.
+  _checkMyAccess (docId) {
+    const entry = this.files.get(docId)
+    const doc = this.engine.getDoc(docId)
+    if (!entry || !doc?.members.exists) return
+    const removal = doc.members.removal(this.identity.userId)
+    if (removal && !doc.members.member(this.identity.userId)) this._accessEnded(docId, removal.after)
+    else if (entry.ended && doc.myAccess) this._patch(docId, { ended: null }) // given back
+  }
+
+  _accessEnded (docId, after = 'keep') {
+    const entry = this.files.get(docId)
+    if (!entry || entry.ended) return
+    if (this._ownerOf(docId) === this.identity.userId) return
+    this._patch(docId, { ended: { at: Date.now(), after: after === 'hide' ? 'hide' : 'keep' } })
+    if (after === 'hide') this._wipe(docId)
+    this.emit('access-ended', docId, after)
+    this._changed()
+  }
+
+  // Deletes this computer's copy of a file's contents, keeping its place in
+  // the Drive (so it can say what happened, and be removed).
+  _wipe (docId) {
+    this.relays?.setRelays(docId, [])
+    this.uploads.unwatch(docId)
+    this.engine.closeDoc(docId, { deleteLocalData: true })
+    this._attached.delete(docId)
+    this._leaveTopics(docId)
+    this._changed()
+  }
+
+  // ---- as a guest: only while the owner is online -------------------------------------
+
+  _watchGuestHost (status) {
+    const entry = status && this.files.get(status.docId)
+    if (!entry?.guest) return
+    const ownerId = this._ownerOf(status.docId)
+    if (status.peers.some((p) => p.userId === ownerId)) {
+      this._hostSeen.set(status.docId, Date.now())
+      if (entry.guestAway) this._patch(status.docId, { guestAway: false })
+    }
+  }
+
+  // A guest's copy with 'hide' is deleted once the owner has been gone a
+  // minute (it comes back when they are online again); with 'keep' it just
+  // can't be edited meanwhile.
+  _checkGuestHosts (now = Date.now()) {
+    for (const entry of this.files.values()) {
+      if (!entry.guest || entry.ended) continue
+      const ownerId = this._ownerOf(entry.docId)
+      if ((this.engine.status(entry.docId)?.peers || []).some((p) => p.userId === ownerId)) {
+        this._hostSeen.set(entry.docId, now)
+        if (entry.guestAway) this._patch(entry.docId, { guestAway: false })
+        continue
+      }
+      const seen = this._hostSeen.get(entry.docId) || 0
+      if (now - seen < this.guestGraceMs) continue
+      if (!entry.guestAway) this._patch(entry.docId, { guestAway: true })
+      const doc = this.engine.getDoc(entry.docId)
+      const hasContent = doc && doc.ydoc.store.clients.size > 0
+      if (entry.guest.after === 'hide' && hasContent) {
+        this._wipe(entry.docId)
+        this._attach(this.files.get(entry.docId))
+      }
+    }
+  }
+
+  // Guests are served by the owner, so they end when ownership moves.
+  transferOwnership (docId, userId) {
+    this.engine.transferOwnership(docId, userId)
+    this.guests.endAllFor(docId)
+  }
+
+  // When someone's access ends (until: ms, or null for never) and what their
+  // computer does with its copy then. Not for access a shared folder gives:
+  // the folder would only give it back.
+  setMemberAccess (docId, userId, { until = null, after = 'keep' } = {}) {
+    this._refuseIfFromFolder(docId, userId)
+    if (until != null && !(until > Date.now())) throw new Error('Choose a time later than now, or remove them instead.')
+    this.engine.setMemberAccess(docId, userId, { until, after })
+  }
+
   resetInvites (docId) { this.engine.resetInvites(docId) }
 
   // 'always': sync whenever commonplace is running (default).
@@ -596,6 +723,7 @@ export class Drive extends EventEmitter {
   async remove (docId, { dismiss = true } = {}) {
     const entry = this.files.get(docId)
     if (this.shared.isFolder(docId)) this._leaveFolder(docId)
+    this.guests.endAllFor(docId)
     if (dismiss && (entry?.viaFolder || this._inMyFolders(docId))) this.dismissed.set(docId, { at: Date.now(), folderId: entry?.viaFolder || this._inMyFolders(docId) })
     this.files.delete(docId)
     await this._forget(docId)
@@ -943,6 +1071,10 @@ export class Drive extends EventEmitter {
 
   _attach (entry) {
     if (this._attached.has(entry.docId)) return
+    if (entry.ended?.after === 'hide') return // deleted when access ended
+    // A guest copy that's deleted while the owner is away starts empty.
+    if (entry.guest?.after === 'hide' && !this.engine.getDoc(entry.docId)) this.store.remove(entry.docId)
+    if (entry.guest && !this._hostSeen.has(entry.docId)) this._hostSeen.set(entry.docId, Date.now()) // a moment to find the owner
     this._attached.add(entry.docId)
     const doc = this.engine.openDoc(Buffer.from(entry.secret, 'base64'), { invite: entry.invite || null, active: this._shouldSync(entry) })
     const refresh = () => {
@@ -988,6 +1120,7 @@ export class Drive extends EventEmitter {
 
   // Tells the relay client which relays a file (or my index) uses.
   _applyRelays (docId) {
+    if (this.files.get(docId)?.guest) { this.relays?.setRelays(docId, []); return } // guests sync only with the owner
     if (!this.relays) return
     if (docId === this.indexId) { this.relays.setRelays(docId, [...this.myRelaysMap.keys()]); return }
     const entry = this.files.get(docId)

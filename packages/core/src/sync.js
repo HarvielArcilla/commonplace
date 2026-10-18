@@ -112,6 +112,9 @@ class DocHandle {
   }
 }
 
+// The end of access an invite link gives (u) and what happens then (a).
+const accessFromInvite = (invite) => (invite?.u ? { until: invite.u, after: invite.a === 'hide' ? 'hide' : 'keep' } : {})
+
 export class SyncEngine extends EventEmitter {
   // device: { id, name } for this computer, so my other computers can tell
   // which of them they're talking to.
@@ -127,6 +130,8 @@ export class SyncEngine extends EventEmitter {
     // how many answers to a form to take from one person.
     this.isBlocked = () => false
     this.answerLimit = () => Infinity
+    this._endsTimer = setInterval(() => { try { this.checkEnds() } catch {} }, 15e3)
+    this._endsTimer.unref?.()
     this.chunks = new ChunkExchange({
       blobs: blobs || new BlobStore(path.join(store.dir, '..', 'blobs')),
       types: MSG,
@@ -188,7 +193,9 @@ export class SyncEngine extends EventEmitter {
       this._scheduleStatus(doc)
     })
 
-    if (doc.active) for (const conn of this.connections) this._sendHellos(doc, conn)
+    // A peer already connected may remember this file from before I closed
+    // it (a copy deleted and opened again): ask them to start over.
+    if (doc.active) for (const conn of this.connections) this._sendHellos(doc, conn, { again: true })
     return doc
   }
 
@@ -361,9 +368,40 @@ export class SyncEngine extends EventEmitter {
     return this.docs.get(docId)?.members.detailed() || []
   }
 
-  // Removes someone: they keep what they already have, but get nothing new.
-  removeMember (docId, userId) {
-    this._ownerAction(docId, (doc) => doc.members.remove(this.identity, userId, crypto.randomBytes(32)))
+  // Removes someone: they get nothing new. after: 'keep' (their copy stays,
+  // read-only) or 'hide' (their computer deletes it).
+  removeMember (docId, userId, { after } = {}) {
+    this._ownerAction(docId, (doc) => doc.members.remove(this.identity, userId, crypto.randomBytes(32), { after }))
+  }
+
+  // When someone's access ends (null: never), and what happens to their copy.
+  setMemberAccess (docId, userId, { until = null, after = 'keep' } = {}) {
+    this._ownerAction(docId, (doc) => doc.members.setAccess(this.identity, userId, { until, after }))
+  }
+
+  // Every few seconds: access that has just ended stops on every computer
+  // (by its own clock), and the owner's computer removes those people and
+  // moves everyone else to a new key. Emits 'access-ended' once when my own
+  // access to a file ends.
+  checkEnds (now = Date.now()) {
+    for (const doc of this.docs.values()) {
+      if (!doc.members.exists) continue
+      if (doc.members.owner === this.identity.userId) {
+        const lapsed = doc.members.lapsed(now)
+        if (lapsed.length) {
+          this._ownerAction(doc.docId, (d) => { for (const x of lapsed) d.members.remove(this.identity, x.userId, crypto.randomBytes(32), { after: x.after }) })
+          continue
+        }
+      }
+      const mine = doc.members.member(this.identity.userId)
+      const ended = doc.members.hasEnded(this.identity.userId, now)
+      if (ended && !doc.endedNoticed) { doc.endedNoticed = true; this.emit('access-ended', doc.docId, { after: mine?.after || 'keep' }) }
+      if (!doc.members.nextEnd(now - 60e3) && !doc.members.lapsed(now).length) continue
+      for (const [conn, link] of doc.links) {
+        this._checkAccess(doc, link)
+        if (!this._mayExchange(doc, link) || link.contentEpoch !== doc.contentEpoch) this._stopContent(doc, conn, link)
+      }
+    }
   }
 
   transferOwnership (docId, userId) {
@@ -393,9 +431,10 @@ export class SyncEngine extends EventEmitter {
       if (e.by !== this.identity.userId || !mineNow()) continue
       const m = doc.members
       try {
-        if (e.type === 'add' && !m.member(e.userId)) this._admit(doc, { userId: e.userId, role: e.role, enc: e.enc, invite: e.via ? { once: true, i: e.via } : null, folder: e.folder })
+        if (e.type === 'add' && !m.member(e.userId)) this._admit(doc, { userId: e.userId, role: e.role, enc: e.enc, invite: e.via ? { once: true, i: e.via } : null, folder: e.folder, ...('until' in e ? { until: e.until, after: e.after } : {}) })
+        else if (e.type === 'access' && m.member(e.userId)) m.setAccess(this.identity, e.userId, { until: e.until, after: e.after })
         else if (e.type === 'role' && m.member(e.userId) && m.member(e.userId).role !== e.role) m.setRole(this.identity, e.userId, e.role)
-        else if (e.type === 'remove' && m.member(e.userId)) m.remove(this.identity, e.userId, crypto.randomBytes(32))
+        else if (e.type === 'remove' && m.member(e.userId)) m.remove(this.identity, e.userId, crypto.randomBytes(32), { after: e.after })
         else if (e.type === 'rotate' && !dropped.some((x) => x.type === 'remove')) m.rotate(this.identity, crypto.randomBytes(32))
         else if (e.type === 'owner' && m.member(e.userId)) m.transfer(this.identity, e.userId)
         else if (e.type === 'revoke-invites') m.revokeInvites(this.identity)
@@ -485,6 +524,7 @@ export class SyncEngine extends EventEmitter {
   }
 
   destroy () {
+    clearInterval(this._endsTimer)
     this.chunks.destroy()
     for (const conn of this.connections) conn.destroy()
     for (const docId of [...this.docs.keys()]) this.closeDoc(docId)
@@ -503,14 +543,21 @@ export class SyncEngine extends EventEmitter {
     return true
   }
 
-  // Opens any keys the membership log has sealed to me.
+  // Opens any keys the membership log has sealed to me. The log decides:
+  // if I hold a different key for an epoch (from a branch of the log that
+  // lost when two of the owner's computers changed access at once), the
+  // log's key replaces it, or I'd be locked out of the file from then on.
   _collectGrants (doc) {
     let added = false
     for (let e = 1; e <= doc.members.epoch; e++) {
-      if (doc.epochs.has(e)) continue
       const sealed = doc.members.sealedKeyFor(this.identity.userId, e)
+      if (!sealed && doc.epochs.has(e)) continue
       const secret = sealed && this.identity.openSealed(sealed)
-      if (secret?.length === 32) added = this._addEpoch(doc, e, secret) || added
+      if (secret?.length !== 32) continue
+      const held = doc.epochs.get(e)
+      if (held && held.secret.equals(secret)) continue
+      if (held) doc.epochs.delete(e)
+      added = this._addEpoch(doc, e, secret) || added
     }
     return added
   }
@@ -536,9 +583,9 @@ export class SyncEngine extends EventEmitter {
     this._scheduleStatus(doc)
   }
 
-  _sendHellos (doc, conn) {
+  _sendHellos (doc, conn, opts) {
     if (!doc.active) return
-    for (const epoch of doc.epochs.keys()) this._sendHello(doc, conn, epoch)
+    for (const epoch of doc.epochs.keys()) this._sendHello(doc, conn, epoch, opts)
   }
 
   // again: ask the peer to send what I'm missing, even though we're already
@@ -665,7 +712,7 @@ export class SyncEngine extends EventEmitter {
       conn.send(MSG.MEMBERS, doc.docId, epoch, seal(doc.keyFor(epoch), Buffer.from(JSON.stringify(doc.members.entries))))
     }
     if (isNew) this._sendHellos(doc, conn) // they may have joined after we connected
-    else if (newEpoch) this._sendHello(doc, conn, epoch)
+    else if (newEpoch || info.again === true) this._sendHello(doc, conn, epoch) // (never with again: no loops)
 
     const access = this._checkAccess(doc, link)
     if (doc.members.owner === this.identity.userId && access && link.user.userId !== this.identity.userId) this._ownerGreets(doc, link, access)
@@ -703,7 +750,7 @@ export class SyncEngine extends EventEmitter {
         }
         return
       }
-      this._admit(doc, { userId, role: access.role, enc: link.enc, invite: link.invite })
+      this._admit(doc, { userId, role: access.role, enc: link.enc, invite: link.invite, ...accessFromInvite(link.invite) })
       this._membersChanged(doc)
       return
     }
@@ -715,14 +762,16 @@ export class SyncEngine extends EventEmitter {
     }
   }
 
-  _admit (doc, { userId, role, enc, invite = null, folder = undefined }) {
+  _admit (doc, { userId, role, enc, invite = null, folder = undefined, until = undefined, after = undefined }) {
     doc.members.admit(this.identity, {
       userId,
       role,
       enc,
       epochSecret: doc.epochs.get(doc.members.epoch)?.secret,
       via: invite?.once ? invite.i : undefined,
-      folder
+      folder,
+      until,
+      after
     })
   }
 

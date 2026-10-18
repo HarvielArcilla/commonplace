@@ -1204,6 +1204,15 @@ textarea.a-text { resize: vertical; }
 .grid td.has-comment::after { content: ''; position: absolute; top: 0; right: 0; border-style: solid; border-width: 0 7px 7px 0; border-color: transparent #e0a526 transparent transparent; }
 .mention { color: var(--accent); font-weight: 600; }
 .mention.mention-me { background: color-mix(in srgb, var(--accent) 14%, transparent); border-radius: 3px; padding: 0 2px; }
+/* how long access lasts */
+.invite-access { margin-top: 6px; flex-wrap: wrap; }
+.invite-access input[type="datetime-local"] { min-width: 0; }
+.invite-access .tool-select { width: auto; max-width: none; }
+.share .person { flex-wrap: wrap; }
+.share .person-name { min-width: 150px; }
+.share .person-controls { flex-wrap: wrap; justify-content: flex-end; margin-left: auto; }
+.person-name .person-note + .person-note { margin-top: 1px; }
+
 /* limits and safety */
 .settings-sub { font: 600 13px var(--serif); color: var(--ink-soft); margin: 16px 0 6px; }
 .limits { display: grid; gap: 4px; margin-bottom: 10px; }
