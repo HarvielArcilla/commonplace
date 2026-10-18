@@ -237,7 +237,7 @@ export class SharedFolders {
         this.drive._patch(entry.docId, { viaFolder: null })
         continue
       }
-      this.drive.remove(entry.docId)
+      this.drive.remove(entry.docId, { dismiss: false })
     }
   }
 }

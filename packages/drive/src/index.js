@@ -591,10 +591,12 @@ export class Drive extends EventEmitter {
   // Removing is always possible, whatever my access: it only deletes this
   // Drive's copy. A file a shared folder brought stays gone until I ask
   // for it back.
-  async remove (docId) {
+  // dismiss: false when the Drive itself takes a file out (it left the
+  // folder that brought it), so it can come back if it's put back.
+  async remove (docId, { dismiss = true } = {}) {
     const entry = this.files.get(docId)
     if (this.shared.isFolder(docId)) this._leaveFolder(docId)
-    if (entry?.viaFolder || this._inMyFolders(docId)) this.dismissed.set(docId, { at: Date.now(), folderId: entry?.viaFolder || this._inMyFolders(docId) })
+    if (dismiss && (entry?.viaFolder || this._inMyFolders(docId))) this.dismissed.set(docId, { at: Date.now(), folderId: entry?.viaFolder || this._inMyFolders(docId) })
     this.files.delete(docId)
     await this._forget(docId)
     this.shared.soon()
