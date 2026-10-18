@@ -90,48 +90,46 @@
     </form>
   </dialog>
 
-  <dialog id="profile-dialog" class="dialog">
+  <dialog id="profile-dialog" class="dialog settings-dialog">
     <form method="dialog" id="profile-form" novalidate>
-      <h2>What should collaborators call you?</h2>
-      <p>Your name and color appear next to your cursor. You can change them any time.</p>
-      <p class="first-run-restore" id="first-run-restore">Used commonplace before? <button type="button" class="link-button" id="restore-first">Restore from a backup</button></p>
-      <label class="field">Name<input id="profile-name" maxlength="40" required autocomplete="name" autofocus></label>
-      <fieldset class="colors" id="profile-colors"><legend>Cursor color</legend></fieldset>
-      <section id="profile-computers" class="computers" hidden>
-        <h3>Your computers</h3>
+      <nav class="settings-nav" id="settings-nav" aria-label="Settings">
+        <p class="settings-title">Settings</p>
+        <button type="button" data-page="profile">Name and color</button>
+        <button type="button" data-page="computers">Your computers</button>
+        <button type="button" data-page="recovery">Recovery</button>
+        <button type="button" data-page="relays">Always-on relay</button>
+        <button type="button" data-page="writing">Writing</button>
+        <button type="button" data-page="storage">Storage and people</button>
+        <button type="button" data-page="limits">Limits and safety</button>
+        <button type="button" class="settings-sub-link" data-page="limits" data-anchor="files">Files others share</button>
+        <button type="button" class="settings-sub-link" data-page="limits" data-anchor="folders">Shared folders</button>
+        <button type="button" class="settings-sub-link" data-page="limits" data-anchor="docs">Shared documents</button>
+        <button type="button" class="settings-sub-link" data-page="limits" data-anchor="forms">Forms</button>
+        <button type="button" class="settings-sub-link" data-page="limits" data-anchor="app">Updates</button>
+      </nav>
+      <div class="settings-body">
+      <section class="settings-page" data-page="profile">
+        <h2 id="profile-heading">What should collaborators call you?</h2>
+        <p>Your name and color appear next to your cursor. You can change them any time.</p>
+        <p class="first-run-restore" id="first-run-restore">Used commonplace before? <button type="button" class="link-button" id="restore-first">Restore from a backup</button></p>
+        <label class="field">Name<input id="profile-name" maxlength="40" required autocomplete="name" autofocus></label>
+        <fieldset class="colors" id="profile-colors"><legend>Cursor color</legend></fieldset>
+        <p class="fineprint" id="profile-id"></p>
+      </section>
+      <section id="profile-computers" class="settings-page" data-page="computers" hidden>
+        <h2>Your computers</h2>
         <ul class="people" id="profile-devices" aria-label="Your computers"></ul>
         <div class="computer-actions">
           <button type="button" class="btn" id="link-out">Link another computer…</button>
           <button type="button" class="btn btn-quiet" id="move-out">Move to another computer…</button>
         </div>
       </section>
-      <section id="profile-recovery" class="computers" hidden>
-        <h3>Recovery</h3>
+      <section id="profile-recovery" class="settings-page" data-page="recovery" hidden>
+        <h2>Recovery</h2>
         <div id="profile-recovery-body"></div>
       </section>
-      <section id="profile-writing" class="computers" hidden>
-        <h3>Writing</h3>
-        <label class="check"><input type="checkbox" id="setting-spellcheck"> Check spelling as you type</label>
-        <p class="fineprint-plain">Right-click a word underlined in red for suggestions. On Windows and Linux the dictionary for your language is downloaded once; nothing you write is sent anywhere.</p>
-      </section>
-      <section id="profile-storage" class="computers" hidden>
-        <h3>Storage</h3>
-        <p class="fineprint-plain" id="storage-summary"></p>
-        <ul class="people" id="storage-list" aria-label="What takes the most space"></ul>
-        <h4 class="settings-sub" id="storage-people-title" hidden>Whose files take the most space</h4>
-        <ul class="people" id="storage-people" aria-label="People whose files take the most space"></ul>
-        <h4 class="settings-sub" id="storage-blocked-title" hidden>Blocked</h4>
-        <p class="fineprint-plain" id="storage-blocked-note" hidden>This computer ignores them: their files pause, their uploads never download, and nothing is exchanged with them.</p>
-        <ul class="people" id="storage-blocked" aria-label="People you’ve blocked"></ul>
-      </section>
-      <section id="profile-limits" class="computers" hidden>
-        <h3>Limits and safety</h3>
-        <p class="fineprint-plain">How much the people you share with can make this computer download and keep. Each computer sets its own limits.</p>
-        <div id="limits-form" class="limits"></div>
-        <button type="button" class="btn btn-quiet" id="limits-reset">Restore the defaults</button>
-      </section>
-      <section id="profile-relays" class="computers" hidden>
-        <h3>Always-on relay</h3>
+      <section id="profile-relays" class="settings-page" data-page="relays" hidden>
+        <h2>Always-on relay</h2>
         <p class="fineprint-plain">A computer you leave on keeps encrypted copies it can’t read, so your files and your computers sync even when nothing else is online. New files you make use it.</p>
         <ul class="people" id="profile-relay-list" aria-label="Your relays"></ul>
         <div class="invite-row">
@@ -140,11 +138,32 @@
         </div>
         <label class="check"><input type="checkbox" id="profile-relay-all"> Also use it for every file I own now</label>
       </section>
-      <p class="fineprint" id="profile-id"></p>
+      <section id="profile-writing" class="settings-page" data-page="writing" hidden>
+        <h2>Writing</h2>
+        <label class="check"><input type="checkbox" id="setting-spellcheck"> Check spelling as you type</label>
+        <p class="fineprint-plain">Right-click a word underlined in red for suggestions. On Windows and Linux the dictionary for your language is downloaded once; nothing you write is sent anywhere.</p>
+      </section>
+      <section id="profile-storage" class="settings-page" data-page="storage" hidden>
+        <h2>Storage and people</h2>
+        <p class="fineprint-plain" id="storage-summary"></p>
+        <ul class="people" id="storage-list" aria-label="What takes the most space"></ul>
+        <h4 class="settings-sub" id="storage-people-title" hidden>Whose files take the most space</h4>
+        <ul class="people" id="storage-people" aria-label="People whose files take the most space"></ul>
+        <h4 class="settings-sub" id="storage-blocked-title" hidden>Blocked</h4>
+        <p class="fineprint-plain" id="storage-blocked-note" hidden>This computer ignores them: their files pause, their uploads never download, and nothing is exchanged with them.</p>
+        <ul class="people" id="storage-blocked" aria-label="People you’ve blocked"></ul>
+      </section>
+      <section id="profile-limits" class="settings-page" data-page="limits" hidden>
+        <h2>Limits and safety</h2>
+        <p class="fineprint-plain">How much the people you share with can make this computer download and keep. Each computer sets its own limits.</p>
+        <div id="limits-form" class="limits"></div>
+        <button type="button" class="btn btn-quiet" id="limits-reset">Restore the defaults</button>
+      </section>
       <p class="error" id="profile-error" role="alert"></p>
-      <div class="dialog-actions">
+      </div>
+      <div class="dialog-actions settings-actions">
         <span class="spacer"></span>
-        <button type="submit" class="btn btn-primary">Save</button>
+        <button type="submit" class="btn btn-primary" id="profile-save">Save</button>
       </div>
     </form>
   </dialog>

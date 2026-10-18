@@ -55,7 +55,7 @@ export async function renderLimits () {
   const form = $('#limits-form')
   const groups = Object.entries(p.groups).map(([group, title]) => {
     const fields = Object.entries(p.fields).filter(([, f]) => f.group === group)
-    return el('fieldset', { class: 'limits-group' },
+    return el('fieldset', { class: 'limits-group', id: `limits-${group}` },
       el('legend', {}, title),
       ...fields.map(([key, f]) => fieldRow(key, f, p.values[key], p.defaults[key])))
   })

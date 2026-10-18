@@ -100,9 +100,14 @@ document.querySelectorAll('[data-close]').forEach((b) => b.addEventListener('cli
 
 // ---- profile -----------------------------------------------------------------
 
-function openProfileDialog () {
+const PAGE_KEY = 'commonplace.settingsPage'
+
+// Settings: one page at a time, chosen on the left. The first time, only
+// the name and color, to get started.
+function openProfileDialog (page = null) {
   const d = $('#profile-dialog')
-  $('#profile-name').value = state.me.hasChosenName ? state.me.name : ''
+  const firstRun = !state.me.hasChosenName
+  $('#profile-name').value = firstRun ? '' : state.me.name
   const colors = $('#profile-colors')
   colors.querySelectorAll('label').forEach((l) => l.remove())
   for (const c of COLORS) {
@@ -111,17 +116,37 @@ function openProfileDialog () {
       el('span', { class: 'swatch', style: `--swatch:${c}` })))
   }
   $('#profile-id').textContent = `Your ID: ${state.me.userId}`
-  $('#profile-computers').hidden = !state.me.hasChosenName // not during first-run setup
-  $('#profile-relays').hidden = !state.me.hasChosenName
-  $('#profile-recovery').hidden = !state.me.hasChosenName
-  $('#profile-storage').hidden = !state.me.hasChosenName
-  $('#profile-limits').hidden = !state.me.hasChosenName
-  $('#profile-writing').hidden = !state.me.hasChosenName
+  d.classList.toggle('first-run', firstRun)
+  $('#settings-nav').hidden = firstRun
+  $('#profile-heading').textContent = firstRun ? 'What should collaborators call you?' : 'Name and color'
+  $('#first-run-restore').hidden = !firstRun
+  $('#profile-save').textContent = firstRun ? 'Start' : 'Done'
+  let saved = null
+  try { saved = localStorage.getItem(PAGE_KEY) } catch {}
+  showSettingsPage(firstRun ? 'profile' : page || saved || 'profile')
   cp.getSettings().then((x) => { $('#setting-spellcheck').checked = x.spellcheck }).catch(() => {})
-  $('#first-run-restore').hidden = state.me.hasChosenName
-  if (state.me.hasChosenName) { renderComputers(); renderMyRelays(); renderRecovery(); renderStorage(); renderLimits() }
-  d.showModal()
+  if (!firstRun) { renderComputers(); renderMyRelays(); renderRecovery(); renderStorage(); renderLimits() }
+  if (!d.open) d.showModal()
 }
+
+function showSettingsPage (key) {
+  const pages = [...document.querySelectorAll('#profile-dialog .settings-page')]
+  if (!pages.some((p) => p.dataset.page === key)) key = 'profile'
+  for (const p of pages) p.hidden = p.dataset.page !== key
+  for (const b of document.querySelectorAll('#settings-nav button:not([data-anchor])')) b.setAttribute('aria-current', String(b.dataset.page === key))
+  $('#profile-dialog .settings-body').scrollTop = 0
+  try { localStorage.setItem(PAGE_KEY, key) } catch {}
+}
+
+// Anything can open a settings page: dispatch 'commonplace:settings' { page }.
+window.addEventListener('commonplace:settings', (e) => openProfileDialog(e.detail?.page || null))
+
+$('#settings-nav').addEventListener('click', (e) => {
+  const b = e.target.closest('button[data-page]')
+  if (!b) return
+  showSettingsPage(b.dataset.page)
+  if (b.dataset.anchor) document.getElementById(`limits-${b.dataset.anchor}`)?.scrollIntoView({ block: 'start' })
+})
 
 async function renderComputers () {
   const devices = await cp.listDevices()
@@ -171,7 +196,7 @@ $('#profile-form').addEventListener('submit', async (e) => {
 })
 $('#profile-name').addEventListener('input', () => { $('#profile-error').textContent = '' })
 $('#profile-dialog').addEventListener('cancel', (e) => { if (!state.me?.hasChosenName) e.preventDefault() })
-$('[data-action="profile"]').addEventListener('click', openProfileDialog)
+$('[data-action="profile"]').addEventListener('click', () => openProfileDialog())
 $('#move-out').addEventListener('click', () => {
   $('#profile-dialog').close()
   moveOutDialog({ keep: false })

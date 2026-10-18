@@ -531,6 +531,30 @@ body.margin-folded :is(.grid-margin, .margin-inner) { padding-left: 0; padding-r
   width: min(460px, 92vw);
 }
 .dialog-wide { width: min(560px, 94vw); }
+
+/* settings: pages chosen on the left */
+.settings-dialog { width: min(860px, 94vw); height: min(660px, 88vh); padding: 0; overflow: hidden; }
+.settings-dialog > form { display: grid; grid-template-columns: 210px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; height: 100%; }
+.settings-nav { grid-row: 1 / 3; display: flex; flex-direction: column; gap: 2px; padding: 22px 12px; background: var(--paper); border-right: 1px solid var(--rule); overflow-y: auto; }
+.settings-title { font: 600 15px var(--serif); color: var(--ink) !important; margin: 0 0 10px 10px !important; }
+.settings-nav button { text-align: left; border: 0; background: none; padding: 7px 10px; border-radius: 6px; font: 14px/1.3 var(--serif); color: var(--ink-soft); cursor: pointer; }
+.settings-nav button:hover { background: color-mix(in srgb, var(--accent) 6%, transparent); color: var(--ink); }
+.settings-nav button[aria-current="true"] { background: color-mix(in srgb, var(--accent) 11%, transparent); color: var(--ink); font-weight: 600; }
+.settings-nav[hidden] { display: none; }
+.settings-nav .settings-sub-link { padding: 4px 10px 4px 22px; font-size: 13px; color: var(--ink-faint); }
+.settings-body { overflow-y: auto; padding: 24px 28px 8px; }
+.settings-page h2 { margin-bottom: 10px; }
+.settings-actions { margin: 0; padding: 12px 28px 18px; border-top: 1px solid var(--rule); }
+.settings-dialog.first-run { width: min(460px, 92vw); height: fit-content; }
+.settings-dialog.first-run > form { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto; height: auto; }
+.settings-dialog.first-run .settings-body { padding: 24px 24px 0; }
+.settings-dialog.first-run .settings-actions { border-top: 0; padding: 8px 24px 22px; }
+@media (max-width: 620px) {
+  .settings-dialog > form { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr) auto; }
+  .settings-nav { grid-row: auto; flex-direction: row; overflow-x: auto; padding: 10px; border-right: 0; border-bottom: 1px solid var(--rule); }
+  .settings-title { display: none; }
+  .settings-nav button { white-space: nowrap; }
+}
 .dialog::backdrop { background: rgba(16, 19, 26, 0.35); }
 .dialog h2 { font: 500 20px/1.3 var(--serif); margin: 0 0 6px; }
 .dialog p { color: var(--ink-soft); margin: 0 0 14px; }
