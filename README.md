@@ -195,7 +195,7 @@ npm run dist:win -w @commonplace/desktop     # one .exe installer for x64 and AR
 npm run dist:linux -w @commonplace/desktop   # .AppImage
 ```
 
-GitHub Actions (`.github/workflows/build.yml`) runs the tests and builds all three on every push to `main`. Pushing a version tag (`git tag v0.2.0 && git push origin v0.2.0`) also publishes them as a GitHub release, which is where the Download links and the installed app's update check look.
+GitHub Actions (`.github/workflows/build.yml`) runs the tests and builds all three on every push to `main`. A new version number in `apps/desktop/package.json` (or a pushed `v…` tag) also publishes them as a GitHub release, which is where the Download links and the installed app's update check look.
 
 Builds aren't signed with paid certificates. The macOS app is signed ad hoc (Apple Silicon won't run an app with no signature at all), so macOS asks you to approve it once rather than calling it damaged.
 

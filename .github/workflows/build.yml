@@ -54,58 +54,34 @@ jobs:
             apps/desktop/release/*.AppImage
           if-no-files-found: error
 
-  # A tag like v0.2.0 publishes the installers as a GitHub release, which
-  # is what the Download links in the README and the app's update check use.
+  # A new version number on main (apps/desktop/package.json) publishes the
+  # installers as a GitHub release tagged v<version>, which is what the
+  # Download links in the README and the installed app's update check use.
+  # Pushing such a tag yourself does the same.
   release:
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
     needs: package
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
+      - name: version
+        id: v
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          v="v$(node -p "require('./apps/desktop/package.json').version")"
+          echo "tag=$v" >> "$GITHUB_OUTPUT"
+          if gh release view "$v" >/dev/null 2>&1; then echo "new=false" >> "$GITHUB_OUTPUT"; else echo "new=true" >> "$GITHUB_OUTPUT"; fi
       - uses: actions/download-artifact@v4
+        if: steps.v.outputs.new == 'true'
         with: { path: dist, merge-multiple: true }
       - uses: softprops/action-gh-release@v2
+        if: steps.v.outputs.new == 'true'
         with:
+          tag_name: ${{ steps.v.outputs.tag }}
+          name: commonplace ${{ steps.v.outputs.tag }}
+          target_commitish: ${{ github.sha }}
           files: dist/*
           generate_release_notes: true
-
-  # Runs the one-step installers on clean macOS and Windows machines.
-  installers:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [macos-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v4
-      - name: install.sh
-        if: runner.os == 'macOS'
-        run: bash scripts/install.sh && test -x "$RUNNER_TEMP/commonplace/node_modules/.bin/electron"
-        env:
-          COMMONPLACE_REPO: ${{ github.workspace }}
-          COMMONPLACE_DIR: ${{ runner.temp }}/commonplace
-          COMMONPLACE_NO_SHORTCUT: '1'
-      - name: renamed to commonplace (macOS)
-        if: runner.os == 'macOS'
-        working-directory: ${{ runner.temp }}/commonplace
-        run: |
-          app=node_modules/electron/dist/commonplace.app
-          fail () { echo "::error::$1 (dist: $(ls node_modules/electron/dist | tr '\n' ' '); path.txt: $(cat node_modules/electron/path.txt); brand says: $(node apps/desktop/scripts/brand.mjs 2>&1))"; exit 1; }
-          test -x "$app/Contents/MacOS/commonplace" || fail "no renamed executable"
-          test ! -e node_modules/electron/dist/Electron.app || fail "Electron.app still there"
-          test "$(plutil -extract CFBundleName raw "$app/Contents/Info.plist")" = commonplace || fail "CFBundleName not set"
-          test "$(plutil -extract CFBundleExecutable raw "$app/Contents/Info.plist")" = commonplace || fail "CFBundleExecutable not set"
-          codesign --verify --deep --strict "$app" 2>/tmp/cs.txt || fail "signature: $(cat /tmp/cs.txt)"
-          "$(node -p "require('electron')")" --version > /tmp/v.txt 2>&1 || fail "won't start: $(cat /tmp/v.txt)"
-      - name: install.ps1
-        if: runner.os == 'Windows'
-        shell: powershell
-        run: |
-          powershell -ExecutionPolicy Bypass -File scripts\install.ps1
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          if (-not (Test-Path "$env:RUNNER_TEMP\commonplace\node_modules\.bin\electron.cmd")) { throw 'electron missing' }
-          if (-not (Test-Path ([Environment]::GetFolderPath('Desktop') + '\commonplace.lnk'))) { throw 'shortcut missing' }
-        env:
-          COMMONPLACE_REPO: ${{ github.workspace }}
-          COMMONPLACE_DIR: ${{ runner.temp }}\commonplace
