@@ -70,7 +70,7 @@ const RANK = { viewer: 0, respondent: 1, editor: 2, owner: 3 }
 const canEdit = (role) => role === 'editor' || role === 'owner'
 
 // The role a folder member gets on a file in it.
-const roleIn = (folderRole, type) => canEdit(folderRole) ? 'editor' : type === 'form' ? 'respondent' : 'viewer'
+const roleIn = (folderRole, type) => canEdit(folderRole) ? 'editor' : type === 'form' ? 'respondent' : folderRole === 'commenter' ? 'commenter' : 'viewer'
 
 export class SharedFolders {
   constructor (drive) {

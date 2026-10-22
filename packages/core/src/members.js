@@ -40,12 +40,13 @@ import crypto from 'node:crypto'
 import { verifySignature } from './identity.js'
 import { sealTo } from './seal.js'
 
-export const ROLES = ['viewer', 'respondent', 'editor', 'owner']
+export const ROLES = ['viewer', 'commenter', 'respondent', 'editor', 'owner']
 // Roles the owner can give someone. A respondent reads the file and may add
 // only their own sealed answers to a form (see respond.js).
-export const GIVEN_ROLES = ['viewer', 'respondent', 'editor']
+export const GIVEN_ROLES = ['viewer', 'commenter', 'respondent', 'editor']
 export const canEdit = (role) => role === 'editor' || role === 'owner'
 export const canRespond = (role) => role === 'respondent'
+export const canComment = (role) => role === 'commenter'
 export const AFTER = ['keep', 'hide']
 const cleanUntil = (v) => (Number.isFinite(v) && v > 0 ? Math.floor(v) : null)
 const cleanAfter = (v) => (AFTER.includes(v) ? v : 'keep')

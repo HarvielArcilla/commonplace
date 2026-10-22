@@ -133,3 +133,36 @@ export function mentionsIn (text, people) {
   }
   return cleanMentions(out)
 }
+
+// ---- commenters ----------------------------------------------------------------
+
+// People with the commenter role may change the comment threads and nothing
+// else. Every computer checks each update from one by applying it to a copy
+// of the file and looking at what changed: every changed type must sit
+// under the 'comments' root, and nothing may be left waiting for parts it
+// depends on (which could land somewhere else later).
+export const MAX_COMMENT_UPDATE = 512 * 1024
+
+export function isCommentUpdate (ydoc, update) {
+  if (!update || update.length > MAX_COMMENT_UPDATE) return false
+  const copy = new Y.Doc({ gc: false })
+  try {
+    Y.applyUpdate(copy, Y.encodeStateAsUpdate(ydoc))
+    let ok = true
+    copy.on('afterTransaction', (tr) => {
+      for (const type of tr.changed.keys()) if (rootName(copy, type) !== COMMENTS) ok = false
+    })
+    Y.applyUpdate(copy, update)
+    return ok && !copy.store.pendingStructs && !copy.store.pendingDs
+  } catch {
+    return false
+  } finally {
+    copy.destroy()
+  }
+}
+
+function rootName (doc, type) {
+  while (type?._item) type = type._item.parent
+  for (const [name, t] of doc.share) if (t === type) return name
+  return null
+}

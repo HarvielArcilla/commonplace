@@ -139,7 +139,7 @@ export function openChip (o, attrs, target) {
   }
   if (attrs.kind === 'person') {
     const member = (fileOf(o.docId)?.members || []).find((m) => m.userId === attrs.ref)
-    const words = attrs.ref === state.me.userId ? 'That’s you.' : member ? `${member.name} can ${member.role === 'viewer' ? 'view' : member.role === 'respondent' ? 'answer' : 'edit'} this file.` : `${attrs.label} doesn’t have this file. Share it with them from Share.`
+    const words = attrs.ref === state.me.userId ? 'That’s you.' : member ? `${member.name} can ${member.role === 'viewer' ? 'view' : member.role === 'commenter' ? 'comment on' : member.role === 'respondent' ? 'answer' : 'edit'} this file.` : `${attrs.label} doesn’t have this file. Share it with them from Share.`
     openMenu(anchor, [{ heading: attrs.label }, { label: words, disabled: true }], { label: attrs.label })
     return
   }

@@ -82,7 +82,7 @@ Everything you share lives on the computers of the people you share it with, so 
 
 ## Sharing
 
-Invite people to edit, only view, or (for forms) answer; change their role, remove them, or hand ownership to someone else. Invite links expire (after 7 days unless you choose otherwise) and can be limited to one person or need your approval for each person.
+Invite people to edit, comment, only view, or (for forms) answer; change their role, remove them, or hand ownership to someone else. Invite links expire (after 7 days unless you choose otherwise) and can be limited to one person or need your approval for each person.
 
 **How long access lasts.** Each invite link, and each person in the Share dialog, can have access:
 
@@ -94,7 +94,7 @@ For the last two, you choose what happens to their copy when access ends (or, fo
 
 ![The share dialog: invite link options and the people with access](docs/images/share.png)
 
-**Shared folders.** Make one with New → Shared folder, or share one of your folders (with its subfolders). Everyone in it gets everything inside: what you put there and what the others do. Folder editors can edit the files, viewers can view them and answer forms. Moving a file in shares it; moving it out, or removing someone from the folder, takes away what they had only through it. Each file's owner does the granting from their own computer whenever it runs, so nobody needs to be online at the same time.
+**Shared folders.** Make one with New → Shared folder, or share one of your folders (with its subfolders). Everyone in it gets everything inside: what you put there and what the others do. Folder editors can edit the files, commenters can comment on them, viewers can view them and answer forms. Moving a file in shares it; moving it out, or removing someone from the folder, takes away what they had only through it. Each file's owner does the granting from their own computer whenever it runs, so nobody needs to be online at the same time.
 
 ![A shared folder's share dialog, with the folder's files behind it](docs/images/shared-folder.png)
 

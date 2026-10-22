@@ -21,11 +21,11 @@ import { ySyncPluginKey } from '@tiptap/y-tiptap'
 import { Pagination, PageBreak } from './pagination.js'
 import { blockKey } from './index.js'
 import { Indent } from './indent.js'
-import { CommentMark, Suggestions, ReviewDocument } from './review.js'
+import { CommentMark, CommentAnchors, Suggestions, ReviewDocument } from './review.js'
 import { Search, Footnote, TableOfContents } from './extras.js'
 import { Chip } from './chips.js'
 
-export { commentAnchors, suggestionList, isSuggesting, withoutSuggestions } from './review.js'
+export { commentAnchors, textAnchor, suggestionList, isSuggesting, withoutSuggestions } from './review.js'
 export { wordCount, footnotesOf, headingsOf, countText } from './extras.js'
 export { actionItems, dayLabel } from './chips.js'
 
@@ -161,6 +161,7 @@ export function createDocsEditor ({ kind, element, ydoc, awareness, user, editab
     Indent,
     ConflictHighlight,
     CommentMark,
+    CommentAnchors,
     Suggestions.configure({ onNewSuggestion: onNewSuggestion || (() => {}) }),
     Markdown,
     PageBreak,

@@ -3,7 +3,10 @@
 // Comments are anchored with a `comment` mark on the text they're about, so
 // the anchor moves with the text as people edit. Several comments can cover
 // the same words. The threads themselves live in the document's 'comments'
-// map (see ./comments.js).
+// map (see ./comments.js). People who can only comment can't add marks to
+// the text, so their threads carry the anchor instead: two CRDT relative
+// positions ({ kind: 'text', from, to }), which move with the text the same
+// way, drawn as decorations that look like the mark.
 //
 // Suggesting mode turns every edit into a tracked change instead: inserted
 // text gets an `insertion` mark, deleted text a `deletion` mark and stays
@@ -13,6 +16,10 @@
 
 import { Extension, Mark, mergeAttributes } from '@tiptap/core'
 import { Document } from '@tiptap/extension-document'
+import { Plugin, PluginKey } from '@tiptap/pm/state'
+import { Decoration, DecorationSet } from '@tiptap/pm/view'
+import * as Y from 'yjs'
+import { ySyncPluginKey, absolutePositionToRelativePosition, relativePositionToAbsolutePosition } from '@tiptap/y-tiptap'
 import {
   suggestChanges, suggestChangesKey, isSuggestChangesEnabled, transformToSuggestionTransaction,
   applySuggestion, revertSuggestion, enableSuggestChanges, disableSuggestChanges
@@ -52,9 +59,65 @@ export const CommentMark = Mark.create({
   }
 })
 
+const anchorsKey = new PluginKey('cp-text-anchors')
+const toB64 = (bytes) => btoa(String.fromCharCode(...bytes))
+const fromB64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0))
+
+// An anchor for the text from..to that doesn't change the document.
+export function textAnchor (editor, from, to) {
+  const ys = ySyncPluginKey.getState(editor.state)
+  if (!ys?.binding) return null
+  const rel = (pos) => toB64(Y.encodeRelativePosition(absolutePositionToRelativePosition(pos, ys.type, ys.binding.mapping)))
+  return { kind: 'text', from: rel(from), to: rel(to) }
+}
+
+// Where the threads anchored that way are now: Map(id -> { from, to }).
+function textAnchored (state) {
+  const out = new Map()
+  const ys = ySyncPluginKey.getState(state)
+  if (!ys?.binding) return out
+  ys.doc.getMap('comments').forEach((thread, id) => {
+    const a = thread?.get?.('anchor')
+    if (a?.kind !== 'text') return
+    try {
+      const at = (s) => relativePositionToAbsolutePosition(ys.doc, ys.type, Y.decodeRelativePosition(fromB64(s)), ys.binding.mapping)
+      const from = at(a.from)
+      const to = at(a.to)
+      if (from != null && to != null && to > from && to <= state.doc.content.size) out.set(id, { from, to })
+    } catch {}
+  })
+  return out
+}
+
+// Draws text-anchored threads like the comment mark.
+export const CommentAnchors = Extension.create({
+  name: 'commentAnchors',
+  addProseMirrorPlugins () {
+    return [new Plugin({
+      key: anchorsKey,
+      props: {
+        decorations (state) {
+          const decos = [...textAnchored(state)].map(([id, { from, to }]) => Decoration.inline(from, to, { class: 'cp-comment', 'data-comment': id }))
+          return decos.length ? DecorationSet.create(state.doc, decos) : DecorationSet.empty
+        }
+      }
+    })]
+  },
+  addCommands () {
+    return {
+      // Redraws after the threads change (they live outside the text).
+      refreshCommentAnchors: () => ({ tr, dispatch }) => {
+        if (dispatch) dispatch(tr.setMeta(anchorsKey, true).setMeta(suggestChangesKey, { skip: true }).setMeta('addToHistory', false))
+        return true
+      }
+    }
+  }
+})
+
 // Where each comment's text is now: Map(id -> { from, to, text }).
 export function commentAnchors (editor) {
   const out = new Map()
+  for (const [id, { from, to }] of textAnchored(editor.state)) out.set(id, { from, to, text: editor.state.doc.textBetween(from, to, ' ') })
   const type = editor.schema.marks.comment
   editor.state.doc.descendants((node, pos) => {
     if (!node.isText) return

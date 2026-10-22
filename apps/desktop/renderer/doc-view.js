@@ -74,9 +74,11 @@ export async function openDocument (docId, { focusTitle = false, initialContent 
 
   // Record that this editing session belongs to me (for "written by"), but
   // only once I actually change something: opening a file is not an edit.
+  // (Commenters never change the text, and may change nothing but comments.)
   let authored = ydoc.getMap('authors').has(String(ydoc.clientID))
+  const mayEdit = () => ['owner', 'editor'].includes(state.files.find((x) => x.docId === docId)?.role)
   ydoc.on('update', (_u, origin) => {
-    if (authored || origin === 'main') return
+    if (authored || origin === 'main' || !mayEdit()) return
     authored = true
     queueMicrotask(() => { if (!ydoc.isDestroyed) ydoc.getMap('authors').set(String(ydoc.clientID), { userId: state.me.userId }) })
   })

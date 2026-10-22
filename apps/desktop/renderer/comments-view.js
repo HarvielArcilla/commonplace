@@ -11,7 +11,7 @@
 
 import { addThread, reply, editMessage, deleteMessage, setResolved, readThreads, mentionsIn } from '@commonplace/core/threads'
 import { recordSuggestions, suggestionAuthor } from '@commonplace/docs/comments'
-import { commentAnchors, suggestionList } from '@commonplace/docs/editor'
+import { commentAnchors, textAnchor, suggestionList } from '@commonplace/docs/editor'
 import { el, ago, toast } from './ui.js'
 import { state } from './state.js'
 import { openPanel, closePanel, openPanelName } from './panel.js'
@@ -23,13 +23,21 @@ const fileOf = (o) => state.files.find((x) => x.docId === o?.docId)
 // People who can be @-mentioned: everyone with access but me.
 const people = (o) => (fileOf(o)?.members || []).filter((m) => m.userId !== state.me.userId && m.name)
 
+const openFile = () => state.files.find((x) => x.docId === state.open?.docId)
 const canEdit = () => {
-  const f = state.files.find((x) => x.docId === state.open?.docId)
+  const f = openFile()
   return Boolean(f) && (f.role === 'owner' || f.role === 'editor') && !f.access?.removed
 }
+// Commenters can comment and reply, but not change the text (so their
+// threads in documents are anchored without a mark, and they don't accept
+// or reject suggestions).
+const canComment = () => canEdit() || (openFile()?.role === 'commenter' && !openFile()?.access?.removed && !openFile()?.ended)
 
-const nameOf = (ydoc, userId) => (userId === state.me.userId ? 'You' : ydoc.getMap('people').get(userId)?.name || 'Someone')
-const colorOf = (ydoc, userId) => (userId === state.me.userId ? state.me.color : ydoc.getMap('people').get(userId)?.color || '#777777')
+// People who can't edit (viewers, commenters) aren't in the file's people
+// map; their names come from the members list.
+const memberName = (userId) => fileOf(state.open)?.members?.find((m) => m.userId === userId)?.name
+const nameOf = (ydoc, userId) => (userId === state.me.userId ? 'You' : ydoc.getMap('people').get(userId)?.name || memberName(userId) || 'Someone')
+const colorOf = (ydoc, userId) => (userId === state.me.userId ? state.me.color : ydoc.getMap('people').get(userId)?.color || fileOf(state.open)?.members?.find((m) => m.userId === userId)?.color || '#777777')
 
 // ---- wiring per open document ----------------------------------------------------
 
@@ -42,12 +50,14 @@ export function attachReview (o) {
     updateCount(o)
     if (view?.o === o) scheduleRender()
   }
+  const redrawAnchors = () => { if (!o.editor.isDestroyed) o.editor.commands.refreshCommentAnchors() }
   const comments = o.ydoc.getMap('comments')
   const suggestions = o.ydoc.getMap('suggestions')
   comments.observeDeep(refresh)
+  comments.observeDeep(redrawAnchors)
   suggestions.observe(refresh)
   o.editor.on('update', refresh)
-  o.cleanup.push(() => { comments.unobserveDeep(refresh); suggestions.unobserve(refresh); o.editor.off('update', refresh) })
+  o.cleanup.push(() => { comments.unobserveDeep(refresh); comments.unobserveDeep(redrawAnchors); suggestions.unobserve(refresh); o.editor.off('update', refresh) })
   refresh()
 }
 
@@ -123,7 +133,7 @@ export function showThread (id) {
 export function newComment () {
   const o = state.open
   if (!o) return
-  if (!canEdit()) { toast('Only people who can edit this file can comment.'); return }
+  if (!canComment()) { toast('Only people who can edit or comment on this file can comment.'); return }
   if (!textMode(o)) {
     const cur = o.view.comments.current?.() || { anchor: { kind: 'file' }, label: 'This file' }
     openComments({ composing: { quote: cur.label, anchor: cur.anchor } })
@@ -132,7 +142,9 @@ export function newComment () {
   }
   const { from, to, empty } = o.editor.state.selection
   if (empty) { toast('Select the text you want to comment on.'); return }
-  openComments({ composing: { quote: o.editor.state.doc.textBetween(from, to, ' ').slice(0, 300), from, to } })
+  // Without edit access the text can't carry a mark, so the thread carries its anchor.
+  const anchor = canEdit() ? null : textAnchor(o.editor, from, to)
+  openComments({ composing: { quote: o.editor.state.doc.textBetween(from, to, ' ').slice(0, 300), from, to, anchor } })
   queueMicrotask(() => view?.body.querySelector('.composer textarea')?.focus())
 }
 
@@ -149,7 +161,8 @@ function render () {
   for (const box of v.body.querySelectorAll('textarea[data-draft]')) v.drafts.set(box.dataset.draft, box.value)
   const focused = document.activeElement?.dataset?.draft
   const { o } = v
-  const writable = canEdit()
+  const writable = canComment()
+  const editable = canEdit()
   if (!textMode(o)) return renderThreads(v, writable, focused)
   const anchors = commentAnchors(o.editor)
   const threads = readThreads(o.ydoc)
@@ -160,12 +173,13 @@ function render () {
 
   const out = []
   if (v.composing) out.push(composer(v))
+  else if (writable && !editable) out.push(el('button', { type: 'button', class: 'btn comment-start', onclick: () => newComment() }, 'Comment on the selection'))
   if (!items.length && !v.composing) {
-    out.push(el('p', { class: 'panel-note' }, writable
+    out.push(el('p', { class: 'panel-note' }, editable
       ? 'Select some text and choose Comment to start a discussion. Switch to Suggesting to propose edits others can accept.'
-      : 'No comments or suggestions yet.'))
+      : writable ? 'Select some text and choose Comment to start a discussion.' : 'No comments or suggestions yet.'))
   }
-  for (const item of items) out.push(item.kind === 'thread' ? threadCard(v, item.t, anchors.get(item.t.id), writable) : suggestionCard(v, item.s, writable))
+  for (const item of items) out.push(item.kind === 'thread' ? threadCard(v, item.t, anchors.get(item.t.id), writable) : suggestionCard(v, item.s, editable))
 
   const resolved = threads.filter((x) => x.resolved)
   if (resolved.length) {
@@ -280,7 +294,7 @@ function composer (v) {
     const { from, to, quote, anchor } = v.composing
     const mentions = mentionsIn(text, people(o))
     const id = addThread(o.ydoc, { quote, anchor, userId: state.me.userId, text, mentions })
-    if (textMode(o)) o.editor.chain().setTextSelection({ from, to }).addComment(id).run()
+    if (textMode(o) && !anchor) o.editor.chain().setTextSelection({ from, to }).addComment(id).run()
     v.composing = null
     v.drafts.delete('new')
     v.active = id
@@ -288,7 +302,7 @@ function composer (v) {
   }
   box.addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); submit() } else if (e.key === 'Escape') { v.composing = null; render() } })
   return el('div', { class: 'review-card composer' },
-    el('p', { class: 'review-quote' }, v.composing.anchor ? v.composing.quote : `“${v.composing.quote}”`),
+    el('p', { class: 'review-quote' }, v.composing.anchor && v.composing.anchor.kind !== 'text' ? v.composing.quote : `“${v.composing.quote}”`),
     box,
     el('div', { class: 'review-actions' },
       el('button', { type: 'button', class: 'btn btn-primary', onclick: submit }, 'Comment'),

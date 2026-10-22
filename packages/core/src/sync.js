@@ -19,7 +19,8 @@ import * as awarenessProtocol from 'y-protocols/awareness'
 import { deriveDocKeys, epochKeys, seal, open } from './crypto.js'
 import { MSG, encodeFrame, FrameReader, encodeHello, decodeHello, helloProof, compatible } from './protocol.js'
 import { verifySignature } from './identity.js'
-import { Membership, canEdit, canRespond } from './members.js'
+import { Membership, canEdit, canRespond, canComment } from './members.js'
+import { isCommentUpdate } from './threads.js'
 import { isResponseUpdate, RESPONSES } from './respond.js'
 import { ChunkExchange, BlobStore } from './chunks.js'
 import { stateVectorMap, hasOpsBeyond, sameState, docFrom } from './conflicts.js'
@@ -271,7 +272,16 @@ export class SyncEngine extends EventEmitter {
 
   applyLocalUpdate (docId, update, origin = 'local') {
     const doc = this.docs.get(docId)
-    if (doc) Y.applyUpdate(doc.ydoc, update, origin)
+    if (!doc) return
+    // As a commenter, only changes to the comments go in, and they go to
+    // everyone who can edit (like a respondent's answers).
+    if (canComment(doc.myAccess?.role)) {
+      if (!isCommentUpdate(doc.ydoc, update)) return
+      Y.applyUpdate(doc.ydoc, update, origin)
+      this._sendOwn(doc, update, { merge: true })
+      return
+    }
+    Y.applyUpdate(doc.ydoc, update, origin)
   }
 
   applyLocalAwareness (docId, update, origin = 'local') {
@@ -471,13 +481,22 @@ export class SyncEngine extends EventEmitter {
     if (!canRespond(doc.myAccess?.role)) throw new Error('Only respondents answer this way.')
     if (!isResponseUpdate(update, this.identity.userId)) throw new Error('That isn’t an answer.')
     Y.applyUpdate(doc.ydoc, update, 'response')
-    const box = this.store.readJSON(docId, 'outbox') || []
-    box.push(Buffer.from(update).toString('base64'))
-    this.store.writeJSON(docId, 'outbox', box)
+    this._sendOwn(doc, update)
+  }
+
+  // A respondent's answer or a commenter's comment: kept in the outbox, sent
+  // now to everyone connected who can edit, and again to each editor I meet
+  // (and to relays). A commenter's changes are merged into one update, since
+  // they can touch the same threads again and again.
+  _sendOwn (doc, update, { merge = false } = {}) {
+    let box = this.store.readJSON(doc.docId, 'outbox') || []
+    if (merge) box = [Buffer.from(Y.mergeUpdates([...box.map((b) => Buffer.from(b, 'base64')), update])).toString('base64')]
+    else box.push(Buffer.from(update).toString('base64'))
+    this.store.writeJSON(doc.docId, 'outbox', box)
     for (const [conn, link] of doc.links) {
-      if (link.contentEpoch === doc.contentEpoch && canEdit(link.role)) conn.send(MSG.UPDATE, docId, doc.contentEpoch, seal(doc.keyFor(doc.contentEpoch), update))
+      if (link.contentEpoch === doc.contentEpoch && canEdit(link.role)) conn.send(MSG.UPDATE, doc.docId, doc.contentEpoch, seal(doc.keyFor(doc.contentEpoch), update))
     }
-    this.emit('response', docId, update)
+    this.emit('outbox', doc.docId, update)
   }
 
   outbox (docId) {
@@ -655,10 +674,11 @@ export class SyncEngine extends EventEmitter {
       case MSG.UPDATE: {
         if (!canEdit(link.role)) {
           // Viewers can't change the document; respondents can only add
-          // their own sealed answers to a form.
-          if (canRespond(link.role) && isResponseUpdate(plain, link.user.userId) && this.answerAllowed(doc, link.user.userId)) {
-            try { Y.applyUpdate(doc.ydoc, plain, conn) } catch {}
-          }
+          // their own sealed answers to a form; commenters can only change
+          // the comments.
+          const allowed = (canRespond(link.role) && isResponseUpdate(plain, link.user.userId) && this.answerAllowed(doc, link.user.userId)) ||
+            (canComment(link.role) && isCommentUpdate(doc.ydoc, plain))
+          if (allowed) { try { Y.applyUpdate(doc.ydoc, plain, conn) } catch {} }
           return
         }
         const check = link.mergeCheck
@@ -803,9 +823,10 @@ export class SyncEngine extends EventEmitter {
     const diff = Y.encodeStateAsUpdate(doc.ydoc, link.sv)
     if (diff.length > EMPTY_UPDATE_BYTES) conn.send(MSG.UPDATE, doc.docId, contentEpoch, seal(doc.keyFor(contentEpoch), diff))
     if (canEdit(link.role)) this._markAcked(doc, link.sv, link.user, link)
-    // As a respondent, hand my answers to everyone who can edit: they keep
-    // them and pass them on. (Already there: nothing changes.)
-    if (canEdit(link.role) && canRespond(doc.myAccess?.role)) {
+    // As a respondent or commenter, hand my answers or comments to everyone
+    // who can edit: they keep them and pass them on. (Already there: nothing
+    // changes.)
+    if (canEdit(link.role) && (canRespond(doc.myAccess?.role) || canComment(doc.myAccess?.role))) {
       for (const update of this.outbox(doc.docId)) conn.send(MSG.UPDATE, doc.docId, contentEpoch, seal(doc.keyFor(contentEpoch), update))
     }
     this.chunks.pump(doc.docId) // someone new who may have chunks I'm waiting for

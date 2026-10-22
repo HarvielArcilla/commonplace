@@ -25,7 +25,8 @@ import { EventEmitter } from 'node:events'
 import crypto from 'node:crypto'
 import * as Y from 'yjs'
 import { seal, open, fileStoreKeys } from './crypto.js'
-import { canEdit, canRespond } from './members.js'
+import { canEdit, canRespond, canComment } from './members.js'
+import { isCommentUpdate } from './threads.js'
 import { isResponseUpdate } from './respond.js'
 import { verifySignature } from './identity.js'
 import { MsgReader, encodeMsg, boxKeys, putProof, compactProof, chunkProof, sha256hex, MAX_NAMES } from './relay-protocol.js'
@@ -56,7 +57,7 @@ export class RelayClient extends EventEmitter {
     })
     engine.chunks.on('chunk', (docId) => this._scheduleSeed(docId))
     engine.on('members', (docId) => this._pushMembers(docId))
-    engine.on('response', (docId, update) => this._pushResponse(docId, update))
+    engine.on('outbox', (docId) => this._pushOwn(docId))
     engine.on('topics', (docId) => this._refreshDoc(docId))
   }
 
@@ -186,8 +187,10 @@ export class RelayClient extends EventEmitter {
     }
     if (head.k !== 'u' || this.engine.isBlocked(head.by)) return
     const role = doc.members.exists ? doc.members.roleOf(head.by, head.inv && typeof head.inv === 'object' ? head.inv : null)?.role : 'editor'
-    // Editors may change anything; respondents may only add their answers.
-    if (!canEdit(role) && !(canRespond(role) && isResponseUpdate(data, head.by) && this.engine.answerAllowed(doc, head.by))) return
+    // Editors may change anything; respondents may only add their answers,
+    // and commenters may only change the comments.
+    if (!canEdit(role) && !(canRespond(role) && isResponseUpdate(data, head.by) && this.engine.answerAllowed(doc, head.by)) &&
+      !(canComment(role) && isCommentUpdate(doc.ydoc, data))) return
     try { Y.applyUpdate(doc.ydoc, data, this) } catch { return }
     try { mergeSV(state.sv, Y.decodeStateVector(Y.encodeStateVectorFromUpdate(data))) } catch {}
   }
@@ -195,7 +198,7 @@ export class RelayClient extends EventEmitter {
   // After reading everything: send what the relay is missing, and rewrite
   // the box as one blob when it has grown long.
   _catchUp (key, link, doc, state, head) {
-    if (canRespond(doc.myAccess?.role)) { this._putAnswers(key, link, doc, state); return }
+    if (canRespond(doc.myAccess?.role) || canComment(doc.myAccess?.role)) { this._putOwn(key, link, doc, state); return }
     if (!this._mayWrite(doc)) return
     if (doc.members.exists) this._put(link, doc, state, 'm', Buffer.from(JSON.stringify(doc.members.entries)))
     if (head.count > this.compactAfter) {
@@ -224,8 +227,9 @@ export class RelayClient extends EventEmitter {
     }
   }
 
-  // As a respondent: leave my answers in the box, once each.
-  _putAnswers (key, link, doc, state) {
+  // As a respondent or commenter: leave my answers or comments in the box,
+  // once each.
+  _putOwn (key, link, doc, state) {
     const sent = new Set(this._saved(doc.docId)[key]?.answers || [])
     for (const update of this.engine.outbox(doc.docId)) {
       const hash = sha256hex(update)
@@ -237,13 +241,13 @@ export class RelayClient extends EventEmitter {
     this._save(key, state)
   }
 
-  _pushResponse (docId, update) {
+  _pushOwn (docId) {
     const doc = this.engine.getDoc(docId)
     if (!doc) return
     for (const key of this.relaysOf(docId)) {
       const link = this.links.get(key)
       const state = link && [...link.boxes.values()].find((s) => s.docId === docId && s.caughtUp)
-      if (state) this._putAnswers(key, link, doc, state)
+      if (state) this._putOwn(key, link, doc, state)
     }
   }
 

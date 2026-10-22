@@ -147,6 +147,7 @@ export function statusNotes (file, { detailed = false } = {}) {
     }
   }
   if (file.role === 'viewer') notes.push({ text: 'You can view this file' })
+  if (file.role === 'commenter') notes.push({ text: 'You can view and comment on this file' })
   if (file.role === 'respondent') notes.push({ text: 'You can answer this form' })
   if (file.role !== 'owner' && !file.sync.ownerOnline && file.owner?.name) {
     notes.push({ text: `${file.owner.name} (owner) is offline` })

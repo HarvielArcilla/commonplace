@@ -4,10 +4,10 @@
 import { $, el, ago, toast, dialog, confirmAction, cleanError, listNames } from './ui.js'
 import { state, cp, when } from './state.js'
 
-const ROLE_LABEL = { owner: 'Owner', editor: 'Can edit', viewer: 'Can view', respondent: 'Can answer' }
+const ROLE_LABEL = { owner: 'Owner', editor: 'Can edit', commenter: 'Can comment', viewer: 'Can view', respondent: 'Can answer' }
 
 // The roles someone can be given in a file: forms are answered, not viewed.
-const rolesFor = (kind) => (kind === 'form' ? ['respondent', 'editor'] : ['editor', 'viewer'])
+const rolesFor = (kind) => (kind === 'form' ? ['respondent', 'editor'] : ['editor', 'commenter', 'viewer'])
 const roleOptions = (kind, selected) => rolesFor(kind).map((r) => el('option', { value: r, selected: r === selected || null }, ROLE_LABEL[r]))
 
 function currentFile (docId) {
@@ -26,7 +26,7 @@ export function shareDialog (docId) {
   const title = el('h2', {})
   const d = el('dialog', { class: 'dialog dialog-wide share' }, el('form', { method: 'dialog' },
     title,
-    f.kind === 'folder' ? el('p', { class: 'share-folder-note' }, 'Everyone in this folder gets every file in it: editors can edit them, viewers can view them (and answer forms). Leaving the folder takes away what they had only through it.') : null,
+    f.kind === 'folder' ? el('p', { class: 'share-folder-note' }, 'Everyone in this folder gets every file in it: editors can edit them, commenters can comment on them, viewers can view them (and answer forms). Leaving the folder takes away what they had only through it.') : null,
     el('div', { class: 'share-body' },
       isOwner ? inviteControls(docId, f.kind) : el('p', {}, `Only ${f.owner?.name || 'the owner'} can invite people or change access.`),
       live),
@@ -180,7 +180,7 @@ async function copyLink (docId, { role, expiresIn, once, ask, access, until, aft
   if (access === 'until' && !(until > Date.now())) { toast('Choose when their access ends, later than now.'); return }
   try {
     await cp.copyInvite(docId, role, { expiresIn: Number(expiresIn) || null, once, ask, access, until, after })
-    const what = access === 'online' ? 'Guest link copied. It works for one person, while you’re online.' : role === 'viewer' ? 'View-only invite link copied.' : role === 'respondent' ? 'Link to answer the form copied.' : 'Invite link copied.'
+    const what = access === 'online' ? 'Guest link copied. It works for one person, while you’re online.' : role === 'viewer' ? 'View-only invite link copied.' : role === 'commenter' ? 'Invite link to comment copied.' : role === 'respondent' ? 'Link to answer the form copied.' : 'Invite link copied.'
     toast(ask && access !== 'online' ? `${what} You\u2019ll approve each person.` : what)
   } catch (err) { toast(cleanError(err)) }
 }
