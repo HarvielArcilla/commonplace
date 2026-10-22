@@ -20,7 +20,7 @@ const tags = process.argv.slice(2).length
 if (!tags.length) { console.log('No earlier release to compare with.'); process.exit(0) }
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
-async function until (fn, what, ms = 60000) {
+async function until (fn, what, ms = 150000) {
   const end = Date.now() + ms
   while (Date.now() < end) { if (await fn()) return; await sleep(250) }
   throw new Error(`timed out waiting for ${what}`)
