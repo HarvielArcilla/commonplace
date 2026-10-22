@@ -25,9 +25,8 @@ import { EventEmitter } from 'node:events'
 import crypto from 'node:crypto'
 import * as Y from 'yjs'
 import { seal, open, fileStoreKeys } from './crypto.js'
-import { canEdit, canRespond, canComment } from './members.js'
-import { isCommentUpdate } from './threads.js'
-import { isResponseUpdate } from './respond.js'
+import { canEdit } from './members.js'
+import { usesOutbox } from './gate.js'
 import { verifySignature } from './identity.js'
 import { MsgReader, encodeMsg, boxKeys, putProof, compactProof, chunkProof, sha256hex, MAX_NAMES } from './relay-protocol.js'
 
@@ -187,10 +186,7 @@ export class RelayClient extends EventEmitter {
     }
     if (head.k !== 'u' || this.engine.isBlocked(head.by)) return
     const role = doc.members.exists ? doc.members.roleOf(head.by, head.inv && typeof head.inv === 'object' ? head.inv : null)?.role : 'editor'
-    // Editors may change anything; respondents may only add their answers,
-    // and commenters may only change the comments.
-    if (!canEdit(role) && !(canRespond(role) && isResponseUpdate(data, head.by) && this.engine.answerAllowed(doc, head.by)) &&
-      !(canComment(role) && isCommentUpdate(doc.ydoc, data))) return
+    if (!this.engine.accepts(doc, role, head.by, data)) return
     try { Y.applyUpdate(doc.ydoc, data, this) } catch { return }
     try { mergeSV(state.sv, Y.decodeStateVector(Y.encodeStateVectorFromUpdate(data))) } catch {}
   }
@@ -198,7 +194,7 @@ export class RelayClient extends EventEmitter {
   // After reading everything: send what the relay is missing, and rewrite
   // the box as one blob when it has grown long.
   _catchUp (key, link, doc, state, head) {
-    if (canRespond(doc.myAccess?.role) || canComment(doc.myAccess?.role)) { this._putOwn(key, link, doc, state); return }
+    if (usesOutbox(doc.myAccess?.role)) { this._putOwn(key, link, doc, state); return }
     if (!this._mayWrite(doc)) return
     if (doc.members.exists) this._put(link, doc, state, 'm', Buffer.from(JSON.stringify(doc.members.entries)))
     if (head.count > this.compactAfter) {

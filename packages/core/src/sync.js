@@ -20,8 +20,8 @@ import { deriveDocKeys, epochKeys, seal, open } from './crypto.js'
 import { MSG, encodeFrame, FrameReader, encodeHello, decodeHello, helloProof, compatible } from './protocol.js'
 import { verifySignature } from './identity.js'
 import { Membership, canEdit, canRespond, canComment } from './members.js'
-import { isCommentUpdate } from './threads.js'
 import { isResponseUpdate, RESPONSES } from './respond.js'
+import { mayApply, usesOutbox } from './gate.js'
 import { ChunkExchange, BlobStore } from './chunks.js'
 import { stateVectorMap, hasOpsBeyond, sameState, docFrom } from './conflicts.js'
 
@@ -220,6 +220,11 @@ export class SyncEngine extends EventEmitter {
     if (deleteLocalData) this.store.remove(docId)
   }
 
+  // Whether to take this update from someone with this role (see gate.js).
+  accepts (doc, role, userId, update) {
+    return mayApply(doc.ydoc, { role, userId, update, answerAllowed: () => this.answerAllowed(doc, userId) })
+  }
+
   // Whether to take another answer from this person (this computer's limit).
   answerAllowed (doc, userId) {
     const limit = this.answerLimit()
@@ -276,7 +281,7 @@ export class SyncEngine extends EventEmitter {
     // As a commenter, only changes to the comments go in, and they go to
     // everyone who can edit (like a respondent's answers).
     if (canComment(doc.myAccess?.role)) {
-      if (!isCommentUpdate(doc.ydoc, update)) return
+      if (!this.accepts(doc, doc.myAccess.role, this.identity.userId, update)) return
       Y.applyUpdate(doc.ydoc, update, origin)
       this._sendOwn(doc, update, { merge: true })
       return
@@ -673,12 +678,7 @@ export class SyncEngine extends EventEmitter {
     switch (type) {
       case MSG.UPDATE: {
         if (!canEdit(link.role)) {
-          // Viewers can't change the document; respondents can only add
-          // their own sealed answers to a form; commenters can only change
-          // the comments.
-          const allowed = (canRespond(link.role) && isResponseUpdate(plain, link.user.userId) && this.answerAllowed(doc, link.user.userId)) ||
-            (canComment(link.role) && isCommentUpdate(doc.ydoc, plain))
-          if (allowed) { try { Y.applyUpdate(doc.ydoc, plain, conn) } catch {} }
+          if (this.accepts(doc, link.role, link.user.userId, plain)) { try { Y.applyUpdate(doc.ydoc, plain, conn) } catch {} }
           return
         }
         const check = link.mergeCheck
@@ -826,7 +826,7 @@ export class SyncEngine extends EventEmitter {
     // As a respondent or commenter, hand my answers or comments to everyone
     // who can edit: they keep them and pass them on. (Already there: nothing
     // changes.)
-    if (canEdit(link.role) && (canRespond(doc.myAccess?.role) || canComment(doc.myAccess?.role))) {
+    if (canEdit(link.role) && usesOutbox(doc.myAccess?.role)) {
       for (const update of this.outbox(doc.docId)) conn.send(MSG.UPDATE, doc.docId, contentEpoch, seal(doc.keyFor(contentEpoch), update))
     }
     this.chunks.pump(doc.docId) // someone new who may have chunks I'm waiting for

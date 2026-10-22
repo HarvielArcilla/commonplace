@@ -13,7 +13,7 @@ import { addThread, reply, editMessage, deleteMessage, setResolved, readThreads,
 import { recordSuggestions, suggestionAuthor } from '@commonplace/docs/comments'
 import { commentAnchors, textAnchor, suggestionList } from '@commonplace/docs/editor'
 import { el, ago, toast } from './ui.js'
-import { state } from './state.js'
+import { state, can } from './state.js'
 import { openPanel, closePanel, openPanelName } from './panel.js'
 
 let view = null // { o, body, drafts: Map, composing: { quote, anchor? } | null, active, showResolved }
@@ -24,14 +24,11 @@ const fileOf = (o) => state.files.find((x) => x.docId === o?.docId)
 const people = (o) => (fileOf(o)?.members || []).filter((m) => m.userId !== state.me.userId && m.name)
 
 const openFile = () => state.files.find((x) => x.docId === state.open?.docId)
-const canEdit = () => {
-  const f = openFile()
-  return Boolean(f) && (f.role === 'owner' || f.role === 'editor') && !f.access?.removed
-}
+const canEdit = () => can(openFile(), 'edit')
 // Commenters can comment and reply, but not change the text (so their
 // threads in documents are anchored without a mark, and they don't accept
 // or reject suggestions).
-const canComment = () => canEdit() || (openFile()?.role === 'commenter' && !openFile()?.access?.removed && !openFile()?.ended)
+const canComment = () => can(openFile(), 'comment')
 
 // People who can't edit (viewers, commenters) aren't in the file's people
 // map; their names come from the members list.

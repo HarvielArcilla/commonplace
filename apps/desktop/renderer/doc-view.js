@@ -18,7 +18,7 @@ import * as Y from 'yjs'
 import * as awarenessProtocol from 'y-protocols/awareness'
 import { $, el, toast, openMenu, cleanError } from './ui.js'
 import { icons } from './icons.js'
-import { state, cp, statusNotes, renderNotes, marginMark } from './state.js'
+import { state, cp, statusNotes, renderNotes, marginMark, can, editorRole } from './state.js'
 import { shareDialog } from './share.js'
 import { conflictsDialog } from './conflicts.js'
 import { toggleHistory, closePanel } from './history-view.js'
@@ -76,7 +76,7 @@ export async function openDocument (docId, { focusTitle = false, initialContent 
   // only once I actually change something: opening a file is not an edit.
   // (Commenters never change the text, and may change nothing but comments.)
   let authored = ydoc.getMap('authors').has(String(ydoc.clientID))
-  const mayEdit = () => ['owner', 'editor'].includes(state.files.find((x) => x.docId === docId)?.role)
+  const mayEdit = () => editorRole(state.files.find((x) => x.docId === docId)?.role)
   ydoc.on('update', (_u, origin) => {
     if (authored || origin === 'main' || !mayEdit()) return
     authored = true
@@ -202,7 +202,7 @@ function applyAccess () {
   if (!o?.view) return
   const file = state.files.find((f) => f.docId === o.docId)
   // Not after my access ended, nor as a guest while the owner is away.
-  const writable = Boolean(file) && (file.role === 'owner' || file.role === 'editor') && !file.access?.removed && !file.ended && !file.guest?.away && !file.newerFormat
+  const writable = can(file, 'edit')
   o.view.setEditable(writable)
   $('#doc-title').readOnly = !writable || Boolean(o.closePreview)
   $('[data-action="comments"]').hidden = !o.view.comments || file?.role === 'respondent'

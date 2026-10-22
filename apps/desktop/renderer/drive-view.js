@@ -2,7 +2,7 @@
 
 import { $, el, svg, ago, listNames, plural, toast, openMenu, dialog, promptText, confirmAction, cleanError } from './ui.js'
 import { icons, kindIcon } from './icons.js'
-import { state, cp, statusNotes, renderNotes, marginMark, savePrefs } from './state.js'
+import { state, cp, statusNotes, renderNotes, marginMark, savePrefs, editorRole, ROLE_LABEL } from './state.js'
 import { shareDialog, setSyncMode, moveInDialog } from './share.js'
 import { restoreDialog } from './recovery-view.js'
 import { conflictsDialog } from './conflicts.js'
@@ -54,7 +54,7 @@ const docs = () => state.files.filter((f) => f.kind !== 'folder' && !f.trashedAt
 const trashed = () => state.files.filter((f) => f.kind !== 'folder' && f.trashedAt)
 const inTrash = () => state.prefs.filter === 'trash'
 const folderIcon = (f) => (f?.shared ? icons.sharedFolder : icons.folder)
-const canChange = (f) => !f?.shared || f.role === 'owner' || f.role === 'editor'
+const canChange = (f) => !f?.shared || editorRole(f.role)
 
 function folderPath (id) {
   const path = []
@@ -662,7 +662,7 @@ function detailsDialog (f) {
   const rows = [
     ['Type', f.appName || 'Unknown'],
     ['Owner', f.role === 'owner' ? 'You' : (f.owner?.name || 'Unknown')],
-    ['Your access', { owner: 'Owner', editor: 'Can edit', commenter: 'Can comment', viewer: 'Can view', respondent: 'Can answer' }[f.role] || (f.access.removed ? 'Removed' : 'Not yet confirmed')],
+    ['Your access', ROLE_LABEL[f.role] || (f.access.removed ? 'Removed' : 'Not yet confirmed')],
     ['Written by', f.contributors.length ? listNames(f.contributors) : 'Nobody yet'],
     ['Folder', f.folderId ? folderPath(f.folderId).map((p) => p.name).join(' / ') : 'commonDrive'],
     ['Last change', [ago(f.lastChangeAt || f.addedAt), f.lastChangedBy ? `by ${f.lastChangedBy}` : null].filter(Boolean).join(' ') || '—'],

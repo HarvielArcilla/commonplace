@@ -9,7 +9,7 @@
 import { actionItems, dayLabel } from '@commonplace/docs/editor'
 import { dayKey, addDays } from '@commonplace/calendar/model'
 import { el, toast, openMenu, dialog, selectField, plural, cleanError } from './ui.js'
-import { state, cp, openFile } from './state.js'
+import { state, cp, openFile, roleVerb } from './state.js'
 
 const MAX_FILES = 6
 const KIND_WORDS = { markdown: 'Document', paged: 'Document', sheet: 'Spreadsheet', slides: 'Presentation', tasks: 'Task board', calendar: 'Calendar', whiteboard: 'Whiteboard', form: 'Form', file: 'File' }
@@ -139,7 +139,7 @@ export function openChip (o, attrs, target) {
   }
   if (attrs.kind === 'person') {
     const member = (fileOf(o.docId)?.members || []).find((m) => m.userId === attrs.ref)
-    const words = attrs.ref === state.me.userId ? 'That’s you.' : member ? `${member.name} can ${member.role === 'viewer' ? 'view' : member.role === 'commenter' ? 'comment on' : member.role === 'respondent' ? 'answer' : 'edit'} this file.` : `${attrs.label} doesn’t have this file. Share it with them from Share.`
+    const words = attrs.ref === state.me.userId ? 'That’s you.' : member ? `${member.name} can ${roleVerb(member.role)} this file.` : `${attrs.label} doesn’t have this file. Share it with them from Share.`
     openMenu(anchor, [{ heading: attrs.label }, { label: words, disabled: true }], { label: attrs.label })
     return
   }

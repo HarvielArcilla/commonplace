@@ -18,6 +18,25 @@ export function savePrefs () {
   try { localStorage.setItem(PREFS_KEY, JSON.stringify(state.prefs)) } catch {}
 }
 
+// ---- roles ------------------------------------------------------------------
+// What someone may do with a file. Every view asks here, so a new role, or a
+// new reason a file is read-only (access ended, a newer format...), is
+// decided in one place. (The background process enforces the same rules for
+// itself; see core/gate.js.)
+
+export const ROLE_LABEL = { owner: 'Owner', editor: 'Can edit', commenter: 'Can comment', viewer: 'Can view', respondent: 'Can answer' }
+const ROLE_VERB = { owner: 'edit', editor: 'edit', commenter: 'comment on', viewer: 'view', respondent: 'answer' }
+export const roleVerb = (role) => ROLE_VERB[role] || 'view'
+export const editorRole = (role) => role === 'owner' || role === 'editor'
+
+// can(file, 'edit' | 'comment'): whether I can do that to this file now.
+export function can (file, what) {
+  if (!file || file.access?.removed || file.ended || file.guest?.away || file.newerFormat) return false
+  if (what === 'edit') return editorRole(file.role)
+  if (what === 'comment') return editorRole(file.role) || file.role === 'commenter'
+  return false
+}
+
 export const state = {
   me: null,
   files: [],
@@ -155,7 +174,7 @@ export function statusNotes (file, { detailed = false } = {}) {
   if (file.sync.pending > 0 && file.sync.lastSyncedAt) {
     notes.push({ text: 'Some of your edits are only on this computer', cls: 'warn' })
   }
-  if (detailed && file.kind !== 'file' && !here.length && !syncing.length && (file.role === 'owner' || file.role === 'editor')) {
+  if (detailed && file.kind !== 'file' && !here.length && !syncing.length && editorRole(file.role)) {
     notes.push({
       text: (file.sync.relays || []).length
         ? 'You can keep writing. Edits are saved here and reach the others through the relay, even when nobody else is online.'

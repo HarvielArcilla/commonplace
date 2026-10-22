@@ -2,9 +2,8 @@
 // another computer.
 
 import { $, el, ago, toast, dialog, confirmAction, cleanError, listNames } from './ui.js'
-import { state, cp, when } from './state.js'
+import { state, cp, when, editorRole, ROLE_LABEL } from './state.js'
 
-const ROLE_LABEL = { owner: 'Owner', editor: 'Can edit', commenter: 'Can comment', viewer: 'Can view', respondent: 'Can answer' }
 
 // The roles someone can be given in a file: forms are answered, not viewed.
 const rolesFor = (kind) => (kind === 'form' ? ['respondent', 'editor'] : ['editor', 'commenter', 'viewer'])
@@ -88,7 +87,7 @@ export function relayStatus (h) {
 }
 
 function relaySection (docId, f) {
-  const writable = f.role === 'owner' || f.role === 'editor'
+  const writable = editorRole(f.role)
   const relays = f.sync.relays || []
   if (!writable && !relays.length) return []
   const list = el('ul', { class: 'people', 'aria-label': 'Always-on relays' }, ...relays.map((h) => el('li', { class: 'person' },

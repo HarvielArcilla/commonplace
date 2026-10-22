@@ -9,7 +9,7 @@ import {
   TYPES, FORM, QUESTIONS, QUESTION_DATA
 } from '@commonplace/forms/model'
 import { $, el, toast, openMenu, cleanError, ago } from './ui.js'
-import { state, cp } from './state.js'
+import { state, cp, editorRole } from './state.js'
 import { toolButton, labeledButton, toolbarGroups, setToolbar } from './toolbar.js'
 import { countBy, badges } from './comment-marks.js'
 
@@ -139,7 +139,7 @@ function render (v) {
 function sentNote (v) {
   const file = state.files.find((f) => f.docId === v.o.docId)
   const owner = file?.owner?.name || 'the form’s owner'
-  if ((file?.sync?.peers || []).some((p) => p.role === 'owner' || p.role === 'editor')) return `${owner} has it.`
+  if ((file?.sync?.peers || []).some((p) => editorRole(p.role))) return `${owner} has it.`
   return (file?.sync?.relays || []).length
     ? `It reaches ${owner} through the relay, even if they’re offline now.`
     : `It reaches ${owner} the next time you’re both online. Keep commonplace open until then, or come back later.`

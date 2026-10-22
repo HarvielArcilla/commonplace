@@ -2,7 +2,7 @@
 // read-only look at any of them, and restoring one for everyone.
 
 import { el, toast, promptText, confirmAction, cleanError } from './ui.js'
-import { state, cp } from './state.js'
+import { state, cp, can } from './state.js'
 import { openPanel, closePanel, openPanelName } from './panel.js'
 import { showPreview } from './doc-view.js'
 
@@ -39,7 +39,7 @@ async function render () {
   const versions = await cp.listVersions(v.docId)
   if (view !== v) return
   const file = state.files.find((f) => f.docId === v.docId)
-  const writable = file && (file.role === 'owner' || file.role === 'editor') && !file.access?.removed
+  const writable = can(file, 'edit')
   const items = []
   if (v.selected && !versions.some((x) => x.id === v.selected)) select(null)
   const selected = versions.find((x) => x.id === v.selected)
