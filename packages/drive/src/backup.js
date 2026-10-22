@@ -22,7 +22,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import zlib from 'node:zlib'
 import { EventEmitter } from 'node:events'
-import { seal, open, FileStore } from '@commonplace/core'
+import { seal, open, FileStore, bundleForNewComputer } from '@commonplace/core'
 import { installStaged } from './move.js'
 
 const MAGIC = 'commonplace-backup 1\n'
@@ -79,7 +79,8 @@ export function readBackupFile (file, recoveryKey) {
 }
 
 // Makes this computer's (empty) data folder into the Drive from a backup.
-export async function restoreBackup ({ payload, dataDir, beforeInstall }) {
+// With protection on, the recovery key also puts this computer in the list.
+export async function restoreBackup ({ payload, dataDir, beforeInstall, recoveryKey = null }) {
   const staging = path.join(dataDir, `.restoring-${Date.now()}`)
   try {
     const store = new FileStore(path.join(staging, 'files'))
@@ -89,7 +90,8 @@ export async function restoreBackup ({ payload, dataDir, beforeInstall }) {
       store.importDoc(doc.docId, doc.files)
       count++
     }
-    await installStaged({ staging, dataDir, identity: payload.identity, index: payload.index, beforeInstall })
+    const { bundle, device } = bundleForNewComputer(payload.identity, normalizeRecoveryKey(recoveryKey))
+    await installStaged({ staging, dataDir, identity: bundle, index: payload.index, device, beforeInstall })
     return { count, userId: payload.identity.userId, createdAt: payload.createdAt }
   } catch (err) {
     fs.rmSync(staging, { recursive: true, force: true })

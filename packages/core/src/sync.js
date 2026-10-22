@@ -22,6 +22,7 @@ import { verifySignature } from './identity.js'
 import { Membership, canEdit, canRespond, canComment, canManage } from './members.js'
 import { isResponseUpdate, RESPONSES } from './respond.js'
 import { mayApply, usesOutbox } from './gate.js'
+import { directory, signatureDevice } from './devices.js'
 import { ChunkExchange, BlobStore } from './chunks.js'
 import { stateVectorMap, hasOpsBeyond, sameState, docFrom } from './conflicts.js'
 
@@ -86,10 +87,16 @@ class DocHandle {
 
   get meta () { return this.ydoc.getMap('meta') }
 
+  // The current epoch: the membership log's, or for a document without
+  // one (the Drive index) the newest key held (see setPrivateKey).
+  get logEpoch () {
+    return this.members.exists ? this.members.epoch : Math.max(...this.epochs.keys())
+  }
+
   // The newest epoch I hold a key for (that the membership log has reached).
   get myEpoch () {
     let best = 0
-    for (const e of this.epochs.keys()) if (e <= this.members.epoch && e > best) best = e
+    for (const e of this.epochs.keys()) if (e <= this.logEpoch && e > best) best = e
     return best
   }
 
@@ -97,7 +104,7 @@ class DocHandle {
   get contentEpoch () {
     const access = this.myAccess
     if (!access || access.gated) return null
-    return this.myEpoch === this.members.epoch ? this.myEpoch : null
+    return this.myEpoch === this.logEpoch ? this.myEpoch : null
   }
 
   get myAccess () {
@@ -132,6 +139,9 @@ export class SyncEngine extends EventEmitter {
     this.connections = new Set()
     // Set by the Drive from this computer's policy: people to ignore, and
     // how many answers to a form to take from one person.
+    // Someone's list of computers changed (see devices.js).
+    this._onDirectory = (userId) => this._directoryChanged(userId)
+    directory.on('change', this._onDirectory)
     this.isBlocked = () => false
     this.answerLimit = () => Infinity
     this._endsTimer = setInterval(() => { try { this.checkEnds() } catch {} }, 15e3)
@@ -172,7 +182,7 @@ export class SyncEngine extends EventEmitter {
     // The last state I had in common with another computer (for conflicts).
     doc.base = this.store.readBinary?.(docId, 'base') || null
     const savedLog = this.store.readJSON(docId, 'members')
-    if (savedLog) doc.members.merge(savedLog)
+    if (savedLog && !doc.members.merge(savedLog)) doc.pendingMembers = savedLog
     for (const userId of this.store.readJSON(docId, 'declined') || []) doc.declined.add(userId)
     this._collectGrants(doc)
 
@@ -440,7 +450,14 @@ export class SyncEngine extends EventEmitter {
   // relay). The log checks its own signatures.
   mergeMembers (docId, entries) {
     const doc = this.docs.get(docId)
-    if (!doc || !doc.members.merge(entries)) return false
+    if (!doc) return false
+    if (!doc.members.merge(entries)) {
+      // It may be signed by a computer whose owner's list hasn't reached
+      // me yet: try again when it does.
+      if (Array.isArray(entries) && entries.length > doc.members.entries.length) doc.pendingMembers = entries
+      return false
+    }
+    doc.pendingMembers = null
     this._membersChanged(doc)
     this._redoDropped(doc, doc.members.dropped)
     return true
@@ -563,10 +580,68 @@ export class SyncEngine extends EventEmitter {
   }
 
   destroy () {
+    directory.off('change', this._onDirectory)
     clearInterval(this._endsTimer)
     this.chunks.destroy()
     for (const conn of this.connections) conn.destroy()
     for (const docId of [...this.docs.keys()]) this.closeDoc(docId)
+  }
+
+  // ---- people's computers ----------------------------------------------------------
+
+  // Hellos again to everyone, for every file (after my list of computers
+  // changed, so they all hear about it).
+  announce () {
+    for (const doc of this.docs.values()) if (doc.active) for (const conn of this.connections) this._sendHellos(doc, conn)
+  }
+
+  // A new key for a document with no members (the Drive index, shared only
+  // by my own computers): content moves to it, and the older keys are kept
+  // only to meet computers of mine that haven't heard of it yet.
+  setPrivateKey (docId, epoch, secret) {
+    const doc = this.docs.get(docId)
+    if (!doc || doc.members.exists || !this._addEpoch(doc, epoch, secret)) return false
+    for (const [conn, link] of doc.links) if (link.contentEpoch !== doc.contentEpoch) this._stopContent(doc, conn, link)
+    this.emit('topics', docId)
+    if (doc.active) for (const conn of this.connections) this._sendHellos(doc, conn)
+    return true
+  }
+
+  // What changes when someone's list of computers does:
+  //   - mine: this computer takes up new keys, or learns it was removed
+  //     (the Drive acts on 'identity');
+  //   - connections to a computer that was removed close;
+  //   - membership logs signed by them are checked again (a removed
+  //     computer's last unendorsed changes drop out, and logs that were
+  //     waiting for this list go in);
+  //   - files I manage that they're in move to a new key if they have a
+  //     new encryption key, since the old one may be in a thief's hands.
+  _directoryChanged (userId) {
+    if (userId === this.identity.userId) this.emit('identity', this.identity.adoptState())
+    const st = directory.state(userId)
+    for (const conn of [...this.connections]) {
+      for (const doc of this.docs.values()) {
+        const link = doc.links.get(conn)
+        if (link?.user?.userId === userId && link.signedBy && st?.revoked.has(link.signedBy)) { conn.destroy(); break }
+      }
+    }
+    for (const doc of this.docs.values()) {
+      if (doc.pendingMembers) { const p = doc.pendingMembers; doc.pendingMembers = null; this.mergeMembers(doc.docId, p) }
+      if (doc.members.exists && doc.members.signers().includes(userId) && doc.members.revalidate()) this._membersChanged(doc)
+      this._refreshEncKey(doc, userId)
+    }
+  }
+
+  _refreshEncKey (doc, userId) {
+    const st = directory.state(userId)
+    const m = doc.members.member(userId)
+    if (!st?.enc || !m || m.enc === st.enc || !doc.members.mayManage(this.identity.userId)) return
+    if (canManage(m.role) && userId !== this.identity.userId && doc.members.owner !== this.identity.userId) return
+    try {
+      this._admit(doc, { userId, role: m.role, enc: st.enc, folder: m.folder || undefined })
+      doc.members.rotate(this.identity, crypto.randomBytes(32))
+      this._membersChanged(doc)
+    } catch {}
   }
 
   // ---- internals ------------------------------------------------------------------
@@ -608,7 +683,10 @@ export class SyncEngine extends EventEmitter {
     for (const [conn, link] of doc.links) {
       // Tell everyone, on the newest epoch we share.
       const shared = Math.max(...[...link.epochs].filter((e) => doc.epochs.has(e)))
-      if (Number.isFinite(shared)) conn.send(MSG.MEMBERS, doc.docId, shared, seal(doc.keyFor(shared), log))
+      if (Number.isFinite(shared)) {
+        this._sendUsers(doc, conn, shared, doc.members.signers())
+        conn.send(MSG.MEMBERS, doc.docId, shared, seal(doc.keyFor(shared), log))
+      }
       // Re-check what each peer may do now, and start or stop content.
       this._checkAccess(doc, link)
       if (!this._mayExchange(doc, link) || link.contentEpoch !== doc.contentEpoch) this._stopContent(doc, conn, link)
@@ -620,6 +698,14 @@ export class SyncEngine extends EventEmitter {
     }
     this.emit('members', doc.docId)
     this._scheduleStatus(doc)
+  }
+
+  // Sends what I know of these people's lists of computers (those who
+  // have one).
+  _sendUsers (doc, conn, epoch, userIds) {
+    const users = {}
+    for (const u of userIds) { const s = directory.statements(u); if (s.length) users[u] = s }
+    if (Object.keys(users).length) conn.send(MSG.USERS, doc.docId, epoch, seal(doc.keyFor(epoch), Buffer.from(JSON.stringify(users))))
   }
 
   _sendHellos (doc, conn, opts) {
@@ -637,6 +723,10 @@ export class SyncEngine extends EventEmitter {
       color: this.identity.color,
       enc: this.identity.encPublic,
       sig: this.identity.sign(helloProof(doc.docId, epoch, conn.localId, this.identity.encPublic)).toString('base64'),
+      // My list of computers, once it matters (protection is on), and a
+      // fingerprint of it so peers who know more can send it.
+      ul: this.identity.isProtected ? directory.statements(this.identity.userId) : undefined,
+      uld: directory.digest(this.identity.userId) || undefined,
       invite: doc.invite,
       head: doc.members.head,
       device: this.device,
@@ -672,6 +762,12 @@ export class SyncEngine extends EventEmitter {
       let entries
       try { entries = JSON.parse(plain.toString('utf8')) } catch { return }
       this.mergeMembers(docId, entries)
+      return
+    }
+    if (type === MSG.USERS) {
+      let users
+      try { users = JSON.parse(plain.toString('utf8')) } catch { return }
+      for (const [userId, statements] of Object.entries(users || {}).slice(0, 64)) directory.merge(userId, statements)
       return
     }
 
@@ -722,7 +818,11 @@ export class SyncEngine extends EventEmitter {
     // The peer proves who they are by signing this document, epoch and the
     // Noise key of this very connection.
     if (typeof info.userId !== 'string' || !/^[0-9a-f]{64}$/.test(info.userId)) return
-    if (!conn.remoteId || !verifySignature(info.userId, helloProof(doc.docId, epoch, conn.remoteId, info.enc), Buffer.from(String(info.sig || ''), 'base64'))) return
+    if (Array.isArray(info.ul)) directory.merge(info.userId, info.ul)
+    const sig = Buffer.from(String(info.sig || ''), 'base64')
+    if (!conn.remoteId || !verifySignature(info.userId, helloProof(doc.docId, epoch, conn.remoteId, info.enc), sig, { fresh: true })) return
+    // They know less about their own computers (or someone's) than I do.
+    if (info.uld !== directory.digest(info.userId) && directory.statements(info.userId).length) this._sendUsers(doc, conn, epoch, [info.userId])
 
     let link = doc.links.get(conn)
     const isNew = !link
@@ -734,6 +834,7 @@ export class SyncEngine extends EventEmitter {
       doc.links.set(conn, link)
     }
     link.user = sanitizeUser(info)
+    link.signedBy = signatureDevice(sig) // their computer's key, once they're protected
     // Which version they run, and whether we can talk at all.
     link.app = typeof info.app === 'string' ? info.app.slice(0, 20) : null
     link.incompatible = compatible(info)
@@ -745,9 +846,11 @@ export class SyncEngine extends EventEmitter {
     link.epochs.add(epoch)
     link.lastSV = stateVectorMap(hello.stateVector)
 
-    // Share the membership log if theirs is behind or different.
+    // Share the membership log if theirs is behind or different (with the
+    // lists of computers that vouch for its signatures).
     const theirs = info.head || {}
     if (doc.members.exists && (theirs.hash !== doc.members.head.hash)) {
+      this._sendUsers(doc, conn, epoch, doc.members.signers())
       conn.send(MSG.MEMBERS, doc.docId, epoch, seal(doc.keyFor(epoch), Buffer.from(JSON.stringify(doc.members.entries))))
     }
     if (isNew) this._sendHellos(doc, conn) // they may have joined after we connected

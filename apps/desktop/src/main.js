@@ -405,6 +405,7 @@ function registerIpc () {
       dataDir: app.getPath('userData'),
       isEmpty: () => drive.isEmpty,
       swarm: ownSwarm(),
+      deviceName: drive.device.name,
       onStatus: (s) => send('move:status', s),
       beforeInstall: () => drive.stop()
     })
@@ -532,7 +533,7 @@ function registerIpc () {
   ipcMain.handle('backup:restore', async (_e, file, recoveryKey) => {
     if (!drive.isEmpty) throw new Error('This computer already has files. A backup can only be restored on a computer with an empty Drive.')
     const { payload, lock } = readBackupFile(file, recoveryKey)
-    const result = await restoreBackup({ payload, dataDir: app.getPath('userData'), beforeInstall: () => { openDocs.clear(); return drive.stop() } })
+    const result = await restoreBackup({ payload, recoveryKey, dataDir: app.getPath('userData'), beforeInstall: () => { openDocs.clear(); return drive.stop() } })
     await startDrive()
     backups.adopt(file, lock)
     win?.webContents.reload()

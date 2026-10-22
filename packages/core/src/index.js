@@ -1,5 +1,6 @@
 export { newDocSecret, deriveDocKeys, epochKeys, seal, open } from './crypto.js'
-export { loadOrCreateIdentity, installIdentity, verifySignature } from './identity.js'
+export { loadOrCreateIdentity, installIdentity, verifySignature, newDeviceKeys, bundleForNewComputer } from './identity.js'
+export { directory, userState, signatureDevice } from './devices.js'
 export { Membership, ROLES, GIVEN_ROLES, canEdit, canRespond, canComment, canManage } from './members.js'
 export { mayApply, usesOutbox } from './gate.js'
 export { RESPONSES, responseUpdate, isResponseUpdate } from './respond.js'

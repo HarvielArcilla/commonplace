@@ -46,8 +46,9 @@
 // someone who saved it some other way. That is the contract.
 
 import crypto from 'node:crypto'
-import { verifySignature } from './identity.js'
+import { signatureStatus } from './devices.js'
 import { sealTo } from './seal.js'
+import { canonical } from './canonical.js'
 
 export const ROLES = ['viewer', 'commenter', 'respondent', 'editor', 'manager', 'owner']
 // Roles the owner can give someone. A respondent reads the file and may add
@@ -67,18 +68,14 @@ export const AFTER = ['keep', 'hide']
 const cleanUntil = (v) => (Number.isFinite(v) && v > 0 ? Math.floor(v) : null)
 const cleanAfter = (v) => (AFTER.includes(v) ? v : 'keep')
 
-export function canonical (value) {
-  if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`
-  if (value && typeof value === 'object') {
-    return `{${Object.keys(value).filter((k) => value[k] !== undefined).sort().map((k) => `${JSON.stringify(k)}:${canonical(value[k])}`).join(',')}}`
-  }
-  return JSON.stringify(value)
-}
+export { canonical }
 
 const unsigned = (entry) => { const { sig, ...rest } = entry; return rest }
 const hashOf = (entry) => crypto.createHash('sha256').update(canonical(entry)).digest('hex')
 const signWith = (identity, body) => identity.sign(`commonplace/members/v1|${canonical(body)}`).toString('base64')
-const verifyWith = (userId, body, sig) => verifySignature(userId, `commonplace/members/v1|${canonical(body)}`, Buffer.from(String(sig || ''), 'base64'))
+// 'ok', 'revoked' (signed by a computer since removed) or null.
+const statusOf = (userId, body, sig) => signatureStatus(userId, `commonplace/members/v1|${canonical(body)}`, Buffer.from(String(sig || ''), 'base64'))
+const verifyWith = (userId, body, sig) => statusOf(userId, body, sig) === 'ok'
 
 function emptyState (docId) {
   return {
@@ -95,19 +92,29 @@ function emptyState (docId) {
   }
 }
 
-// Replays a log and returns the resulting state, or throws if any entry is invalid.
+// Replays a log and returns the resulting state, or throws if any entry is
+// invalid. An entry signed by a computer that has since been removed (see
+// devices.js) stands only if an entry after it was signed by a computer
+// still in: someone honest built on it. What a lost computer signed last,
+// that nobody built on, is dropped (see Membership.revalidate).
 export function replay (docId, entries) {
   const s = emptyState(docId)
   let prevHash = null
+  let lastGood = -1
+  let lastRevoked = -1
   entries.forEach((entry, i) => {
     if (entry.seq !== i) throw new Error(`entry ${i}: wrong sequence number`)
     if ((entry.prev || null) !== prevHash) throw new Error(`entry ${i}: does not follow the previous entry`)
     if (entry.doc !== docId) throw new Error(`entry ${i}: belongs to another document`)
     if (i === 0 ? entry.by !== entry.owner : !maySign(s, entry)) throw new Error(`entry ${i}: not signed by the owner or a manager`)
-    if (!verifyWith(entry.by, unsigned(entry), entry.sig)) throw new Error(`entry ${i}: bad signature`)
+    const status = statusOf(entry.by, unsigned(entry), entry.sig)
+    if (!status) throw new Error(`entry ${i}: bad signature`)
+    if (status === 'revoked') lastRevoked = i
+    else lastGood = i
     apply(s, entry, i)
     prevHash = hashOf(entry)
   })
+  if (lastRevoked > lastGood) throw new Error(`entry ${lastRevoked}: signed by a removed computer`)
   s.head = { seq: entries.length - 1, hash: prevHash }
   return s
 }
@@ -262,6 +269,27 @@ export class Membership {
   // Whether this person may change who has access (owner or manager).
   mayManage (userId) {
     return canManage(this.member(userId)?.role) && !this.hasEnded(userId)
+  }
+
+  // After learning that a computer was removed: drop what it signed at the
+  // end of the log that nobody built on. True if anything was dropped.
+  revalidate () {
+    try { this.state = replay(this.docId, this.entries); return false } catch {}
+    for (let n = this.entries.length - 1; n > 0; n--) {
+      try {
+        const state = replay(this.docId, this.entries.slice(0, n))
+        this.entries = this.entries.slice(0, n)
+        this.state = state
+        return true
+      } catch {}
+    }
+    return false
+  }
+
+  // People whose changes this log carries, so their lists of computers can
+  // travel with it.
+  signers () {
+    return [...new Set(this.entries.map((e) => e.by))]
   }
 
   // Appends an entry signed by the owner or a manager.

@@ -14,7 +14,7 @@ import * as Y from 'yjs'
 import {
   FileStore, SyncEngine, SwarmTransport, LanTransport, RelayClient, formatRelayAddress, loadOrCreateIdentity, canEdit,
   newDocSecret, deriveDocKeys, encodeInvite, parseInvite, initContainer, readMeta, updatePerson,
-  History, restoreContent, BlobStore
+  History, restoreContent, BlobStore, directory
 } from '@commonplace/core'
 import { Files, filesApp } from './files.js'
 import { Policy } from './policy.js'
@@ -30,6 +30,7 @@ import { Folders } from './parts/folders.js'
 import { Limits } from './parts/limits.js'
 import { Relays, RELAYS_MAP } from './parts/relays.js'
 import { VersionHistory } from './parts/history.js'
+import { Computers } from './parts/computers.js'
 
 // How long a guest waits for the owner before treating them as offline.
 const GUEST_GRACE_MS = 60e3
@@ -65,6 +66,10 @@ export class Drive extends EventEmitter {
     this.swarmOpts = { ...this.network.swarmOptions(), ...swarm }
     this.networkOverridden = Boolean(swarm.dht || swarm.bootstrap)
     this.appsByType = new Map([...apps, filesApp, folderApp].map((a) => [a.type, a]))
+    // What I know of people's lists of computers (public, signed; see
+    // core/devices.js), kept across runs.
+    this._usersFile = path.join(dataDir, 'users.json')
+    try { directory.load(JSON.parse(fs.readFileSync(this._usersFile, 'utf8'))) } catch {}
     this.identity = loadOrCreateIdentity(dataDir)
     this.device = { id: loadDeviceId(dataDir), name: String(deviceName).slice(0, 60) }
     this.store = new FileStore(path.join(dataDir, 'files'))
@@ -157,6 +162,7 @@ export class Drive extends EventEmitter {
     this._guestTimer = setInterval(() => this._checkGuestHosts(), Math.min(15e3, guestGraceMs / 2))
     this._guestTimer.unref?.()
     this.devicesMap.observe(() => { this._checkUnlinked(); this._changed() })
+    this._watchComputers()
 
     this.engine.on('status', (status) => { this._rememberNames(status); this._changed() })
     this.engine.on('members', () => { this.shared.soon(); this._changed() })
@@ -189,6 +195,8 @@ export class Drive extends EventEmitter {
   }
 
   async stop () {
+    this.stopped = true
+    this._stopWatchingComputers()
     clearInterval(this._seenTimer)
     clearInterval(this._guestTimer)
     this.guests.destroy()
@@ -581,7 +589,7 @@ export class Drive extends EventEmitter {
     const online = new Set((this.engine.status(this.indexId)?.devices || []).map((d) => d.id))
     return [...this.devicesMap.entries()]
       .filter(([, d]) => d && !d.unlinked)
-      .map(([id, d]) => ({ id, name: d.name, platform: d.platform, lastSeenAt: d.lastSeenAt, thisComputer: id === this.device.id, online: id === this.device.id || online.has(id) }))
+      .map(([id, d]) => ({ id, name: d.name, platform: d.platform, lastSeenAt: d.lastSeenAt, thisComputer: id === this.device.id, online: id === this.device.id || online.has(id), status: this._computerStatus(d) }))
       .sort((a, b) => (b.thisComputer - a.thisComputer) || (b.lastSeenAt || 0) - (a.lastSeenAt || 0))
   }
 
@@ -627,10 +635,14 @@ export class Drive extends EventEmitter {
   _seen () {
     const cur = this.devicesMap.get(this.device.id)
     if (cur?.unlinked) return
-    this.devicesMap.set(this.device.id, { ...cur, name: this.device.name, platform: process.platform, linkedAt: cur?.linkedAt || Date.now(), lastSeenAt: Date.now() })
+    // (key: this computer's own key, so my other computers can vouch for it.)
+    this.devicesMap.set(this.device.id, { ...cur, name: this.device.name, platform: process.platform, linkedAt: cur?.linkedAt || Date.now(), lastSeenAt: Date.now(), key: this.identity.myDevice })
   }
 
   _checkUnlinked () {
+    // Once protection is on, being unlinked is only a request (see
+    // parts/computers.js): a thief mustn't be able to wipe my computers.
+    if (this.identity.isProtected) return
     if (this.devicesMap.get(this.device.id)?.unlinked && !this.signedOut) {
       this.signedOut = true
       this.emit('unlinked')
@@ -826,7 +838,7 @@ export class Drive extends EventEmitter {
 
 // The Drive's methods are grouped by subject in ./parts. Each part is a class
 // whose methods become the Drive's own, so callers see one object.
-for (const part of [Access, Conflicts, Folders, Limits, Relays, VersionHistory]) {
+for (const part of [Access, Computers, Conflicts, Folders, Limits, Relays, VersionHistory]) {
   for (const name of Object.getOwnPropertyNames(part.prototype)) {
     if (name === 'constructor') continue
     if (name in Drive.prototype) throw new Error(`Drive.${name} is defined twice`)

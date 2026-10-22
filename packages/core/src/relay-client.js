@@ -6,6 +6,8 @@
 // Every blob is sealed with the file's key and signed by its writer:
 //   sealed( u32 headLength | { k: 'u' | 'm', by, sig, inv? } | data )
 //   k 'u': a Yjs update     k 'm': the membership log (JSON)
+//   k 'k': people's lists of computers (JSON { userId: statements }, see
+//          devices.js), so what the log's signers' computers signed checks out
 // Readers check the signature and that the writer may edit (from the
 // membership log, or the invite they joined with), exactly as for edits
 // that arrive from a peer.
@@ -27,6 +29,7 @@ import * as Y from 'yjs'
 import { seal, open, fileStoreKeys } from './crypto.js'
 import { canEdit } from './members.js'
 import { usesOutbox } from './gate.js'
+import { directory } from './devices.js'
 import { verifySignature } from './identity.js'
 import { MsgReader, encodeMsg, boxKeys, putProof, compactProof, chunkProof, sha256hex, MAX_NAMES } from './relay-protocol.js'
 
@@ -177,6 +180,14 @@ export class RelayClient extends EventEmitter {
     let head
     try { head = JSON.parse(plain.subarray(4, 4 + plain.readUInt32BE(0)).toString('utf8')) } catch { return }
     const data = plain.subarray(4 + plain.readUInt32BE(0))
+    // Lists of computers check themselves (every statement is signed), and
+    // may be what the writer's signature needs.
+    if (head.k === 'k') {
+      let users
+      try { users = JSON.parse(data.toString('utf8')) } catch { return }
+      for (const [userId, statements] of Object.entries(users || {}).slice(0, 64)) directory.merge(userId, statements)
+      return
+    }
     if (typeof head.by !== 'string' || !verifySignature(head.by, blobProof(doc.docId, state.keys.box, data), Buffer.from(String(head.sig || ''), 'base64'))) return
     if (head.k === 'm') {
       let entries
@@ -196,6 +207,8 @@ export class RelayClient extends EventEmitter {
   _catchUp (key, link, doc, state, head) {
     if (usesOutbox(doc.myAccess?.role)) { this._putOwn(key, link, doc, state); return }
     if (!this._mayWrite(doc)) return
+    const users = this._users([this.engine.identity.userId, ...(doc.members.exists ? doc.members.signers() : [])])
+    if (users) this._put(link, doc, state, 'k', users)
     if (doc.members.exists) this._put(link, doc, state, 'm', Buffer.from(JSON.stringify(doc.members.entries)))
     if (head.count > this.compactAfter) {
       const full = this._seal(doc, state, 'u', Y.encodeStateAsUpdate(doc.ydoc))
@@ -254,8 +267,18 @@ export class RelayClient extends EventEmitter {
     for (const key of this.relaysOf(docId)) {
       const link = this.links.get(key)
       const state = link && [...link.boxes.values()].find((s) => s.docId === docId && s.caughtUp)
-      if (state && this._mayWrite(doc)) this._put(link, doc, state, 'm', Buffer.from(JSON.stringify(doc.members.entries)))
+      if (!state || !this._mayWrite(doc)) continue
+      const users = this._users([this.engine.identity.userId, ...doc.members.signers()])
+      if (users) this._put(link, doc, state, 'k', users)
+      this._put(link, doc, state, 'm', Buffer.from(JSON.stringify(doc.members.entries)))
     }
+  }
+
+  // People's lists of computers, for a 'k' blob (null if none matter yet).
+  _users (userIds) {
+    const users = {}
+    for (const u of new Set(userIds)) { const s = directory.statements(u); if (s.length) users[u] = s }
+    return Object.keys(users).length ? Buffer.from(JSON.stringify(users)) : null
   }
 
   _mayWrite (doc) {

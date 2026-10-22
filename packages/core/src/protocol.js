@@ -12,7 +12,7 @@
 // each one's version is at least the other's minimum. Bump PROTOCOL_VERSION
 // for any change; raise MIN_PROTOCOL_VERSION only when older apps would
 // misread what newer ones send.
-export const PROTOCOL_VERSION = 3
+export const PROTOCOL_VERSION = 4
 export const MIN_PROTOCOL_VERSION = 2
 
 export function compatible (info) {
@@ -32,7 +32,8 @@ export const MSG = {
   LEAVE: 6, // sealed(empty) - "I've stopped syncing this document for now"
   WANT: 7, // sealed(json { h: [hash] }) - chunks of an uploaded file I'd like (see chunks.js)
   CHUNK: 8, // sealed(32-byte hash | data) - one chunk
-  NOCHUNK: 9 // sealed(json { h: [hash] }) - chunks I don't have
+  NOCHUNK: 9, // sealed(json { h: [hash] }) - chunks I don't have
+  USERS: 10 // sealed(json { userId: statements }) - people's lists of computers (devices.js)
 }
 
 const HEADER = 4 + 1 + 16 + 4

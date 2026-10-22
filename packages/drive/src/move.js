@@ -17,7 +17,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import Hyperswarm from 'hyperswarm'
 import * as Y from 'yjs'
-import { seal, open, installIdentity, FileStore } from '@commonplace/core'
+import { seal, open, installIdentity, newDeviceKeys, FileStore } from '@commonplace/core'
 
 const PREFIX = 'cpmove1.'
 const EXPIRES_MS = 15 * 60 * 1000
@@ -84,12 +84,17 @@ export function sendDrive ({ code, drive, swarm = {}, onStatus = () => {}, signa
         if (msg.type === 'ready') {
           if (!msg.empty) { send({ type: 'refused', reason: 'not-empty' }); return }
           onStatus({ phase: 'sending' })
+          // With protection on, the new computer gets a place in my list of
+          // computers instead of the account key.
+          if (drive.identity.isProtected && msg.device) drive.identity.addDevice({ id: msg.device.id, enc: msg.device.enc, name: msg.device.name })
           const payload = drive.exportForMove({ leaving })
           send({ type: 'identity', identity: payload.identity })
           send({ type: 'index', index: payload.index })
           for (const doc of payload.docs) send({ type: 'doc', ...doc })
           send({ type: 'done', count: payload.docs.length })
         } else if (msg.type === 'received') {
+          // Moving away: this computer leaves my list (the new one is in it).
+          if (leaving && drive.identity.isProtected) drive.leaveList()
           onStatus({ phase: 'confirmed', count: msg.count })
           finish(null, { count: msg.count })
         }
@@ -102,12 +107,13 @@ export function sendDrive ({ code, drive, swarm = {}, onStatus = () => {}, signa
 
 // New computer: connects with the code, writes the Drive into dataDir, then
 // tells the old computer it may sign out. dataDir must not hold a Drive yet.
-export function receiveDrive ({ code, dataDir, isEmpty, swarm = {}, onStatus = () => {}, beforeInstall = async () => {} }) {
+export function receiveDrive ({ code, dataDir, isEmpty, swarm = {}, onStatus = () => {}, beforeInstall = async () => {}, deviceName = undefined }) {
   const secret = parseMoveCode(code)
   if (!secret) throw new Error('That move code is not valid.')
   const { topic, key } = keysFor(secret)
   const net = new Hyperswarm(swarm)
   const staging = path.join(dataDir, `.incoming-${Date.now()}`)
+  const device = newDeviceKeys() // this computer's own keys for the Drive coming in
   let done = false
   return new Promise((resolve, reject) => {
     let finish = async (err, value) => {
@@ -136,7 +142,7 @@ export function receiveDrive ({ code, dataDir, isEmpty, swarm = {}, onStatus = (
             onStatus({ phase: 'receiving', count: docs.length })
           } else if (msg.type === 'done') {
             if (!identity || !index || docs.length !== msg.count) throw new Error('The transfer was incomplete. Try again.')
-            await installStaged({ staging, dataDir, identity, index, beforeInstall })
+            await installStaged({ staging, dataDir, identity, index, device, beforeInstall })
             send({ type: 'received', count: docs.length })
             onStatus({ phase: 'done', count: docs.length })
             finish(null, { count: docs.length, userId: identity.userId })
@@ -146,7 +152,7 @@ export function receiveDrive ({ code, dataDir, isEmpty, swarm = {}, onStatus = (
         }
       })
       onStatus({ phase: 'connected' })
-      send({ type: 'ready', empty: isEmpty() })
+      send({ type: 'ready', empty: isEmpty(), device: { id: device.id, enc: device.encPublic, name: deviceName } })
     })
     // Look up the other computer now and every couple of seconds, in case it
     // was still announcing itself the first time.
@@ -161,13 +167,13 @@ export function receiveDrive ({ code, dataDir, isEmpty, swarm = {}, onStatus = (
 // The last step of bringing a Drive here (from another computer or from a
 // backup): the files are already in staging/files; write the identity and
 // the index next to them, then swap everything into place.
-export async function installStaged ({ staging, dataDir, identity, index, beforeInstall = async () => {} }) {
+export async function installStaged ({ staging, dataDir, identity, index, device = null, beforeInstall = async () => {} }) {
   const indexStore = new FileStore(path.join(staging, 'files'))
   const ydoc = new Y.Doc()
   Y.applyUpdate(ydoc, Buffer.from(index, 'base64'))
   indexStore.load('drive-index', new Y.Doc())
   indexStore.compact('drive-index', ydoc)
-  installIdentity(staging, identity)
+  installIdentity(staging, identity, device)
   await beforeInstall() // e.g. stop the running (empty) Drive
   fs.rmSync(path.join(dataDir, 'files'), { recursive: true, force: true })
   fs.renameSync(path.join(staging, 'files'), path.join(dataDir, 'files'))
