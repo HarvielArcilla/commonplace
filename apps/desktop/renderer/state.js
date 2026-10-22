@@ -110,8 +110,12 @@ export function statusNotes (file, { detailed = false } = {}) {
     else if (up.downloading) notes.push({ text: `Downloading ${Math.round(up.progress * 100)}%`, cls: 'live' })
   }
   if (!file.supported) {
-    notes.push({ text: 'Made with a newer version of commonplace', cls: 'warn' })
+    notes.push({ text: 'Made with a newer version of commonplace. Update to open it.', cls: 'warn', action: { label: 'Check for updates', run: () => cp.openUpdatePage() } })
     return notes
+  }
+  if (file.newerFormat) notes.push({ text: 'Changed by a newer version of commonplace, so it’s read-only here. Update to edit it.', cls: 'warn', action: { label: 'Check for updates', run: () => cp.openUpdatePage() } })
+  for (const p of file.sync?.outdated || []) {
+    notes.push({ text: p.side === 'older' ? `${p.name} has an older version of commonplace${p.app ? ` (${p.app})` : ''}. You’ll sync once they update.` : `${p.name} has a newer version of commonplace${p.app ? ` (${p.app})` : ''}. Update to sync with them.`, cls: 'warn' })
   }
   const conflicts = file.conflicts?.length || 0
   if (conflicts) {

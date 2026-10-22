@@ -17,7 +17,7 @@ import path from 'node:path'
 import * as Y from 'yjs'
 import * as awarenessProtocol from 'y-protocols/awareness'
 import { deriveDocKeys, epochKeys, seal, open } from './crypto.js'
-import { MSG, encodeFrame, FrameReader, encodeHello, decodeHello, helloProof } from './protocol.js'
+import { MSG, encodeFrame, FrameReader, encodeHello, decodeHello, helloProof, compatible } from './protocol.js'
 import { verifySignature } from './identity.js'
 import { Membership, canEdit, canRespond } from './members.js'
 import { isResponseUpdate, RESPONSES } from './respond.js'
@@ -119,9 +119,12 @@ export class SyncEngine extends EventEmitter {
   // device: { id, name } for this computer, so my other computers can tell
   // which of them they're talking to.
   // blobs: where uploaded files' chunks are kept (a BlobStore), if any.
-  constructor ({ identity, store, device = null, blobs = null }) {
+  // appVersion: this app's version, told to peers so people can see who
+  // needs to update.
+  constructor ({ identity, store, device = null, blobs = null, appVersion = null }) {
     super()
     this.identity = identity
+    this.appVersion = appVersion
     this.store = store
     this.device = device
     this.docs = new Map()
@@ -493,7 +496,12 @@ export class SyncEngine extends EventEmitter {
     for (const [conn, link] of doc.links) {
       if (link.contentEpoch == null) continue
       if (link.user.userId === this.identity.userId) devices.set(link.device?.id || conn.remoteId, { id: link.device?.id || null, name: link.device?.name || 'Another computer' })
-      else peers.set(link.user.userId, { ...link.user, role: link.role, pending: link.pending })
+      else peers.set(link.user.userId, { ...link.user, role: link.role, pending: link.pending, app: link.app })
+    }
+    // People we can't sync with until one of us updates commonplace.
+    const outdated = new Map()
+    for (const link of doc.links.values()) {
+      if (link.user && link.incompatible && link.user.userId !== this.identity.userId) outdated.set(link.user.userId, { userId: link.user.userId, name: link.user.name, app: link.app, side: link.incompatible })
     }
     // People with the document open right now (their editor publishes presence).
     const here = new Map()
@@ -507,6 +515,8 @@ export class SyncEngine extends EventEmitter {
       peers: [...peers.values()],
       devices: [...devices.values()],
       here: [...here.values()],
+      outdated: [...outdated.values()],
+      needsNewer: doc.members.needsNewer,
       lastSyncedAt: doc.state.lastSyncedAt,
       lastSyncedWith: doc.state.lastSyncedWith,
       lastSyncedDevice: doc.state.lastSyncedDevice || null,
@@ -600,7 +610,8 @@ export class SyncEngine extends EventEmitter {
       sig: this.identity.sign(helloProof(doc.docId, epoch, conn.localId, this.identity.encPublic)).toString('base64'),
       invite: doc.invite,
       head: doc.members.head,
-      device: this.device
+      device: this.device,
+      app: this.appVersion || undefined
     }
     conn.send(MSG.HELLO, doc.docId, epoch, seal(doc.keyFor(epoch), encodeHello(info, Y.encodeStateVector(doc.ydoc))))
   }
@@ -698,6 +709,9 @@ export class SyncEngine extends EventEmitter {
       doc.links.set(conn, link)
     }
     link.user = sanitizeUser(info)
+    // Which version they run, and whether we can talk at all.
+    link.app = typeof info.app === 'string' ? info.app.slice(0, 20) : null
+    link.incompatible = compatible(info)
     link.device = info.device && typeof info.device === 'object'
       ? { id: String(info.device.id || '').slice(0, 32), name: String(info.device.name || 'Another computer').slice(0, 60) }
       : null
@@ -734,7 +748,7 @@ export class SyncEngine extends EventEmitter {
   }
 
   _mayExchange (doc, link) {
-    return Boolean(link.role) && !this.isBlocked(link.user?.userId) && !link.gated && doc.contentEpoch != null && link.epochs.has(doc.contentEpoch)
+    return Boolean(link.role) && !link.incompatible && !doc.members.needsNewer && !this.isBlocked(link.user?.userId) && !link.gated && doc.contentEpoch != null && link.epochs.has(doc.contentEpoch)
   }
 
   // As owner: let in people holding a valid invite (or note their request,

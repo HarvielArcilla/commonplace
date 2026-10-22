@@ -134,3 +134,62 @@ test('an installer build downloads the new installer and checks it against the s
   await same.check()
   assert.equal(seen.available, false)
 })
+
+// ---- different versions of the app working together ------------------------------
+
+test('protocol versions: computers talk only when each meets the other’s minimum', async () => {
+  const { compatible, PROTOCOL_VERSION, MIN_PROTOCOL_VERSION } = await import('@commonplace/core')
+  assert.equal(compatible({ v: PROTOCOL_VERSION, min: MIN_PROTOCOL_VERSION }), null)
+  assert.equal(compatible({ v: 2 }), null, 'apps from before versions were exchanged')
+  assert.equal(compatible({ v: 1 }), 'older')
+  assert.equal(compatible({ v: PROTOCOL_VERSION + 5, min: PROTOCOL_VERSION + 1 }), 'newer')
+  assert.equal(compatible({ v: PROTOCOL_VERSION + 5, min: PROTOCOL_VERSION }), null, 'a newer app that still speaks ours')
+})
+
+test('a membership entry from a newer app is skipped, unless it limits access', async () => {
+  const { Membership, loadOrCreateIdentity } = await import('@commonplace/core')
+  const owner = loadOrCreateIdentity(tmp())
+  const sam = loadOrCreateIdentity(tmp())
+  const m = Membership.create(owner, 'doc9')
+  m.admit(owner, { userId: sam.userId, role: 'editor', enc: sam.encPublic })
+  m.append(owner, { type: 'badge', userId: sam.userId, colour: 'gold' }) // something a later app might add
+  const copy = new Membership('doc9', m.entries)
+  assert.equal(copy.entries.length, 3, 'the log still replays')
+  assert.equal(copy.member(sam.userId).role, 'editor')
+  assert.equal(copy.needsNewer, false)
+  m.append(owner, { type: 'quarantine', userId: sam.userId, critical: true })
+  const strict = new Membership('doc9', m.entries)
+  assert.equal(strict.needsNewer, true, 'a critical one stops this app syncing the file')
+})
+
+test('opening an older file runs its app’s migrations once; a newer file opens read-only', async (t) => {
+  const { Drive } = await import('@commonplace/drive')
+  const { docsApp } = await import('@commonplace/docs')
+  const ran = []
+  const v2 = { ...docsApp, schemaVersion: 2, migrations: { 2: (ydoc) => { ran.push(2); ydoc.getMap('extra').set('added', true) } } }
+  const dir = tmp()
+  const old = new Drive({ dataDir: dir, apps: [docsApp], transport: false, lan: false })
+  await old.start()
+  const docId = await old.create('docs', 'Notes')
+  assert.equal(old.describe(docId).newerFormat, false)
+  await old.stop()
+
+  const now = new Drive({ dataDir: dir, apps: [v2], transport: false, lan: false })
+  t.after(() => now.stop())
+  await now.start()
+  now.setOpen(docId, true)
+  assert.deepEqual(ran, [2])
+  assert.equal(now.getDoc(docId).ydoc.getMap('extra').get('added'), true)
+  assert.equal(now.getDoc(docId).meta.get('schemaVersion'), 2)
+  now.setOpen(docId, false)
+  now.setOpen(docId, true)
+  assert.deepEqual(ran, [2], 'only once')
+  await now.stop()
+
+  // Back on the older app: the file is newer than it, so read-only.
+  const back = new Drive({ dataDir: dir, apps: [docsApp], transport: false, lan: false })
+  await back.start()
+  assert.equal(back.describe(docId).supported, true)
+  assert.equal(back.describe(docId).newerFormat, true)
+  await back.stop()
+})

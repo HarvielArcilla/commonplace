@@ -7,7 +7,21 @@
 // One connection can carry many documents, because Hyperswarm keeps a single
 // connection per pair of peers no matter how many topics they share.
 
-export const PROTOCOL_VERSION = 2
+// The protocol this app speaks, and the oldest it still talks to. A peer
+// says both in its HELLO (v, min); two computers exchange content only if
+// each one's version is at least the other's minimum. Bump PROTOCOL_VERSION
+// for any change; raise MIN_PROTOCOL_VERSION only when older apps would
+// misread what newer ones send.
+export const PROTOCOL_VERSION = 3
+export const MIN_PROTOCOL_VERSION = 2
+
+export function compatible (info) {
+  const v = Number(info?.v) || 1
+  const min = Number(info?.min) || v // apps before 0.3 didn't say; they spoke v2 only
+  if (v < MIN_PROTOCOL_VERSION) return 'older'
+  if (min > PROTOCOL_VERSION) return 'newer'
+  return null
+}
 
 export const MSG = {
   HELLO: 1, // sealed(u32 jsonLen | json | stateVector) - who I am, proof of it, what I have
@@ -57,7 +71,7 @@ export class FrameReader {
 }
 
 export function encodeHello (info, stateVector) {
-  const json = Buffer.from(JSON.stringify({ v: PROTOCOL_VERSION, ...info }))
+  const json = Buffer.from(JSON.stringify({ v: PROTOCOL_VERSION, min: MIN_PROTOCOL_VERSION, ...info }))
   const head = Buffer.alloc(4)
   head.writeUInt32BE(json.length)
   return Buffer.concat([head, json, Buffer.from(stateVector)])

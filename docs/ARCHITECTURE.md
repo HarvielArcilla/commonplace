@@ -126,6 +126,8 @@ Both have links (Ctrl/Cmd+click opens them in the browser), LaTeX math rendered 
 
 **Conflicts (`core/src/conflicts.js`).** The CRDT merges everything, so edits to different paragraphs made while apart simply combine. Each computer keeps `base.bin`, the last state it had fully in common with a peer (saved when both state vectors match, and when a connection closes while in sync). When a peer reconnects and both sides changed the file since then, the engine captures three versions before applying the peer's catch-up update: *base*, *mine*, and *theirs* (base plus the peer's update). The app compares them unit by unit (each top-level block, keyed by the CRDT item that created it, plus the title). A unit changed on both sides with different results is a conflict, and so is one side deleting a block the other edited. Both computers detect the same conflict and record it under the same id in the file's `conflicts` map, with each version's text and a snapshot of its block. The document keeps the merged text meanwhile, with the block highlighted. Only the owner resolves: keep one version, keep both, or keep the merged text. The resolution is an ordinary edit, so it syncs like any other. Live editing never produces conflicts, since both computers' state vectors stay in step. The base is approximate when someone disconnects mid-edit, which can occasionally flag a block both people actually saw.
 
+**Different versions of the app (`core/src/protocol.js`).** Every `HELLO` carries the protocol version the computer speaks (`v`), the oldest it still accepts (`min`) and its app version. Two computers exchange a file only when each meets the other's minimum; otherwise both show who needs to update, and nothing is lost, since the changes wait in each copy until they do. Membership entries of a type this app doesn't know are skipped, so newer apps can add entries that older ones ignore; an entry marked `critical` (one that limits access) stops this app syncing the file until it's updated, rather than ignoring a restriction. Each app declares a `schemaVersion` and `migrations`. A file opened by an editor on a newer app is migrated once (`Drive.migrate`) and stamped with the new version; on an older app such a file opens read-only, so an older editor never writes in a layout it doesn't understand.
+
 **Window boundary.** The window is sandboxed, with no Node and no network. It keeps its own Y.Doc mirror and exchanges binary updates with the background process through `preload.cjs`.
 
 ## Known limits
@@ -154,8 +156,7 @@ Both have links (Ctrl/Cmd+click opens them in the browser), LaTeX math rendered 
 
 ## Roadmap
 
-1. **Signed updates.** Releases and commits signed, with the updater checking the signature against a key built into the app before installing anything.
-2. **Per-computer keys.** Device keys certified by your identity, so a lost computer can be cut off for real.
-3. **A "can comment" role**, enforced by checking that a commenter's updates touch only comments.
-4. **commonSheets:** merged cells. **commonSlides:** animations, images as shared blobs.
-5. **Docs features.** Headers and footers, Word equations in .docx, and images as content-addressed blobs instead of inline data.
+1. **Per-computer keys.** Device keys certified by your identity, so a lost computer can be cut off for real.
+2. **A "can comment" role**, enforced by checking that a commenter's updates touch only comments.
+3. **commonSheets:** merged cells. **commonSlides:** animations, images as shared blobs.
+4. **Docs features.** Headers and footers, Word equations in .docx, and images as content-addressed blobs instead of inline data.

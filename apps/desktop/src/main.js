@@ -543,7 +543,7 @@ function swarmOptions () {
 async function startDrive () {
   // COMMONPLACE_CHECKPOINT_SECONDS shortens the pause before a version is saved (for testing).
   const pause = Number(process.env.COMMONPLACE_CHECKPOINT_SECONDS) * 1000
-  drive = new Drive({ dataDir: app.getPath('userData'), apps: APPS, swarm: swarmOptions(), history: pause ? { idleMs: pause } : {}, makeThumb })
+  drive = new Drive({ dataDir: app.getPath('userData'), apps: APPS, swarm: swarmOptions(), history: pause ? { idleMs: pause } : {}, makeThumb, appVersion: app.getVersion() })
   drive.on('error', (err) => console.error('[commonplace]', err))
   // Another of my computers unlinked this one: sign out and delete it all here.
   drive.on('unlinked', () => {

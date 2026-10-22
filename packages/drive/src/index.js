@@ -51,7 +51,8 @@ export class Drive extends EventEmitter {
   // makeThumb(path): a small JPEG data URL for an uploaded image (optional).
   // policy: values that replace the default limits (see policy.js);
   // guardBytes is the old name for policy.docGuardBytes.
-  constructor ({ dataDir, apps = [], swarm = {}, transport = true, lan = true, history = {}, deviceName = defaultDeviceName(), makeThumb = null, guardBytes = null, policy = {}, guestGraceMs = GUEST_GRACE_MS }) {
+  // appVersion: this app's version, shown to the people you sync with.
+  constructor ({ dataDir, apps = [], swarm = {}, transport = true, lan = true, history = {}, deviceName = defaultDeviceName(), makeThumb = null, guardBytes = null, policy = {}, guestGraceMs = GUEST_GRACE_MS, appVersion = null }) {
     super()
     this.dataDir = dataDir
     this.policy = new Policy(dataDir, { ...(guardBytes ? { docGuardBytes: guardBytes } : {}), ...policy })
@@ -60,7 +61,7 @@ export class Drive extends EventEmitter {
     this.identity = loadOrCreateIdentity(dataDir)
     this.device = { id: loadDeviceId(dataDir), name: String(deviceName).slice(0, 60) }
     this.store = new FileStore(path.join(dataDir, 'files'))
-    this.engine = new SyncEngine({ identity: this.identity, store: this.store, device: this.device, blobs: new BlobStore(path.join(dataDir, 'blobs')) })
+    this.engine = new SyncEngine({ identity: this.identity, store: this.store, device: this.device, blobs: new BlobStore(path.join(dataDir, 'blobs')), appVersion })
     // Each computer protects itself: it ignores people you've blocked and
     // takes a limited number of answers to a form from any one person.
     this.engine.isBlocked = (userId) => this.policy.isBlocked(userId)
@@ -305,7 +306,10 @@ export class Drive extends EventEmitter {
       lastChangedBy: changeAt > (entry.lastEditedAt || 0) ? changeBy : null,
       lastActivityAt: Math.max(changeAt || 0, entry.lastOpenedAt || 0, entry.addedAt || 0),
       waitingForPeer: !entry.type, // joined by invite, nothing received yet
-      supported: !entry.type || (app && (entry.schemaVersion || 1) <= app.schemaVersion),
+      // Openable by this app; newerFormat: a newer app wrote it, so it opens
+      // read-only here (editing could damage what this app doesn't know).
+      supported: !entry.type || Boolean(app),
+      newerFormat: Boolean(app && (entry.schemaVersion || 1) > app.schemaVersion) || Boolean(doc?.members.needsNewer),
       appName: app?.name || null,
       kind: app?.kind || null,
       exports: app?.exports || [],
@@ -342,7 +346,9 @@ export class Drive extends EventEmitter {
         devices: status.devices || [],
         // Always-on relays keeping a copy: [{ key, online, lastSyncedAt }].
         relays: (this.relays?.status(docId) || []).map((h) => ({ ...h, address: formatRelayAddress(h.key) })),
-        pending: status.pending
+        pending: status.pending,
+        // People who can't sync with me until one of us updates.
+        outdated: (status.outdated || []).map((p) => ({ ...p, name: nameOf(p.userId, p.name) }))
       }
     }
   }
@@ -686,6 +692,26 @@ export class Drive extends EventEmitter {
     if (open) this._open.add(docId)
     else this._open.delete(docId)
     this._applyActive(docId)
+    if (open) this.migrate(docId)
+  }
+
+  // Brings an older file up to this app's format, when someone who may edit
+  // it opens it. Each app lists its steps (app.migrations: { [version]:
+  // fn(ydoc) }); they run in order, in one change, and must be safe to run
+  // on two computers at once (the CRDT merges both runs).
+  migrate (docId) {
+    const entry = this.files.get(docId)
+    const doc = this.engine.getDoc(docId)
+    const app = entry && this.appsByType.get(entry.type)
+    if (!doc || !app || !canEdit(this.engine.access(docId)?.role)) return false
+    const from = doc.meta.get('schemaVersion') || 1
+    if (from >= app.schemaVersion) return false
+    doc.ydoc.transact(() => {
+      for (let v = from + 1; v <= app.schemaVersion; v++) app.migrations?.[v]?.(doc.ydoc)
+      doc.meta.set('schemaVersion', app.schemaVersion)
+    }, 'local')
+    this._patch(docId, { schemaVersion: app.schemaVersion })
+    return true
   }
 
   rename (docId, title) {

@@ -168,7 +168,13 @@ function apply (s, e, i) {
       s.legacyLinks = false
       break
     default:
-      throw new Error(`unknown entry type ${e.type}`)
+      // An entry from a newer app. Ignoring it is safe unless it limits
+      // who may do what (the newer app marks those `critical`); then this
+      // app stops syncing the file until it's updated, rather than let in
+      // someone the owner kept out.
+      if (typeof e.type !== 'string') throw new Error('bad entry')
+      if (e.critical) s.needsNewer = true
+      s.unknown = (s.unknown || 0) + 1
   }
 }
 
@@ -186,6 +192,8 @@ export class Membership {
   get epoch () { return this.state.epoch }
   get head () { return this.state.head }
   get acceptsLegacyLinks () { return this.state.legacyLinks }
+  // The log has an entry only a newer app understands, and it limits access.
+  get needsNewer () { return Boolean(this.state.needsNewer) }
 
   // Starts a log. `members` lets a document made before membership keep
   // everyone who was already working on it.
