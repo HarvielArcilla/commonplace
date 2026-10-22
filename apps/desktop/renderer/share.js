@@ -1,7 +1,8 @@
 // Sharing (who has access, with which role) and moving your Drive to
 // another computer.
 
-import { $, el, ago, toast, dialog, confirmAction, cleanError, listNames } from './ui.js'
+import { $, el, svg, ago, toast, dialog, confirmAction, cleanError, listNames, openMenu } from './ui.js'
+import { icons } from './icons.js'
 import { state, cp, when, editorRole, manages, ROLE_LABEL } from './state.js'
 
 // The roles someone can be given in a file: forms are answered, not viewed.
@@ -56,10 +57,19 @@ function shareLists (docId, f) {
     if (manage && m.role !== 'owner' && (isOwner || m.role !== 'manager')) {
       const select = el('select', { class: 'tool-select', 'aria-label': `Role for ${m.name}`, onchange: (e) => act(() => cp.setMemberRole(docId, m.userId, e.target.value)) },
         ...roleOptions(f.kind, m.role, isOwner))
-      controls.append(select,
-        m.via ? null : el('button', { type: 'button', class: 'btn btn-quiet', title: 'When their access ends', onclick: () => accessDialog(docId, m) }, m.until ? 'Change end' : 'Set an end'),
-        isOwner ? el('button', { type: 'button', class: 'btn btn-quiet', title: 'Make this person the owner', onclick: () => transfer(docId, m) }, 'Make owner') : null,
-        el('button', { type: 'button', class: 'btn btn-quiet btn-danger', onclick: () => removePerson(docId, m) }, 'Remove'))
+      // The role is the one thing changed often; the rest is in a menu.
+      const more = el('button', {
+        type: 'button',
+        class: 'btn btn-quiet btn-icon',
+        'aria-label': `More for ${m.name}`,
+        onclick: (e) => openMenu(e.currentTarget, [
+          m.via ? null : { label: m.until ? 'Change when access ends…' : 'Set when access ends…', onSelect: () => accessDialog(docId, m) },
+          isOwner ? { label: 'Make owner…', onSelect: () => transfer(docId, m) } : null,
+          { sep: true },
+          { label: 'Remove…', danger: true, onSelect: () => removePerson(docId, m) }
+        ].filter(Boolean), { label: m.name })
+      }, svg(icons.more))
+      controls.append(select, more)
     } else {
       controls.append(el('span', { class: 'person-role' }, ROLE_LABEL[m.role] || m.role))
     }
@@ -163,13 +173,14 @@ function inviteControls (docId, kind, owner) {
   // Remember the choices, but not a form's role as the default for other files.
   for (const c of [role, expiry, once, ask, access, after, untilInput]) c.addEventListener('change', () => { const v = options(); saveInviteOptions({ role: kind === 'form' ? loadInviteOptions().role : v.role, expiresIn: v.expiresIn, once: v.once, ask: v.ask, access: v.access, after: v.after }); explain() })
   explain()
+  // Choose, then copy: the button comes last.
   return el('div', { class: 'invite-box' },
-    el('div', { class: 'invite-row' }, el('span', { class: 'invite-label' }, 'Invite link'), role, expiry,
-      el('button', { type: 'button', class: 'btn btn-primary', onclick: () => copyLink(docId, options()) }, 'Copy invite link')),
+    el('div', { class: 'invite-row' }, el('span', { class: 'invite-label' }, 'Invite link'), role, expiry),
     kind === 'folder' ? null : accessRow,
     el('div', { class: 'invite-options' },
       el('label', { class: 'check' }, once, 'One person only'),
-      el('label', { class: 'check' }, ask, 'I approve each person')),
+      el('label', { class: 'check' }, ask, 'I approve each person'),
+      el('button', { type: 'button', class: 'btn btn-primary invite-copy', onclick: () => copyLink(docId, options()) }, 'Copy invite link')),
     note)
 }
 

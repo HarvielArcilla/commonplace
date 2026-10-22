@@ -53,16 +53,17 @@ export function cleanError (err) {
 }
 
 let toastTimer
-// action: { label, run } for a button in the toast (Undo, say).
+// action: { label, run } for a button in the toast (Undo, say). The toast
+// is a popover, so it shows above any open dialog too.
 export function toast (msg, action = null) {
   const t = $('#toast')
+  const hide = () => { try { t.hidePopover() } catch {} }
   t.replaceChildren(msg)
-  if (action) {
-    t.append(el('button', { type: 'button', class: 'toast-action', onclick: () => { t.hidden = true; action.run() } }, action.label))
-  }
-  t.hidden = false
+  if (action) t.append(el('button', { type: 'button', class: 'toast-action', onclick: () => { hide(); action.run() } }, action.label))
+  hide() // and show again, on top of whatever opened since
+  try { t.showPopover() } catch {}
   clearTimeout(toastTimer)
-  toastTimer = setTimeout(() => { t.hidden = true }, action ? 6000 : 2800)
+  toastTimer = setTimeout(hide, action ? 6000 : 2800)
 }
 
 // ---- popover menus --------------------------------------------------------
@@ -102,7 +103,9 @@ export function openMenu (anchor, items, { align = 'start', label } = {}) {
     buttons.push(b)
     menu.append(b)
   }
-  document.body.append(menu)
+  // Inside an open dialog the rest of the page is inert, so the menu goes in
+  // the dialog.
+  ;(anchor.closest('dialog[open]') || document.body).append(menu)
   const r = anchor.getBoundingClientRect()
   const mw = menu.offsetWidth
   const mh = menu.offsetHeight

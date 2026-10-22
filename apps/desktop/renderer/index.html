@@ -116,7 +116,7 @@
       <section class="settings-page" data-page="profile">
         <h2 id="profile-heading">What should collaborators call you?</h2>
         <p>Your name and color appear next to your cursor. You can change them any time.</p>
-        <p class="first-run-restore" id="first-run-restore">Used commonplace before? <button type="button" class="link-button" id="restore-first">Restore from a backup</button></p>
+        <p class="first-run-restore" id="first-run-restore">Used commonplace before? <button type="button" class="link-button" id="move-first">Bring your Drive from your other computer</button> or <button type="button" class="link-button" id="restore-first">restore from a backup</button>.</p>
         <label class="field">Name<input id="profile-name" maxlength="40" required autocomplete="name" autofocus></label>
         <fieldset class="colors" id="profile-colors"><legend>Cursor color</legend></fieldset>
         <p class="fineprint" id="profile-id"></p>
@@ -199,7 +199,7 @@
     </form>
   </dialog>
 
-  <div id="toast" class="toast" role="status" hidden></div>
+  <div id="toast" class="toast" role="status" popover="manual"></div>
   <script src="dist/app.js"></script>
 </body>
 </html>

@@ -6,7 +6,7 @@ import { state, cp } from './state.js'
 import { initDrive, renderDrive } from './drive-view.js'
 import { initDocView, openDocument, renderDocMargin } from './doc-view.js'
 import { renderStorage, renderLimits, renderNetwork, renderLocalRelay } from './settings-view.js'
-import { moveOutDialog, relayStatus } from './share.js'
+import { moveOutDialog, moveInDialog, relayStatus } from './share.js'
 import { renderRecovery, restoreDialog } from './recovery-view.js'
 import { openActivity, showActivityCount } from './activity-view.js'
 import { showThread } from './comments-view.js'
@@ -118,7 +118,8 @@ function openProfileDialog (page = null) {
       el('input', { type: 'radio', name: 'color', value: c, checked: c === state.me.color, 'aria-label': `Color ${c}` }),
       el('span', { class: 'swatch', style: `--swatch:${c}` })))
   }
-  $('#profile-id').textContent = `Your ID: ${state.me.userId}`
+  // (Your ID is for checking who's who, not for a first look.)
+  $('#profile-id').textContent = firstRun ? '' : `Your ID: ${state.me.userId}`
   d.classList.toggle('first-run', firstRun)
   $('#settings-nav').hidden = firstRun
   $('#profile-heading').textContent = firstRun ? 'What should collaborators call you?' : 'Name and color'
@@ -201,9 +202,15 @@ $('#link-out').addEventListener('click', () => {
   $('#profile-dialog').close()
   moveOutDialog({ keep: true })
 })
+// On first run, the name can wait for someone bringing their Drive here.
+const backToNameIfNeeded = () => { if (!state.me?.hasChosenName && !$('#profile-dialog').open) openProfileDialog() }
 $('#restore-first').addEventListener('click', () => {
   $('#profile-dialog').close()
-  restoreDialog().finally(() => { if (!state.me?.hasChosenName && !$('#profile-dialog').open) openProfileDialog() })
+  restoreDialog().finally(backToNameIfNeeded)
+})
+$('#move-first').addEventListener('click', () => {
+  $('#profile-dialog').close()
+  moveInDialog().finally(backToNameIfNeeded)
 })
 cp.onBackup(() => { if ($('#profile-dialog').open && !$('#profile-recovery').hidden) renderRecovery() })
 cp.onNotice((text) => toast(text))

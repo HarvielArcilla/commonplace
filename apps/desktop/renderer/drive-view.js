@@ -162,7 +162,15 @@ async function emptyTrash () {
   toast(`Deleted ${plural(n, 'file')}`)
 }
 
-const star = (f) => (f.starred ? el('span', { class: 'star', title: 'Starred', 'aria-label': 'Starred' }, '★') : null)
+// A star beside the title: shown when starred, offered on hover.
+const star = (f) => (f.trashedAt ? null : el('button', {
+  type: 'button',
+  class: `star-toggle${f.starred ? ' on' : ''}`,
+  'aria-pressed': String(Boolean(f.starred)),
+  'aria-label': f.starred ? `Remove star from ${f.title || 'Untitled'}` : `Star ${f.title || 'Untitled'}`,
+  title: f.starred ? 'Starred' : 'Star',
+  onclick: (e) => { e.stopPropagation(); cp.starFile(f.docId, !f.starred) }
+}, f.starred ? '★' : '☆'))
 
 function renderCrumbs () {
   const nav = $('#crumbs')
