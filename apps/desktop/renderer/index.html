@@ -98,6 +98,7 @@
         <button type="button" data-page="computers">Your computers</button>
         <button type="button" data-page="recovery">Recovery</button>
         <button type="button" data-page="relays">Always-on relay</button>
+        <button type="button" data-page="network">Network</button>
         <button type="button" data-page="writing">Writing</button>
         <button type="button" data-page="storage">Storage and people</button>
         <button type="button" data-page="limits">Limits and safety</button>
@@ -130,13 +131,26 @@
       </section>
       <section id="profile-relays" class="settings-page" data-page="relays" hidden>
         <h2>Always-on relay</h2>
-        <p class="fineprint-plain">A computer you leave on keeps encrypted copies it can’t read, so your files and your computers sync even when nothing else is online. New files you make use it.</p>
+        <p class="fineprint-plain">A computer you leave on keeps encrypted copies it can’t read, of documents and uploaded files alike, so your files and your computers sync even when nothing else is online. New files you make use it.</p>
         <ul class="people" id="profile-relay-list" aria-label="Your relays"></ul>
         <div class="invite-row">
           <input id="profile-relay-input" class="relay-input" placeholder="Paste a relay address (cpr1.…)" aria-label="Relay address" spellcheck="false">
           <button type="button" class="btn" id="profile-relay-add">Add relay</button>
         </div>
         <label class="check"><input type="checkbox" id="profile-relay-all"> Also use it for every file I own now</label>
+      </section>
+      <section id="profile-network" class="settings-page" data-page="network" hidden>
+        <h2>Network</h2>
+        <p class="fineprint-plain" id="network-summary"></p>
+        <h4 class="settings-sub">Bootstrap addresses</h4>
+        <p class="fineprint-plain">The first time it goes online, commonplace finds the network through a few public bootstrap addresses. After that it starts from computers it has already met. A group can also run its own bootstrap node and list it here, one <code>host:port</code> per line.</p>
+        <textarea id="network-bootstrap" class="network-bootstrap" rows="3" spellcheck="false" placeholder="bootstrap.example.org:49737" aria-label="Bootstrap addresses"></textarea>
+        <label class="check"><input type="checkbox" id="network-public"> Also use the public bootstrap addresses</label>
+        <div class="computer-actions">
+          <button type="button" class="btn" id="network-save">Save</button>
+          <button type="button" class="btn btn-quiet" id="network-forget">Forget remembered computers</button>
+        </div>
+        <p class="fineprint-plain">Changes apply the next time commonplace starts. Computers on the same Wi-Fi or network always find each other directly, with or without these.</p>
       </section>
       <section id="profile-writing" class="settings-page" data-page="writing" hidden>
         <h2>Writing</h2>

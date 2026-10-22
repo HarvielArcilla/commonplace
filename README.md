@@ -187,6 +187,10 @@ node packages/relay/bin/commonplace-relay.js --dir ~/relay-data --quota 4
 
 It prints an address starting with `cpr1.`. Paste it into your profile in commonplace (used for new files and to sync your own computers), or into a file's **Share** dialog. Everyone working on that file then uses it.
 
+A relay also keeps uploaded files (encrypted, under names it can't link to their contents), so they download while whoever uploaded them is away. `--no-files` keeps documents only. Everything counts toward `--quota`.
+
+**Your own bootstrap node.** commonplace first finds the network through Hyperswarm's public bootstrap nodes, then remembers the computers it meets and starts from those. A group that would rather not depend on the public nodes can run its own (`npx hyperdht --bootstrap --host <its public IP> --port 49737`) and list it under Settings → Network.
+
 ## Signed releases
 
 Releases are signed, and the app installs one only if its signature checks out against the release key built into it (`apps/desktop/src/release-key.js`). Each release has `release.json`, listing the SHA-256 of every installer and the commit it was built from, and `release.json.sig`, an Ed25519 signature over it. The app checks the signature, then checks the installer it downloads byte for byte; copies installed from source move to exactly the signed commit. Someone who took over the GitHub account couldn't push an update to anyone without also having the release key.

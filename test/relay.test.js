@@ -5,6 +5,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import crypto from 'node:crypto'
 import createTestnet from 'hyperdht/testnet.js'
 import DHT from 'hyperdht'
 import * as Y from 'yjs'
@@ -73,6 +74,44 @@ test('people who are never online together sync through a relay that can’t rea
   // Nothing on the relay's disk is readable.
   const stored = allBytes(relayDir)
   for (const secret of ['heron', 'Field journal', 'Alice', 'Bob saw']) assert.ok(!stored.includes(secret), `relay storage contains "${secret}"`)
+})
+
+test('an uploaded file downloads from the relay while whoever uploaded it is off', async (t) => {
+  const testnet = await createTestnet(3)
+  const swarm = () => ({ dht: new DHT({ bootstrap: testnet.bootstrap, host: '127.0.0.1' }), refreshMs: 500 })
+  const relayDir = tmp()
+  const relay = new RelayServer({ dir: relayDir, swarm: { dht: new DHT({ bootstrap: testnet.bootstrap, host: '127.0.0.1' }) } })
+  const address = await relay.start()
+  const opts = { apps: [docsApp], lan: false }
+  const alice = new Drive({ dataDir: tmp(), swarm: swarm(), ...opts })
+  const bob = new Drive({ dataDir: tmp(), swarm: swarm(), ...opts })
+  t.after(async () => { await alice.stop(); await bob.stop(); await relay.stop(); await testnet.destroy() })
+  await alice.start()
+  await bob.start()
+  alice.addMyRelay(address)
+
+  const bytes = crypto.randomBytes(700 * 1024) // three chunks
+  const src = path.join(tmp(), 'survey.pdf')
+  fs.writeFileSync(src, bytes)
+  const docId = await alice.upload(src)
+  const chunksDir = path.join(relayDir, 'chunks')
+  const stored = () => (fs.existsSync(chunksDir) ? fs.readdirSync(chunksDir, { recursive: true }).filter((f) => /[0-9a-f]{64}$/.test(path.basename(f)) && f.includes(path.sep)).length : 0)
+  await until(() => stored() === 3, 30000, 'the relay to hold the file’s chunks')
+  const link = alice.invite(docId, 'viewer')
+  await alice.stop()
+
+  await bob.join(link)
+  await until(() => bob.describe(docId)?.upload?.ready, 30000, 'bob to download the file from the relay')
+  const out = path.join(tmp(), 'out.pdf')
+  await bob.uploads.saveTo(docId, out)
+  assert.deepEqual(fs.readFileSync(out), bytes)
+
+  // The relay holds neither the contents nor the chunks' real hashes.
+  const disk = allBytes(chunksDir)
+  assert.ok(!disk.includes(bytes.subarray(0, 64).toString('latin1')))
+  const real = bob.getDoc(docId).ydoc.getArray('versions').toArray()[0].chunks
+  const names = fs.readdirSync(chunksDir, { recursive: true }).map((f) => path.basename(f))
+  for (const h of real) assert.ok(!names.includes(h), 'a chunk stored under its hash')
 })
 
 test('a relay keeps only one blob per file after compacting, and rejects writes without the box key', async (t) => {

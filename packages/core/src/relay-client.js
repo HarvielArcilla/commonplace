@@ -14,15 +14,23 @@
 // then send whatever the relay doesn't have yet, judged from the state
 // vectors of what's there. While connected, every change goes up live and
 // the relay passes it on to everyone else connected.
+//
+// Uploaded files: each relay also keeps the chunks of the files that list
+// it (see relay-protocol.js), so a file downloads even when nobody who has
+// it is online. Every relay connection is a chunk source for the engine's
+// chunk exchange, so chunks from a relay pass the same checks (asked for,
+// hash matches, within this computer's limits) as chunks from a peer.
 
 import { EventEmitter } from 'node:events'
 import crypto from 'node:crypto'
 import * as Y from 'yjs'
-import { seal, open } from './crypto.js'
+import { seal, open, fileStoreKeys } from './crypto.js'
 import { canEdit, canRespond } from './members.js'
 import { isResponseUpdate } from './respond.js'
 import { verifySignature } from './identity.js'
-import { MsgReader, encodeMsg, boxKeys, putProof, compactProof, sha256hex } from './relay-protocol.js'
+import { MsgReader, encodeMsg, boxKeys, putProof, compactProof, chunkProof, sha256hex, MAX_NAMES } from './relay-protocol.js'
+
+const PUTS_IN_FLIGHT = 4 // chunks being sent to one relay at once
 
 const blobProof = (docId, box, data) => `commonplace/relay/v1/blob|${docId}|${box}|${sha256hex(data)}`
 
@@ -39,7 +47,14 @@ export class RelayClient extends EventEmitter {
     this.docRelays = new Map() // docId -> Set(relayKey)
     this.links = new Map() // relayKey -> { send, boxes: Map(box -> state) }
     this.boxCache = new Map() // epoch secret (hex) -> boxKeys
-    engine.on('update', (docId, update, origin) => { if (origin !== this && origin !== 'disk') this._pushUpdate(docId, update) })
+    this.stores = new Map() // docId -> the file's chunk store keys
+    this.chunksOf = () => [] // set by the Drive: the chunk hashes a file lists
+    this._seedTimers = new Map()
+    engine.on('update', (docId, update, origin) => {
+      if (origin !== this && origin !== 'disk') this._pushUpdate(docId, update)
+      if (origin !== 'disk') this._scheduleSeed(docId)
+    })
+    engine.chunks.on('chunk', (docId) => this._scheduleSeed(docId))
     engine.on('members', (docId) => this._pushMembers(docId))
     engine.on('response', (docId, update) => this._pushResponse(docId, update))
     engine.on('topics', (docId) => this._refreshDoc(docId))
@@ -79,13 +94,15 @@ export class RelayClient extends EventEmitter {
   addConnection (socket, keyHex) {
     const old = this.links.get(keyHex)
     if (old) old.socket.destroy()
-    const link = { socket, send: (head, payload) => socket.write(encodeMsg(head, payload)), boxes: new Map(), pending: new Map() }
+    const link = { socket, send: (head, payload) => socket.write(encodeMsg(head, payload)), boxes: new Map(), pending: new Map(), calls: new Map(), puts: [], putting: 0, known: new Set(), files: true }
+    link.chunkConn = { relay: keyHex, chunkSend: (type, docId, plain) => this._ask(link, docId, type, plain) }
     this.links.set(keyHex, link)
     const reader = new MsgReader((head, payload) => this._onMessage(keyHex, link, head, payload))
     socket.on('data', (chunk) => { try { reader.push(chunk) } catch { socket.destroy() } })
     socket.on('error', () => {})
     socket.on('close', () => {
       if (this.links.get(keyHex) === link) this.links.delete(keyHex)
+      this.engine.chunks.dropConnection(link.chunkConn)
       for (const s of link.boxes.values()) this._status(s.docId)
     })
     for (const [docId, keys] of this.docRelays) if (keys.has(keyHex)) this._refreshDoc(docId)
@@ -131,6 +148,7 @@ export class RelayClient extends EventEmitter {
   }
 
   _onMessage (key, link, head, payload) {
+    if (head.id && link.calls.has(head.id)) return this._onChunkReply(link, head, payload)
     const state = link.boxes.get(head.box)
     if (!state) return
     const doc = this.engine.getDoc(state.docId)
@@ -143,6 +161,8 @@ export class RelayClient extends EventEmitter {
       state.caughtUp = true
       this._catchUp(key, link, doc, state, head)
       this._save(key, state)
+      this.engine.chunks.pump(doc.docId) // the relay may have chunks this computer is waiting for
+      this.seedChunks(doc.docId)
     } else if (head.t === 'ok') {
       const sent = link.pending.get(head.id)
       link.pending.delete(head.id)
@@ -259,6 +279,112 @@ export class RelayClient extends EventEmitter {
     const id = crypto.randomBytes(6).toString('hex')
     link.pending.set(id, extra)
     link.send({ t: 'put', box: state.keys.box, sig: state.keys.sign(putProof(state.keys.box, blob)), id }, blob)
+  }
+
+  // ---- uploaded files' chunks -----------------------------------------------------
+
+  _store (doc) {
+    if (!this.stores.has(doc.docId)) {
+      const k = fileStoreKeys(doc.secret)
+      this.stores.set(doc.docId, { ...boxKeys(k.storeSecret), encKey: k.encKey, nameKey: k.nameKey })
+    }
+    return this.stores.get(doc.docId)
+  }
+
+  _chunkName (store, hash) {
+    return crypto.createHmac('sha256', store.nameKey).update(hash).digest('hex')
+  }
+
+  // Relays that can hand out a file's chunks right now (for the engine).
+  chunkSources (docId) {
+    return this.relaysOf(docId).map((k) => this.links.get(k)).filter((l) => l?.files).map((l) => l.chunkConn)
+  }
+
+  // The chunk exchange asking a relay for chunks, as it would a peer.
+  _ask (link, docId, type, plain) {
+    const doc = this.engine.getDoc(docId)
+    if (!doc || type !== this.engine.chunks.T.WANT) return
+    let hashes
+    try { hashes = JSON.parse(plain.toString('utf8')).h } catch { return }
+    const store = this._store(doc)
+    for (const hash of Array.isArray(hashes) ? hashes : []) {
+      const id = crypto.randomBytes(6).toString('hex')
+      link.calls.set(id, { kind: 'get', docId, hash })
+      link.send({ t: 'cget', box: store.box, name: this._chunkName(store, hash), id })
+    }
+  }
+
+  _onChunkReply (link, head, payload) {
+    const call = link.calls.get(head.id)
+    link.calls.delete(head.id)
+    const T = this.engine.chunks.T
+    if (head.t === 'error') {
+      if (head.reason === 'full') link.full = true
+      else if (head.reason === 'unknown message') link.files = false // a relay from before files
+    }
+    if (call.kind === 'get') {
+      const doc = this.engine.getDoc(call.docId)
+      const plain = head.t === 'chunk' && doc ? open(this._store(doc).encKey, payload) : null
+      if (plain) this.engine.chunks.onMessage(call.docId, link.chunkConn, T.CHUNK, Buffer.concat([Buffer.from(call.hash, 'hex'), plain]))
+      else this.engine.chunks.onMessage(call.docId, link.chunkConn, T.NOCHUNK, Buffer.from(JSON.stringify({ h: [call.hash] })))
+    } else if (call.kind === 'has') {
+      if (head.t !== 'have') return
+      const have = new Set(head.names)
+      for (const [name, hash] of call.names) {
+        if (have.has(name)) link.known.add(name)
+        else link.puts.push({ docId: call.docId, hash, name })
+      }
+      this._pumpPuts(link)
+    } else if (call.kind === 'put') {
+      link.putting--
+      if (head.t === 'ok') link.known.add(call.name)
+      this._pumpPuts(link)
+    }
+  }
+
+  _scheduleSeed (docId) {
+    if (!this.docRelays.has(docId) || this._seedTimers.has(docId)) return
+    const t = setTimeout(() => { this._seedTimers.delete(docId); this.seedChunks(docId) }, 1500)
+    t.unref?.()
+    this._seedTimers.set(docId, t)
+  }
+
+  // Leaves on each of the file's relays the chunks this computer has that
+  // the relay doesn't, so the file can download while this computer is off.
+  seedChunks (docId) {
+    const doc = this.engine.getDoc(docId)
+    if (!doc) return
+    const blobs = this.engine.chunks.blobs
+    const hashes = [...new Set(this.chunksOf(docId))].filter((h) => blobs.has(h))
+    if (!hashes.length) return
+    const store = this._store(doc)
+    for (const key of this.relaysOf(docId)) {
+      const link = this.links.get(key)
+      if (!link?.files || link.full) continue
+      const unknown = hashes.map((h) => [this._chunkName(store, h), h]).filter(([name]) => !link.known.has(name) && !link.puts.some((p) => p.name === name))
+      for (let i = 0; i < unknown.length; i += MAX_NAMES) {
+        const names = unknown.slice(i, i + MAX_NAMES)
+        const id = crypto.randomBytes(6).toString('hex')
+        link.calls.set(id, { kind: 'has', docId, names })
+        link.send({ t: 'chas', box: store.box, names: names.map(([n]) => n), id })
+      }
+    }
+  }
+
+  _pumpPuts (link) {
+    while (link.putting < PUTS_IN_FLIGHT && link.puts.length && !link.full) {
+      const { docId, hash, name } = link.puts.shift()
+      const doc = this.engine.getDoc(docId)
+      const blobs = this.engine.chunks.blobs
+      if (!doc || !blobs.has(hash) || link.known.has(name)) continue
+      const store = this._store(doc)
+      const sealed = seal(store.encKey, blobs.read(hash))
+      const id = crypto.randomBytes(6).toString('hex')
+      link.calls.set(id, { kind: 'put', name })
+      link.putting++
+      link.send({ t: 'cput', box: store.box, name, sig: store.sign(chunkProof(store.box, name, sealed)), id }, sealed)
+    }
+    if (link.full) link.puts.length = 0
   }
 
   // ---- bookkeeping ------------------------------------------------------------

@@ -48,6 +48,33 @@ async function block (p) {
   renderStorage()
 }
 
+// ---- network -----------------------------------------------------------------------
+
+export async function renderNetwork () {
+  const n = await cp.getNetwork()
+  $('#network-summary').textContent = [
+    `Connected to ${n.connections} computer${n.connections === 1 ? '' : 's'} right now.`,
+    n.remembered ? `Remembers ${n.remembered} computer${n.remembered === 1 ? '' : 's'} on the network to start from next time.` : null,
+    n.overridden ? 'This copy was started with its own bootstrap list (COMMONPLACE_BOOTSTRAP), which overrides these settings.' : null
+  ].filter(Boolean).join(' ')
+  $('#network-bootstrap').value = n.bootstrap.join('\n')
+  $('#network-public').checked = n.publicBootstrap
+}
+
+$('#network-save').addEventListener('click', async () => {
+  try {
+    await cp.setNetwork({ bootstrap: $('#network-bootstrap').value, publicBootstrap: $('#network-public').checked })
+    toast('Saved. It applies the next time commonplace starts.')
+  } catch (err) { toast(cleanError(err)) }
+  renderNetwork()
+})
+
+$('#network-forget').addEventListener('click', async () => {
+  await cp.forgetNetworkNodes()
+  toast('Forgotten')
+  renderNetwork()
+})
+
 // ---- limits ------------------------------------------------------------------------
 
 export async function renderLimits () {

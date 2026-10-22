@@ -5,7 +5,7 @@ import { $, el, ago, toast, confirmAction, cleanError } from './ui.js'
 import { state, cp } from './state.js'
 import { initDrive, renderDrive } from './drive-view.js'
 import { initDocView, openDocument, renderDocMargin } from './doc-view.js'
-import { renderStorage, renderLimits } from './settings-view.js'
+import { renderStorage, renderLimits, renderNetwork } from './settings-view.js'
 import { moveOutDialog, relayStatus } from './share.js'
 import { renderRecovery, restoreDialog } from './recovery-view.js'
 import { openActivity, showActivityCount } from './activity-view.js'
@@ -125,7 +125,7 @@ function openProfileDialog (page = null) {
   try { saved = localStorage.getItem(PAGE_KEY) } catch {}
   showSettingsPage(firstRun ? 'profile' : page || saved || 'profile')
   cp.getSettings().then((x) => { $('#setting-spellcheck').checked = x.spellcheck }).catch(() => {})
-  if (!firstRun) { renderComputers(); renderMyRelays(); renderRecovery(); renderStorage(); renderLimits() }
+  if (!firstRun) { renderComputers(); renderMyRelays(); renderRecovery(); renderStorage(); renderLimits(); renderNetwork() }
   if (!d.open) d.showModal()
 }
 

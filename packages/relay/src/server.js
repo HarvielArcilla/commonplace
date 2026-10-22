@@ -6,6 +6,8 @@
 // Storage, one folder per box:
 //   boxes/<box>/log.bin    u32 seq | u32 length | blob, appended
 //   boxes/<box>/meta.json  { last, count, bytes }
+// and one per file whose uploads it keeps:
+//   chunks/<store>/<name>  one sealed chunk
 
 import { EventEmitter } from 'node:events'
 import fs from 'node:fs'
@@ -13,17 +15,22 @@ import path from 'node:path'
 import Hyperswarm from 'hyperswarm'
 import DHT from 'hyperdht'
 import {
-  MsgReader, encodeMsg, verifyBox, putProof, compactProof, dropProof, formatRelayAddress
+  MsgReader, encodeMsg, verifyBox, putProof, compactProof, dropProof, chunkProof, formatRelayAddress, MAX_RELAY_CHUNK, MAX_NAMES
 } from '@commonplace/core/relay-protocol'
 
 const BOX = /^[0-9a-f]{64}$/
+const NAME = /^[0-9a-f]{64}$/
 
 export class RelayServer extends EventEmitter {
   // quotaBytes: the most this relay stores in total, across every box.
-  constructor ({ dir, swarm = {}, quotaBytes = 4 * 1024 ** 3 } = {}) {
+  // files: whether it also keeps uploaded files' chunks (they count toward
+  // the same quota).
+  constructor ({ dir, swarm = {}, quotaBytes = 4 * 1024 ** 3, files = true } = {}) {
     super()
     this.dir = dir
     this.quotaBytes = quotaBytes
+    this.files = files
+    this.chunkBytes = 0
     this.swarmOpts = swarm
     this.boxes = new Map() // box -> { last, count, bytes, subs: Set(conn) }
     this.connections = new Set()
@@ -32,7 +39,7 @@ export class RelayServer extends EventEmitter {
   get address () { return formatRelayAddress(this.swarm.keyPair.publicKey.toString('hex')) }
 
   get usedBytes () {
-    let n = 0
+    let n = this.chunkBytes
     for (const b of this.boxes.values()) n += b.bytes
     return n
   }
@@ -46,6 +53,7 @@ export class RelayServer extends EventEmitter {
         this.boxes.set(name, { last: meta.last, count: meta.count, bytes: meta.bytes, subs: new Set() })
       } catch {}
     }
+    this.chunkBytes = countBytes(path.join(this.dir, 'chunks'))
     this.swarm = new Hyperswarm({ ...this.swarmOpts, keyPair: this.swarmOpts.keyPair || loadKeyPair(this.dir) })
     this.swarm.on('connection', (socket) => this._accept(socket))
     await this.swarm.listen()
@@ -78,6 +86,9 @@ export class RelayServer extends EventEmitter {
     if (head.t === 'put') return this._put(conn, box, head, payload)
     if (head.t === 'compact') return this._compact(conn, box, head, payload)
     if (head.t === 'drop') return this._drop(conn, box, head)
+    if (this.files && head.t === 'chas') return this._chunksHas(conn, box, head)
+    if (this.files && head.t === 'cput') return this._chunkPut(conn, box, head, payload)
+    if (this.files && head.t === 'cget') return this._chunkGet(conn, box, head)
     throw new Error('unknown message')
   }
 
@@ -127,6 +138,40 @@ export class RelayServer extends EventEmitter {
     conn.send({ t: 'ok', box, id: head.id })
   }
 
+  // ---- uploaded files' chunks ------------------------------------------------
+
+  _chunkFile (box, name) {
+    if (!NAME.test(String(name || ''))) throw new Error('bad chunk name')
+    return path.join(this.dir, 'chunks', box, name)
+  }
+
+  _chunksHas (conn, box, head) {
+    const names = (Array.isArray(head.names) ? head.names : []).slice(0, MAX_NAMES)
+    conn.send({ t: 'have', box, id: head.id, names: names.filter((n) => NAME.test(String(n)) && fs.existsSync(this._chunkFile(box, n))) })
+  }
+
+  _chunkPut (conn, box, head, payload) {
+    const file = this._chunkFile(box, head.name)
+    if (payload.length > MAX_RELAY_CHUNK) throw new Error('too big')
+    if (!verifyBox(box, chunkProof(box, head.name, payload), head.sig)) throw new Error('bad signature')
+    if (!fs.existsSync(file)) {
+      if (this.usedBytes + payload.length > this.quotaBytes) throw new Error('full')
+      fs.mkdirSync(path.dirname(file), { recursive: true })
+      fs.writeFileSync(`${file}.tmp`, payload)
+      fs.renameSync(`${file}.tmp`, file)
+      this.chunkBytes += payload.length
+    }
+    conn.send({ t: 'ok', box, id: head.id })
+  }
+
+  _chunkGet (conn, box, head) {
+    const file = this._chunkFile(box, head.name)
+    let data = null
+    try { data = fs.readFileSync(file) } catch {}
+    if (data) conn.send({ t: 'chunk', box, name: head.name, id: head.id }, data)
+    else conn.send({ t: 'nochunk', box, name: head.name, id: head.id })
+  }
+
   _newBox (box, persist) {
     const b = { last: 0, count: 0, bytes: 0, subs: new Set() }
     this.boxes.set(box, b)
@@ -157,6 +202,17 @@ export class RelayServer extends EventEmitter {
     const { last, count, bytes } = this.boxes.get(box)
     fs.writeFileSync(path.join(this.dir, 'boxes', box, 'meta.json'), JSON.stringify({ last, count, bytes }))
   }
+}
+
+function countBytes (dir) {
+  let n = 0
+  for (const store of fs.existsSync(dir) ? fs.readdirSync(dir) : []) {
+    if (!BOX.test(store)) continue
+    for (const name of fs.readdirSync(path.join(dir, store))) {
+      if (NAME.test(name)) { try { n += fs.statSync(path.join(dir, store, name)).size } catch {} }
+    }
+  }
+  return n
 }
 
 function frame (seq, blob) {

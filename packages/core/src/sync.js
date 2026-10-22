@@ -140,11 +140,14 @@ export class SyncEngine extends EventEmitter {
       types: MSG,
       send: (conn, type, docId, plain) => {
         const doc = this.docs.get(docId)
+        if (conn.chunkSend) return conn.chunkSend(type, docId, plain) // a relay
         if (doc?.contentEpoch != null) conn.send(type, docId, doc.contentEpoch, seal(doc.keyFor(doc.contentEpoch), plain))
       },
       links: (docId) => {
         const doc = this.docs.get(docId)
-        return doc ? [...doc.links].filter(([, l]) => l.contentEpoch === doc.contentEpoch && l.contentEpoch != null).map(([c]) => c) : []
+        if (!doc) return []
+        const peers = [...doc.links].filter(([, l]) => l.contentEpoch === doc.contentEpoch && l.contentEpoch != null).map(([c]) => c)
+        return [...peers, ...(this.chunkSources?.(docId) || [])]
       },
       // Set by the Drive: whether a chunk belongs to a file.
       allow: (docId, hash) => this.allowChunk?.(docId, hash) || false

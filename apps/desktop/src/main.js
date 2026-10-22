@@ -368,7 +368,7 @@ function registerIpc () {
     const code = newMoveCode()
     const controller = new AbortController()
     move = controller
-    sendDrive({ code, drive, swarm: swarmOptions(), signal: controller.signal, leaving: !keep, onStatus: (s) => send('move:status', s) })
+    sendDrive({ code, drive, swarm: moveSwarm(), signal: controller.signal, leaving: !keep, onStatus: (s) => send('move:status', s) })
       .then(async ({ count }) => {
         move = null
         if (keep) { send('move:status', { phase: 'linked', count }); return }
@@ -395,7 +395,7 @@ function registerIpc () {
       code,
       dataDir: app.getPath('userData'),
       isEmpty: () => drive.isEmpty,
-      swarm: swarmOptions(),
+      swarm: moveSwarm(),
       onStatus: (s) => send('move:status', s),
       beforeInstall: () => drive.stop()
     })
@@ -458,6 +458,9 @@ function registerIpc () {
     return bytes ? { kind, src: `data:${types[ext]};base64,${bytes.toString('base64')}` } : null
   })
   ipcMain.handle('storage:usage', () => drive.storageUsage())
+  ipcMain.handle('network:get', () => drive.networkInfo())
+  ipcMain.handle('network:set', (e, patch) => drive.setNetwork(patch))
+  ipcMain.handle('network:forget', () => drive.forgetNetworkNodes())
   ipcMain.handle('storage:settings', (_e, patch) => drive.setStorageSettings(patch || {}))
   ipcMain.handle('drive:keepSyncing', (_e, docId) => drive.keepSyncing(docId))
   ipcMain.handle('drive:keepSyncingFolder', (_e, folderId) => drive.keepSyncingFolder(folderId))
@@ -538,6 +541,15 @@ function swarmOptions () {
   // COMMONPLACE_DHT_HOST binds this computer's DHT node to one address (e.g. 127.0.0.1).
   if (process.env.COMMONPLACE_DHT_HOST) return { dht: new DHT({ bootstrap, host: process.env.COMMONPLACE_DHT_HOST }) }
   return { bootstrap }
+}
+
+// Moving or linking computers uses its own short-lived connection, with the
+// same bootstrap addresses as everything else.
+function moveSwarm () {
+  const env = swarmOptions()
+  if (env.dht || env.bootstrap) return env
+  const { bootstrap } = drive.network.swarmOptions()
+  return bootstrap ? { bootstrap } : {}
 }
 
 async function startDrive () {

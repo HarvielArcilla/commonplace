@@ -23,6 +23,7 @@ import { SharedFolders, folderApp, ITEMS } from './shared-folders.js'
 import { openThreadCount } from '@commonplace/core/threads'
 import { Activity } from './activity.js'
 import { Templates } from './templates.js'
+import { NetworkSettings } from './network.js'
 
 // How long a guest waits for the owner before treating them as offline.
 const GUEST_GRACE_MS = 60e3
@@ -36,6 +37,7 @@ export { sendDrive, receiveDrive, newMoveCode, parseMoveCode } from './move.js'
 export { Backups, readBackupFile, restoreBackup, newRecoveryKey, normalizeRecoveryKey } from './backup.js'
 export { MAX_FILE_BYTES, GUARD_BYTES, fileKind, safeFileName, formatBytes, filesApp } from './files.js'
 export { POLICY_FIELDS, POLICY_GROUPS, DEFAULT_POLICY, normalizePolicy } from './policy.js'
+export { NetworkSettings, parseNodes } from './network.js'
 
 // Where the index lived before it synced between computers (still used to
 // hand an index over when moving or linking a Drive).
@@ -56,7 +58,10 @@ export class Drive extends EventEmitter {
     super()
     this.dataDir = dataDir
     this.policy = new Policy(dataDir, { ...(guardBytes ? { docGuardBytes: guardBytes } : {}), ...policy })
-    this.swarmOpts = swarm
+    this.network = new NetworkSettings(dataDir)
+    // Options passed in (tests, or COMMONPLACE_BOOTSTRAP) win over the settings.
+    this.swarmOpts = { ...this.network.swarmOptions(), ...swarm }
+    this.networkOverridden = Boolean(swarm.dht || swarm.bootstrap)
     this.appsByType = new Map([...apps, filesApp, folderApp].map((a) => [a.type, a]))
     this.identity = loadOrCreateIdentity(dataDir)
     this.device = { id: loadDeviceId(dataDir), name: String(deviceName).slice(0, 60) }
@@ -78,7 +83,7 @@ export class Drive extends EventEmitter {
     this._open = new Set() // files open in a window right now
     this.transport = transport
       ? new SwarmTransport(this.engine, {
-        ...swarm,
+        ...this.swarmOpts,
         isLonely: (topicHex) => {
           const status = this.engine.status(this._topicToDoc.get(topicHex))
           return !status || (status.peers.length === 0 && status.devices.length === 0)
@@ -95,6 +100,11 @@ export class Drive extends EventEmitter {
       ? new RelayClient(this.engine, { connect: (key) => this.transport.joinPeer(key), disconnect: (key) => this.transport.leavePeer(key) })
       : null
     this.relays?.on('status', () => this._changed())
+    if (this.relays) {
+      // Relays keep uploaded files' chunks too.
+      this.relays.chunksOf = (docId) => this.uploads._current(docId)?.chunks || []
+      this.engine.chunkSources = (docId) => this.relays.chunkSources(docId)
+    }
     this.lan = lan
       ? new LanTransport(this.engine, {
         ...(typeof lan === 'object' ? lan : {}),
@@ -1267,6 +1277,25 @@ export class Drive extends EventEmitter {
   approveDownload (docId) { this.uploads.approve(docId) }
   removeDownloadedCopy (docId) { this.uploads.removeCopy(docId) }
   storageUsage () { return this.uploads.usage() }
+
+  // ---- network (Settings → Network) ---------------------------------------------
+
+  // What the settings show: the saved values, whether something passed in
+  // at start (COMMONPLACE_BOOTSTRAP) overrides them, and what's connected.
+  networkInfo () {
+    const t = this.transport
+    return {
+      ...this.network.get(),
+      overridden: this.networkOverridden,
+      remembered: t?.remembered || 0,
+      connections: t?.peerCount || 0,
+      lan: this.lan ? true : false
+    }
+  }
+
+  setNetwork (patch) { return this.network.set(patch) }
+
+  forgetNetworkNodes () { this.transport?.forgetNodes() }
   setStorageSettings (patch) { this.uploads.setSettings(patch); this._changed() }
 
   _applyActive (docId) {

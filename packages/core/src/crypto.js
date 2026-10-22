@@ -36,6 +36,13 @@ export function epochKeys (secret) {
   return { topic: derive('topic', secret, 32), encKey: derive('enc', secret, 32) }
 }
 
+// Keys for storing a file's uploaded chunks on a relay. They come from the
+// root secret, so they outlast key changes: chunks never change, and someone
+// removed from the file never learns the chunk names of anything newer.
+export function fileStoreKeys (secret) {
+  return { storeSecret: derive('relay-files', secret), encKey: derive('file-enc', secret), nameKey: derive('file-name', secret) }
+}
+
 export function seal (encKey, plaintext) {
   const nonce = crypto.randomBytes(NONCE_BYTES)
   const cipher = crypto.createCipheriv('aes-256-gcm', encKey, nonce)

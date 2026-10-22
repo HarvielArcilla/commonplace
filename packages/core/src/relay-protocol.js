@@ -15,9 +15,21 @@
 //                     { t: 'put', box, sig, id }        payload = blob; sig = writer's signature
 //                     { t: 'compact', box, upTo, sig }  payload replaces every blob up to seq upTo
 //                     { t: 'drop', box, sig }           delete the box (an old epoch)
+//                     { t: 'chas', box, names, id }     which of these chunks do you have?
+//                     { t: 'cput', box, name, sig, id } payload = one sealed chunk
+//                     { t: 'cget', box, name, id }      send me this chunk
 //   relay -> client  { t: 'blob', box, seq }           payload = blob
 //                     { t: 'end', box, last, count }    caught up
 //                     { t: 'ok', box, seq, id }  /  { t: 'error', box, id, reason }
+//                     { t: 'have', box, id, names }     the ones it has
+//                     { t: 'chunk', box, name, id }     payload = the sealed chunk
+//                     { t: 'nochunk', box, name, id }
+//
+// Uploaded files' chunks live in a separate store per file, also named by a
+// key (derived from the file's root secret, so it outlasts key changes).
+// Chunk names are keyed hashes of the chunk, so the relay can't tell which
+// well-known file someone uploaded; the payload is sealed, and readers check
+// the decrypted chunk against its SHA-256, so a relay can't swap one.
 
 import crypto from 'node:crypto'
 
@@ -94,6 +106,10 @@ export function verifyBox (box, text, sig) {
 export const putProof = (box, payload) => `commonplace/relay/v1/put|${box}|${sha256hex(payload)}`
 export const compactProof = (box, upTo, payload) => `commonplace/relay/v1/compact|${box}|${upTo}|${sha256hex(payload)}`
 export const dropProof = (box) => `commonplace/relay/v1/drop|${box}`
+export const chunkProof = (box, name, payload) => `commonplace/relay/v1/cput|${box}|${name}|${sha256hex(payload)}`
+
+export const MAX_RELAY_CHUNK = 512 * 1024 // a 256 KB chunk, sealed, with room to spare
+export const MAX_NAMES = 256 // per 'chas'
 
 // Relay addresses are the relay's public key: cpr1.<base64url>. Addresses
 // from when relays were called helpers (cph1.) still work.

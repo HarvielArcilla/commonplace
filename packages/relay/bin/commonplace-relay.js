@@ -3,7 +3,9 @@
 // (an old laptop, a Raspberry Pi, a free cloud VM), then paste its address
 // into commonplace under Share > Always-on relay.
 //
-//   commonplace-relay [--dir <folder>] [--quota <GB>]
+//   commonplace-relay [--dir <folder>] [--quota <GB>] [--no-files]
+//
+// --no-files: keep only documents, not uploaded files' contents.
 
 import fs from 'node:fs'
 import os from 'node:os'
@@ -14,7 +16,7 @@ import { RelayServer } from '../src/server.js'
 const args = process.argv.slice(2)
 const opt = (name, fallback) => { const i = args.indexOf(`--${name}`); return i >= 0 ? args[i + 1] : fallback }
 if (args.includes('--help') || args.includes('-h')) {
-  console.log('Usage: commonplace-relay [--dir <folder>] [--quota <GB>]')
+  console.log('Usage: commonplace-relay [--dir <folder>] [--quota <GB>] [--no-files]')
   process.exit(0)
 }
 // Relays used to be called helpers: an existing ~/.commonplace-helper keeps being used.
@@ -27,14 +29,15 @@ const list = (process.env.COMMONPLACE_BOOTSTRAP || '').split(',').map((s) => s.t
 const bootstrap = list.map((hp) => { const [host, port] = hp.split(':'); return { host, port: Number(port) } })
 const swarm = !list.length ? {} : process.env.COMMONPLACE_DHT_HOST ? { dht: new DHT({ bootstrap, host: process.env.COMMONPLACE_DHT_HOST }) } : { bootstrap }
 
-const relay = new RelayServer({ dir, quotaBytes, swarm })
+const files = !args.includes('--no-files')
+const relay = new RelayServer({ dir, quotaBytes, swarm, files })
 const address = await relay.start()
 console.log('commonplace relay is running.')
 console.log('')
 console.log(`  Address: ${address}`)
 console.log('')
 console.log('Paste the address into commonplace (Share > Always-on relay, or your profile).')
-console.log(`Storing encrypted copies in ${dir} (up to ${opt('quota', 4)} GB). It can't read them.`)
+console.log(`Storing encrypted copies${files ? ' of documents and uploaded files' : ' of documents'} in ${dir} (up to ${opt('quota', 4)} GB). It can't read them.`)
 const stop = async () => { await relay.stop(); process.exit(0) }
 process.on('SIGINT', stop)
 process.on('SIGTERM', stop)
