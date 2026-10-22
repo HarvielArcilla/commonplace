@@ -33,7 +33,8 @@ export const POLICY_FIELDS = {
   // Forms
   answersPerPerson: { group: 'forms', kind: 'count', default: 20, min: 1, max: 100000, label: 'Answers one person can send to a form' },
   // Updates
-  updateCheck: { group: 'app', kind: 'bool', default: true, label: 'Check GitHub for new versions', hint: 'Only asks GitHub which commits are new; nothing about you is sent.' }
+  updateCheck: { group: 'app', kind: 'bool', default: true, label: 'Check GitHub for new versions', hint: 'Only asks GitHub which versions are out; nothing about you is sent.' },
+  followMain: { group: 'app', kind: 'bool', default: false, label: 'Follow every change on main (installed from source)', hint: 'For testing the newest work: updates to each new commit instead of each signed release, without a signature check.' }
 }
 
 export const POLICY_GROUPS = { files: 'Files others share', folders: 'Shared folders', docs: 'Shared documents', forms: 'Forms', app: 'Updates' }

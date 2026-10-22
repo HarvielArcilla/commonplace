@@ -64,6 +64,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    env:
+      RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
     steps:
       - uses: actions/checkout@v4
       - name: version
@@ -77,6 +79,11 @@ jobs:
       - uses: actions/download-artifact@v4
         if: steps.v.outputs.new == 'true'
         with: { path: dist, merge-multiple: true }
+      # Sign the release (release.json lists every file's SHA-256), so the
+      # app installs it only if the project's release key vouches for it.
+      - name: sign
+        if: steps.v.outputs.new == 'true' && env.RELEASE_SIGNING_KEY != ''
+        run: node scripts/release-key.mjs sign dist "${{ steps.v.outputs.tag }}" "${{ github.sha }}"
       - uses: softprops/action-gh-release@v2
         if: steps.v.outputs.new == 'true'
         with:

@@ -612,7 +612,13 @@ app.whenReady().then(async () => {
     packaged: app.isPackaged,
     logDir: app.getPath('logs'),
     onChange: (state) => send('updates:changed', state),
-    enabled: () => drive?.policy.get('updateCheck') !== false
+    enabled: () => drive?.policy.get('updateCheck') !== false,
+    followMain: () => drive?.policy.get('followMain') === true,
+    downloadDir: path.join(app.getPath('downloads')),
+    openFile: async (file) => {
+      const err = await shell.openPath(file)
+      if (err) shell.showItemInFolder(file)
+    }
   })
   const last = updates.takeLastResult()
   if (last) pendingNotice = last.ok ? 'commonplace was updated to the newest version.' : `commonplace couldn’t update itself. Run the install command again, or see ${last.log}.`
@@ -620,6 +626,7 @@ app.whenReady().then(async () => {
   await startDrive()
   createWindow()
   updates.start()
+  drive.policy.onChange(() => updates.check()) // checking turned on, or following main
 
   app.on('activate', () => { if (!win) createWindow() })
 })

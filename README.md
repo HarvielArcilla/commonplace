@@ -131,7 +131,7 @@ Every version is on the [releases page](https://github.com/HarvielArcilla/common
 - **Windows:** run the installer; if SmartScreen appears, choose **More info**, then **Run anyway**.
 - **Linux:** make the AppImage executable (`chmod +x`) and run it.
 
-When your computer asks whether commonplace may use the network, allow it (on Windows, for private networks too, for same-network sync), or other people's computers can't reach yours. The app tells you when a new version is out and links to it.
+When your computer asks whether commonplace may use the network, allow it (on Windows, for private networks too, for same-network sync), or other people's computers can't reach yours. When a new version is out, the app offers to download it, checks it against the project's signature (see [Signed releases](#signed-releases)), and opens the installer.
 
 **Or install from source**, to always have the newest work on `main`. One command installs everything it needs (Git and Node.js too, if they're missing) into `commonplace` in your home folder, adds a launcher, and from then on **Update and restart** in the app updates it in place.
 
@@ -186,6 +186,14 @@ node packages/relay/bin/commonplace-relay.js --dir ~/relay-data --quota 4
 ```
 
 It prints an address starting with `cpr1.`. Paste it into your profile in commonplace (used for new files and to sync your own computers), or into a file's **Share** dialog. Everyone working on that file then uses it.
+
+## Signed releases
+
+Releases are signed, and the app installs one only if its signature checks out against the release key built into it (`apps/desktop/src/release-key.js`). Each release has `release.json`, listing the SHA-256 of every installer and the commit it was built from, and `release.json.sig`, an Ed25519 signature over it. The app checks the signature, then checks the installer it downloads byte for byte; copies installed from source move to exactly the signed commit. Someone who took over the GitHub account couldn't push an update to anyone without also having the release key.
+
+To check a release yourself: download its files into a folder and run `node scripts/release-key.mjs verify <folder>`.
+
+For the maintainer, once: run `node scripts/release-key.mjs new` on your own computer. Put the public key it prints in `apps/desktop/src/release-key.js`, add the private key as the repository's Actions secret `RELEASE_SIGNING_KEY`, and keep a copy of it somewhere safe offline. CI signs every release from then on. Until a key is listed, the app still tells people about new versions but marks them unverified and doesn't install them by itself.
 
 ## Build installers
 

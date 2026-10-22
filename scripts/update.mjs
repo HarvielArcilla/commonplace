@@ -1,7 +1,7 @@
 // Updates a commonplace installed from source, then starts it again. The app
 // runs this (detached) and quits, so nothing is in use while files change.
 //
-//   node scripts/update.mjs <app pid> <log folder>
+//   node scripts/update.mjs <app pid> <log folder> [commit]
 
 import fs from 'node:fs'
 import path from 'node:path'
@@ -9,7 +9,8 @@ import { spawn, spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const [pid, logDir] = process.argv.slice(2)
+// target: the exact commit a signed release names (absent: follow main).
+const [pid, logDir, target] = process.argv.slice(2)
 const win = process.platform === 'win32'
 const log = fs.openSync(path.join(logDir, 'update.log'), 'w')
 const say = (line) => fs.writeSync(log, `${new Date().toISOString()} ${line}\n`)
@@ -18,7 +19,10 @@ const say = (line) => fs.writeSync(log, `${new Date().toISOString()} ${line}\n`)
 for (let i = 0; i < 600 && alive(Number(pid)); i++) await new Promise((resolve) => setTimeout(resolve, 100))
 
 let ok = true
-for (const [cmd, args] of [['git', ['pull', '--ff-only']], [win ? 'npm.cmd' : 'npm', ['install', '--no-audit', '--no-fund']]]) {
+const steps = target && /^[0-9a-f]{40}$/.test(target)
+  ? [['git', ['fetch', 'origin']], ['git', ['merge', '--ff-only', target]]]
+  : [['git', ['pull', '--ff-only']]]
+for (const [cmd, args] of [...steps, [win ? 'npm.cmd' : 'npm', ['install', '--no-audit', '--no-fund']]]) {
   say(`$ ${cmd} ${args.join(' ')}`)
   const r = spawnSync(cmd, args, { cwd: root, stdio: ['ignore', log, log], shell: win, windowsHide: true })
   if (r.status !== 0) { ok = false; say(`failed (${r.error?.message || `exit ${r.status}`})`); break }

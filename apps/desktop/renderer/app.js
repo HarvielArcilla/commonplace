@@ -217,24 +217,28 @@ cp.onNotice((text) => toast(text))
 let toldAboutUpdate = false
 function showUpdate (u) {
   const note = $('#update-note')
+  if (u?.problem && !u.available) {
+    note.replaceChildren(el('span', {}, u.problem), el('button', { type: 'button', class: 'btn', onclick: () => cp.openUpdatePage() }, 'See the release'))
+    note.hidden = false
+    return
+  }
   if (!u?.available) { note.hidden = true; return }
-  const what = u.behind ? `${u.behind} change${u.behind === 1 ? '' : 's'}` : u.changes[0] || 'A new version'
+  const what = u.channel === 'main' && u.behind ? `${u.behind} change${u.behind === 1 ? '' : 's'}` : u.changes[0] || 'A new version'
+  const installer = Boolean(u.asset)
   note.title = u.changes.length ? `What's new:\n${u.changes.join('\n')}` : ''
   note.replaceChildren(
-    el('span', {}, u.installing ? 'Updating commonplace…' : `A new version of commonplace is available (${what}).`),
-    u.installing ? null : u.canInstall
-      ? el('button', { type: 'button', class: 'btn btn-primary', onclick: confirmUpdate }, 'Update and restart')
+    el('span', {}, u.installing ? (installer ? 'Downloading the new version…' : 'Updating commonplace…') : u.downloaded ? 'The new version is downloaded and checked. Its installer is open.' : `A new version of commonplace is available (${what}).${u.verified ? ' Signed by the project.' : ''}`),
+    u.problem ? el('span', { class: 'update-problem' }, u.problem) : null,
+    u.installing || u.downloaded ? null : u.canInstall
+      ? el('button', { type: 'button', class: 'btn btn-primary', onclick: () => confirmUpdate(installer) }, installer ? 'Download and install' : 'Update and restart')
       : el('button', { type: 'button', class: 'btn', onclick: () => cp.openUpdatePage() }, 'See what’s new'))
   note.hidden = false
   if (!toldAboutUpdate && !u.installing) { toldAboutUpdate = true; toast('A new version of commonplace is available.') }
 }
-async function confirmUpdate () {
-  const ok = await confirmAction({
-    title: 'Update and restart?',
-    body: 'commonplace closes, downloads the new version, and opens again in a minute or two. Your files stay where they are.',
-    confirm: 'Update and restart',
-    danger: false
-  })
+async function confirmUpdate (installer) {
+  const ok = await confirmAction(installer
+    ? { title: 'Download and install?', body: 'commonplace downloads the new installer, checks it against the project’s signature, and opens it. Quit commonplace when the installer asks.', confirm: 'Download and install', danger: false }
+    : { title: 'Update and restart?', body: 'commonplace closes, downloads the new version, and opens again in a minute or two. Your files stay where they are.', confirm: 'Update and restart', danger: false })
   if (ok) cp.installUpdate()
 }
 cp.onUpdates(showUpdate)

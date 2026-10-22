@@ -1213,6 +1213,9 @@ textarea.a-text { resize: vertical; }
 .share .person-controls { flex-wrap: wrap; justify-content: flex-end; margin-left: auto; }
 .person-name .person-note + .person-note { margin-top: 1px; }
 
+/* updates */
+.update-problem { color: var(--warn); font-size: 12px; }
+
 /* limits and safety */
 .settings-sub { font: 600 13px var(--serif); color: var(--ink-soft); margin: 16px 0 6px; }
 .limits { display: grid; gap: 4px; margin-bottom: 10px; }
