@@ -80,6 +80,8 @@ Everything you share lives on the computers of the people you share it with, so 
 
 ![Lines with chips for a date, a person and a file, about to become tasks](docs/images/links.png)
 
+**Finding your way around.** Star the files you use most and find them under **Starred**, whatever folder they're in. Removing a file moves it to the **Trash**, where it keeps syncing and can be put back; the trash empties itself after 30 days (a setting). Light or dark theme, or the same as your computer's. Press Ctrl+/ (⌘/ on a Mac) for every keyboard shortcut.
+
 ## Sharing
 
 Invite people to edit, comment, only view, or (for forms) answer; change their role, remove them, or hand ownership to someone else. Invite links expire (after 7 days unless you choose otherwise) and can be limited to one person or need your approval for each person.

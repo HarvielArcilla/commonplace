@@ -32,12 +32,14 @@ export const POLICY_FIELDS = {
   keepFreeBytes: { group: 'docs', kind: 'bytes', default: 2 * GB, min: 100 * MB, max: 1024 * GB, label: 'Always leave this much free on the disk', hint: 'Nothing from others downloads or grows below it.' },
   // Forms
   answersPerPerson: { group: 'forms', kind: 'count', default: 20, min: 1, max: 100000, label: 'Answers one person can send to a form' },
+  // Your Drive
+  trashDays: { group: 'drive', kind: 'count', default: 30, min: 1, max: 3650, label: 'Delete files from the trash after this many days', hint: 'Until then they keep syncing, so they come back as they were.' },
   // Updates
   updateCheck: { group: 'app', kind: 'bool', default: true, label: 'Check GitHub for new versions', hint: 'Only asks GitHub which versions are out; nothing about you is sent.' },
   followMain: { group: 'app', kind: 'bool', default: false, label: 'Follow every change on main (installed from source)', hint: 'For testing the newest work: updates to each new commit instead of each signed release, without a signature check.' }
 }
 
-export const POLICY_GROUPS = { files: 'Files others share', folders: 'Shared folders', docs: 'Shared documents', forms: 'Forms', app: 'Updates' }
+export const POLICY_GROUPS = { files: 'Files others share', folders: 'Shared folders', docs: 'Shared documents', forms: 'Forms', drive: 'Your Drive', app: 'Updates' }
 
 export const DEFAULT_POLICY = Object.fromEntries(Object.entries(POLICY_FIELDS).map(([k, f]) => [k, f.default]))
 

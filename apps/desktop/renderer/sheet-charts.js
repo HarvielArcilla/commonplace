@@ -5,8 +5,7 @@
 import { chartsOn, chartData, chartSvg, addChart, updateChart, deleteChart, CHART_TYPES } from '@commonplace/sheets/charts'
 import { el, toast, openMenu, dialog, selectField } from './ui.js'
 import { icons } from './icons.js'
-
-const dark = () => window.matchMedia('(prefers-color-scheme: dark)').matches
+import { isDark as dark } from './theme.js'
 
 // The new chart goes beside everything already on the sheet.
 export function insertChart (v, range, used) {

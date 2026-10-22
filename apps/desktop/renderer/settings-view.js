@@ -4,7 +4,7 @@
 // drive/policy.js shows up here by itself.
 
 import { $, el, toast, confirmAction, cleanError } from './ui.js'
-import { cp, formatBytes } from './state.js'
+import { cp, state, formatBytes } from './state.js'
 
 const MB = 1024 * 1024
 const GB = 1024 * MB
@@ -79,6 +79,7 @@ $('#network-forget').addEventListener('click', async () => {
 
 export async function renderLimits () {
   const p = await cp.getPolicy()
+  state.trashDays = p.values.trashDays
   const form = $('#limits-form')
   const groups = Object.entries(p.groups).map(([group, title]) => {
     const fields = Object.entries(p.fields).filter(([, f]) => f.group === group)

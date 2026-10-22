@@ -88,6 +88,7 @@ function openAudience () {
     if (copy.href) copy.href = n.href // resolved against this window
     d.head.append(copy)
   }
+  d.documentElement.dataset.theme = document.documentElement.dataset.theme
   d.body.classList.add('audience')
   return win
 }

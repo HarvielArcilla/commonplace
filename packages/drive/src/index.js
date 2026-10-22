@@ -180,7 +180,8 @@ export class Drive extends EventEmitter {
     this.shared.soon()
     this._seen()
     this._checkUnlinked()
-    this._seenTimer = setInterval(() => this._seen(), 3600e3)
+    this._seenTimer = setInterval(() => { this._seen(); this._emptyOldTrash() }, 3600e3)
+    this._emptyOldTrash()
     this._seenTimer.unref?.()
     this._changed()
   }
@@ -308,6 +309,8 @@ export class Drive extends EventEmitter {
       requests: isOwner ? this.engine.requests(docId).map((r) => ({ ...r, name: nameOf(r.userId, r.name) })) : [],
       contributed: Boolean(entry.contributed),
       contributors: entry.contributors || [],
+      starred: Boolean(entry.starred),
+      trashedAt: entry.trashedAt || null,
       addedAt: entry.addedAt,
       lastOpenedAt: entry.lastOpenedAt || null,
       lastEditedAt: entry.lastEditedAt || null,
@@ -766,6 +769,21 @@ export class Drive extends EventEmitter {
     this.shared.soon()
   }
 
+  // ---- trash and stars --------------------------------------------------------
+  // Both are part of each file's entry in the Drive index, so they follow
+  // you to your other computers. A file in the trash keeps syncing (so it can
+  // come back as it was) until it's deleted, by hand or after the number of
+  // days in this computer's settings.
+
+  trash (docId) { this._patch(docId, { trashedAt: Date.now() }) }
+  untrash (docId) { this._patch(docId, { trashedAt: null }) }
+  star (docId, on = true) { this._patch(docId, { starred: Boolean(on) }) }
+
+  async emptyTrash ({ olderThan = 0 } = {}) {
+    const cutoff = Date.now() - olderThan
+    for (const e of [...this.files.values()]) if (e.trashedAt && e.trashedAt <= cutoff) await this.remove(e.docId)
+  }
+
   // The shared folder of mine that lists a file, if any.
   _inMyFolders (docId) {
     for (const f of this.shared.folders()) if (this.shared.items(f.docId).has(docId)) return f.docId
@@ -986,6 +1004,10 @@ export class Drive extends EventEmitter {
     this.store.load(INDEX_ID, old)
     Y.applyUpdate(this.index, Y.encodeStateAsUpdate(old), 'adopt')
     this.store.remove(INDEX_ID)
+  }
+
+  _emptyOldTrash () {
+    this.emptyTrash({ olderThan: this.policy.get('trashDays') * 86400e3 }).catch(() => {})
   }
 
   _seen () {

@@ -133,6 +133,10 @@ Both have links (Ctrl/Cmd+click opens them in the browser), LaTeX math rendered 
 
 **Different versions of the app (`core/src/protocol.js`).** Every `HELLO` carries the protocol version the computer speaks (`v`), the oldest it still accepts (`min`) and its app version. Two computers exchange a file only when each meets the other's minimum; otherwise both show who needs to update, and nothing is lost, since the changes wait in each copy until they do. Membership entries of a type this app doesn't know are skipped, so newer apps can add entries that older ones ignore; an entry marked `critical` (one that limits access) stops this app syncing the file until it's updated, rather than ignoring a restriction. Each app declares a `schemaVersion` and `migrations`. A file opened by an editor on a newer app is migrated once (`Drive.migrate`) and stamped with the new version; on an older app such a file opens read-only, so an older editor never writes in a layout it doesn't understand.
 
+**Trash and stars.** Both live in each file's entry in the Drive index (`trashedAt`, `starred`), so they follow you to your other computers. A file in the trash stays joined and keeps syncing, so putting it back loses nothing; it's deleted (the same as removing it) when the trash is emptied, or after `trashDays` (30 by default) on the hourly pass.
+
+**Theme.** The window marks `<html>` with `data-theme` (light or dark, from the setting or the system) and the styles key their dark colors to it; the background process also sets Electron's `nativeTheme.themeSource` for native parts.
+
 **Window boundary.** The window is sandboxed, with no Node and no network. It keeps its own Y.Doc mirror and exchanges binary updates with the background process through `preload.cjs`.
 
 ## Known limits

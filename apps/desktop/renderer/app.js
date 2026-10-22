@@ -10,6 +10,8 @@ import { moveOutDialog, relayStatus } from './share.js'
 import { renderRecovery, restoreDialog } from './recovery-view.js'
 import { openActivity, showActivityCount } from './activity-view.js'
 import { showThread } from './comments-view.js'
+import { showShortcuts } from './shortcuts.js'
+import { setTheme } from './theme.js'
 
 const COLORS = ['#b4532a', '#2f6f5e', '#4a5aa8', '#8a4f8c', '#a2741b', '#2d6f8f', '#9b3d4f', '#55703a']
 
@@ -124,7 +126,11 @@ function openProfileDialog (page = null) {
   let saved = null
   try { saved = localStorage.getItem(PAGE_KEY) } catch {}
   showSettingsPage(firstRun ? 'profile' : page || saved || 'profile')
-  cp.getSettings().then((x) => { $('#setting-spellcheck').checked = x.spellcheck }).catch(() => {})
+  cp.getSettings().then((x) => {
+    $('#setting-spellcheck').checked = x.spellcheck
+    for (const r of document.querySelectorAll('#setting-theme input')) r.checked = r.value === x.theme
+    setTheme(x.theme)
+  }).catch(() => {})
   if (!firstRun) { renderComputers(); renderMyRelays(); renderRecovery(); renderStorage(); renderLimits(); renderNetwork() }
   if (!d.open) d.showModal()
 }
@@ -141,6 +147,7 @@ function showSettingsPage (key) {
 // Anything can open a settings page: dispatch 'commonplace:settings' { page }.
 window.addEventListener('commonplace:settings', (e) => openProfileDialog(e.detail?.page || null))
 
+$('#open-shortcuts').addEventListener('click', () => showShortcuts())
 $('#settings-nav').addEventListener('click', (e) => {
   const b = e.target.closest('button[data-page]')
   if (!b) return
@@ -195,6 +202,9 @@ $('#profile-form').addEventListener('submit', async (e) => {
   renderDrive()
 })
 $('#profile-name').addEventListener('input', () => { $('#profile-error').textContent = '' })
+// These take effect as soon as they change.
+$('#setting-spellcheck').addEventListener('change', (e) => cp.setSettings({ spellcheck: e.target.checked }))
+$('#setting-theme').addEventListener('change', (e) => { setTheme(e.target.value); cp.setSettings({ theme: e.target.value }) })
 $('#profile-dialog').addEventListener('cancel', (e) => { if (!state.me?.hasChosenName) e.preventDefault() })
 $('[data-action="profile"]').addEventListener('click', () => openProfileDialog())
 $('#move-out').addEventListener('click', () => {
@@ -243,6 +253,8 @@ async function confirmUpdate (installer) {
 }
 cp.onUpdates(showUpdate)
 cp.updateState().then(showUpdate)
+cp.getPolicy().then((p) => { state.trashDays = p.values.trashDays }).catch(() => {})
+cp.getSettings().then((x) => setTheme(x.theme)).catch(() => {})
 
 // ---- boot ----------------------------------------------------------------------
 

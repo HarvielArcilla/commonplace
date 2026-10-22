@@ -53,12 +53,16 @@ export function cleanError (err) {
 }
 
 let toastTimer
-export function toast (msg) {
+// action: { label, run } for a button in the toast (Undo, say).
+export function toast (msg, action = null) {
   const t = $('#toast')
-  t.textContent = msg
+  t.replaceChildren(msg)
+  if (action) {
+    t.append(el('button', { type: 'button', class: 'toast-action', onclick: () => { t.hidden = true; action.run() } }, action.label))
+  }
   t.hidden = false
   clearTimeout(toastTimer)
-  toastTimer = setTimeout(() => { t.hidden = true }, 2800)
+  toastTimer = setTimeout(() => { t.hidden = true }, action ? 6000 : 2800)
 }
 
 // ---- popover menus --------------------------------------------------------

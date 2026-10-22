@@ -25,6 +25,8 @@
         <button type="button" data-filter="all" aria-label="All files"><span class="label-long">All files</span><span class="label-short">All</span></button>
         <button type="button" data-filter="mine" aria-label="Owned by me"><span class="label-long">Owned by me</span><span class="label-short">Mine</span></button>
         <button type="button" data-filter="shared" aria-label="Shared with me"><span class="label-long">Shared with me</span><span class="label-short">Shared</span></button>
+        <button type="button" data-filter="starred" aria-label="Starred"><span class="label-long">Starred</span><span class="label-short">★</span></button>
+        <button type="button" data-filter="trash" aria-label="Trash"><span class="label-long">Trash</span><span class="label-short">Trash</span></button>
       </div>
       <select id="type-filter" class="tool-select" aria-label="File type"></select>
       <select id="sort" class="tool-select" aria-label="Sort by">
@@ -99,14 +101,16 @@
         <button type="button" data-page="recovery">Recovery</button>
         <button type="button" data-page="relays">Always-on relay</button>
         <button type="button" data-page="network">Network</button>
-        <button type="button" data-page="writing">Writing</button>
+        <button type="button" data-page="writing">Appearance and writing</button>
         <button type="button" data-page="storage">Storage and people</button>
         <button type="button" data-page="limits">Limits and safety</button>
         <button type="button" class="settings-sub-link" data-page="limits" data-anchor="files">Files others share</button>
         <button type="button" class="settings-sub-link" data-page="limits" data-anchor="folders">Shared folders</button>
         <button type="button" class="settings-sub-link" data-page="limits" data-anchor="docs">Shared documents</button>
         <button type="button" class="settings-sub-link" data-page="limits" data-anchor="forms">Forms</button>
+        <button type="button" class="settings-sub-link" data-page="limits" data-anchor="drive">Your Drive</button>
         <button type="button" class="settings-sub-link" data-page="limits" data-anchor="app">Updates</button>
+        <button type="button" class="settings-shortcuts" id="open-shortcuts">Keyboard shortcuts</button>
       </nav>
       <div class="settings-body">
       <section class="settings-page" data-page="profile">
@@ -153,7 +157,14 @@
         <p class="fineprint-plain">Changes apply the next time commonplace starts. Computers on the same Wi-Fi or network always find each other directly, with or without these.</p>
       </section>
       <section id="profile-writing" class="settings-page" data-page="writing" hidden>
-        <h2>Writing</h2>
+        <h2>Appearance and writing</h2>
+        <fieldset class="theme-choice" id="setting-theme">
+          <legend>Theme</legend>
+          <label class="check"><input type="radio" name="theme" value="system"> Same as this computer</label>
+          <label class="check"><input type="radio" name="theme" value="light"> Light</label>
+          <label class="check"><input type="radio" name="theme" value="dark"> Dark</label>
+        </fieldset>
+        <p class="fineprint-plain">Paged documents stay white, like paper, in every theme.</p>
         <label class="check"><input type="checkbox" id="setting-spellcheck"> Check spelling as you type</label>
         <p class="fineprint-plain">Right-click a word underlined in red for suggestions. On Windows and Linux the dictionary for your language is downloaded once; nothing you write is sent anywhere.</p>
       </section>

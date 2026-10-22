@@ -3,7 +3,7 @@
 // talks to this process over a narrow IPC surface defined in preload.cjs.
 
 import fsSync from 'node:fs'
-import { app, BrowserWindow, ipcMain, clipboard, shell, dialog, Notification, nativeImage, Menu, screen } from 'electron'
+import { app, BrowserWindow, ipcMain, clipboard, shell, dialog, Notification, nativeImage, Menu, screen, nativeTheme } from 'electron'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -95,6 +95,10 @@ function writeSettings (patch) {
   try { fsSync.writeFileSync(settingsFile(), JSON.stringify(next, null, 2)) } catch {}
   return next
 }
+
+// Light, dark, or whatever the system uses. Setting Electron's theme source
+// switches prefers-color-scheme in every window, so the styles need nothing else.
+const THEMES = ['system', 'light', 'dark']
 
 // Right-click in text: spelling suggestions first, then cut, copy and paste.
 function editMenu (p) {
@@ -317,6 +321,10 @@ function registerIpc () {
   ipcMain.handle('drive:create', (_e, type, title, folderId) => drive.create(type, title, { folderId }))
   ipcMain.handle('drive:join', (_e, invite, folderId) => drive.join(invite, { folderId }))
   ipcMain.handle('drive:remove', (_e, docId) => { openDocs.delete(docId); return drive.remove(docId) })
+  ipcMain.handle('drive:trash', (_e, docId) => drive.trash(docId))
+  ipcMain.handle('drive:untrash', (_e, docId) => drive.untrash(docId))
+  ipcMain.handle('drive:emptyTrash', () => drive.emptyTrash())
+  ipcMain.handle('drive:star', (_e, docId, on) => drive.star(docId, on))
   ipcMain.handle('drive:copyInvite', (_e, docId, role, options) => {
     const invite = drive.invite(docId, role, options || {})
     if (invite) clipboard.writeText(invite)
@@ -469,11 +477,16 @@ function registerIpc () {
   ipcMain.handle('policy:reset', () => drive.resetPolicy())
   ipcMain.handle('people:block', (_e, userId, name) => drive.block(userId, name))
   ipcMain.handle('people:unblock', (_e, userId) => drive.unblock(userId))
-  ipcMain.handle('settings:get', () => ({ spellcheck: readSettings().spellcheck !== false }))
-  ipcMain.handle('settings:set', (_e, patch) => {
-    const next = writeSettings({ spellcheck: patch?.spellcheck !== false })
+  const appSettings = (s = readSettings()) => ({ spellcheck: s.spellcheck !== false, theme: THEMES.includes(s.theme) ? s.theme : 'system' })
+  ipcMain.handle('settings:get', () => appSettings())
+  ipcMain.handle('settings:set', (_e, patch = {}) => {
+    const changes = {}
+    if ('spellcheck' in patch) changes.spellcheck = patch.spellcheck !== false
+    if (THEMES.includes(patch.theme)) changes.theme = patch.theme
+    const next = appSettings(writeSettings(changes))
     win?.webContents.session.setSpellCheckerEnabled(next.spellcheck)
-    return { spellcheck: next.spellcheck }
+    nativeTheme.themeSource = next.theme
+    return next
   })
   ipcMain.handle('templates:list', () => drive.templates.list())
   ipcMain.handle('templates:create', (_e, id, folderId) => drive.templates.create(id, { folderId }))
@@ -617,6 +630,7 @@ app.on('web-contents-created', (_e, contents) => {
 })
 
 app.whenReady().then(async () => {
+  nativeTheme.themeSource = THEMES.includes(readSettings().theme) ? readSettings().theme : 'system'
   if (process.platform === 'darwin' && !app.isPackaged) app.dock?.setIcon(ICON)
   updates = new Updates({
     root: app.isPackaged ? app.getAppPath() : path.resolve(here, '..', '..', '..'),

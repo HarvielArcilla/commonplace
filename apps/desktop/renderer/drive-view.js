@@ -49,7 +49,10 @@ async function uploadFiles (dropped) {
 
 const folderById = (id) => state.folders.find((f) => f.id === id) || null
 // Files proper: shared folders are documents too, but show as folders.
-const docs = () => state.files.filter((f) => f.kind !== 'folder')
+// Files in the trash show only in the trash.
+const docs = () => state.files.filter((f) => f.kind !== 'folder' && !f.trashedAt)
+const trashed = () => state.files.filter((f) => f.kind !== 'folder' && f.trashedAt)
+const inTrash = () => state.prefs.filter === 'trash'
 const folderIcon = (f) => (f?.shared ? icons.sharedFolder : icons.folder)
 const canChange = (f) => !f?.shared || f.role === 'owner' || f.role === 'editor'
 
@@ -83,6 +86,7 @@ function matchesFilters (f) {
   const { filter, type } = state.prefs
   if (filter === 'mine' && f.role !== 'owner') return false
   if (filter === 'shared' && f.role === 'owner') return false
+  if (filter === 'starred' && !f.starred) return false
   if (type !== 'all' && f.kind !== type) return false
   return true
 }
@@ -90,10 +94,12 @@ function matchesFilters (f) {
 function visibleItems () {
   const q = state.query.trim().toLowerCase()
   const searching = q.length > 0
+  // Starred files and the trash are gathered from every folder.
+  const everywhere = searching || ['starred', 'trash'].includes(state.prefs.filter)
   const inFolder = (f) => (f.folderId || null) === (state.folderId || null)
-  let files = docs().filter((f) => (searching ? true : inFolder(f)) && matchesFilters(f))
+  let files = (inTrash() ? trashed() : docs()).filter((f) => (everywhere || inFolder(f)) && matchesFilters(f))
   if (searching) files = files.filter((f) => `${f.title} ${f.preview}`.toLowerCase().includes(q))
-  let folders = searching || state.prefs.filter !== 'all' || state.prefs.type !== 'all'
+  let folders = everywhere || state.prefs.filter !== 'all' || state.prefs.type !== 'all'
     ? []
     : state.folders.filter((f) => (f.parentId || null) === (state.folderId || null))
   if (searching) folders = state.folders.filter((f) => f.name.toLowerCase().includes(q))
@@ -104,8 +110,9 @@ function visibleItems () {
   if (by === 'name') files.sort(name)
   else if (by === 'owner') files.sort((a, b) => ownerName(a).localeCompare(ownerName(b)) || name(a, b))
   else files.sort((a, b) => (b.lastActivityAt || 0) - (a.lastActivityAt || 0))
+  if (inTrash()) files.sort((a, b) => b.trashedAt - a.trashedAt)
   folders.sort(name)
-  return { files, folders, searching }
+  return { files, folders, searching: everywhere }
 }
 
 // ---- rendering --------------------------------------------------------------
@@ -122,19 +129,40 @@ export function renderDrive () {
   list.className = `ledger ledger-${state.prefs.mode}`
   const { files, folders, searching } = visibleItems()
 
-  if (!docs().length && !state.folders.length) {
+  if (inTrash()) list.append(trashBar(files))
+  if (!docs().length && !state.folders.length && !inTrash()) {
     list.append(emptyState())
     return
   }
   if (!files.length && !folders.length) {
-    list.append(el('div', { class: 'empty' },
-      el('h2', {}, searching ? 'No matches' : state.folderId ? 'This folder is empty' : 'Nothing matches these filters'),
-      el('p', {}, searching ? 'Try a different word, or clear the search.' : state.folderId ? 'Drag files here from another folder, or start a new document while you’re in it.' : 'Change the filters above to see more.')))
+    const [title, hint] = state.query.trim()
+      ? ['No matches', 'Try a different word, or clear the search.']
+      : inTrash() ? ['The trash is empty', 'Files you remove from your Drive wait here, so you can bring them back.']
+        : state.prefs.filter === 'starred' ? ['No starred files', 'Star a file from its menu to find it here, whatever folder it’s in.']
+          : state.folderId ? ['This folder is empty', 'Drag files here from another folder, or start a new document while you’re in it.']
+            : ['Nothing matches these filters', 'Change the filters above to see more.']
+    list.append(el('div', { class: 'empty' }, el('h2', {}, title), el('p', {}, hint)))
     return
   }
   if (state.prefs.mode === 'grid') renderGrid(list, files, folders, searching)
   else renderList(list, files, folders, searching)
 }
+
+function trashBar (files) {
+  const days = state.trashDays || 30
+  return el('div', { class: 'trash-bar' },
+    el('span', {}, `Files here keep syncing until they’re deleted from this computer, by hand or after ${plural(days, 'day')}. Others you shared them with keep theirs.`),
+    files.length ? el('button', { type: 'button', class: 'btn btn-quiet btn-danger', onclick: emptyTrash }, 'Empty trash') : null)
+}
+
+async function emptyTrash () {
+  const n = trashed().length
+  if (!await confirmAction({ title: `Delete ${plural(n, 'file')} from this computer?`, body: 'They are deleted on each of your computers. Anyone you shared them with keeps theirs. This can’t be undone.', confirm: 'Delete' })) return
+  await cp.emptyTrash()
+  toast(`Deleted ${plural(n, 'file')}`)
+}
+
+const star = (f) => (f.starred ? el('span', { class: 'star', title: 'Starred', 'aria-label': 'Starred' }, '★') : null)
 
 function renderCrumbs () {
   const nav = $('#crumbs')
@@ -234,8 +262,8 @@ function renderList (list, files, folders, searching) {
     },
     el('div', { class: 'row-margin' }, ...renderNotes(statusNotes(f)), marginMark(statusNotes(f))),
     el('div', { class: 'row-main' },
-      el('p', { class: 'row-title' }, svg(kindIcon(f.kind)), el('span', {}, f.title || 'Untitled')),
-      el('p', { class: 'row-preview' }, where || f.preview || (f.appName ? `Empty ${f.appName.toLowerCase()}` : ''))),
+      el('p', { class: 'row-title' }, svg(kindIcon(f.kind)), el('span', {}, f.title || 'Untitled'), star(f)),
+      el('p', { class: 'row-preview' }, f.trashedAt ? `Moved to the trash ${ago(f.trashedAt)}` : where || f.preview || (f.appName ? `Empty ${f.appName.toLowerCase()}` : ''))),
     el('div', { class: 'row-owner' }, ownerName),
     el('div', { class: 'row-time', title: f.lastChangedBy ? `Changed by ${f.lastChangedBy}` : null },
       ago(f.lastChangeAt || f.addedAt), f.lastChangedBy ? el('span', { class: 'row-by' }, f.lastChangedBy) : null),
@@ -294,7 +322,7 @@ function renderGrid (list, files, folders, searching) {
     },
     thumbnail(f),
     el('div', { class: 'tile-meta' },
-      el('p', { class: 'tile-title' }, svg(kindIcon(f.kind)), el('span', {}, f.title || 'Untitled')),
+      el('p', { class: 'tile-title' }, svg(kindIcon(f.kind)), el('span', {}, f.title || 'Untitled'), star(f)),
       el('button', { type: 'button', class: 'btn btn-quiet btn-icon tile-menu', 'aria-label': `Options for ${f.title}`, onclick: (e) => fileMenu(e.currentTarget, f) }, svg(icons.more))),
     first ? el('span', { class: `note tile-note ${first.cls || ''}` }, first.text, first.dot ? el('span', { class: 'dot', 'aria-hidden': 'true' }) : null) : null,
     searching && f.folderId ? el('span', { class: 'tile-where' }, `In ${folderById(f.folderId)?.name}`) : null)
@@ -592,6 +620,24 @@ async function refreshLists () {
 
 function fileMenu (anchor, f) {
   const openable = f.supported && !f.waitingForPeer
+  if (f.trashedAt) {
+    openMenu(anchor, [
+      { label: 'Open', disabled: !openable, onSelect: () => handlers.openDocument(f.docId) },
+      { label: 'Put back', onSelect: async () => { await cp.untrashFile(f.docId); toast(`Put “${f.title}” back`) } },
+      { sep: true },
+      {
+        label: 'Delete from this computer…',
+        danger: true,
+        onSelect: async () => {
+          const body = f.role === 'owner'
+            ? 'This deletes your copy, on each of your computers. Anyone you shared it with keeps theirs. This can’t be undone.'
+            : `Shared by ${f.owner?.name || 'someone'}. This deletes your copy only, on each of your computers.`
+          if (await confirmAction({ title: `Delete “${f.title}”?`, body, confirm: 'Delete' })) { await cp.removeFile(f.docId); toast('Deleted') }
+        }
+      }
+    ], { label: f.title })
+    return
+  }
   openMenu(anchor, [
     { label: 'Open', disabled: !openable, onSelect: () => handlers.openDocument(f.docId) },
     { label: 'Share\u2026', icon: icons.invite, disabled: f.waitingForPeer, onSelect: () => shareDialog(f.docId) },
@@ -600,32 +646,23 @@ function fileMenu (anchor, f) {
     f.conflicts?.length ? { label: f.role === 'owner' ? 'Review conflicts\u2026' : 'See conflicts\u2026', onSelect: () => conflictsDialog(f.docId) } : null,
     { label: 'Make a copy', disabled: !openable || f.kind === 'file', onSelect: () => copyFile(f) },
     { label: 'Save as template…', disabled: !openable || f.kind === 'file', onSelect: () => saveTemplate(f) },
+    { label: f.starred ? 'Remove star' : 'Add star', onSelect: () => cp.starFile(f.docId, !f.starred) },
     { label: 'Details', onSelect: () => detailsDialog(f) },
     { sep: true },
-    {
-      label: 'Remove from your Drive…',
-      danger: true,
-      onSelect: async () => {
-        const body = [
-          f.role === 'owner'
-            ? 'This deletes your copy, on each of your computers. Anyone you shared it with keeps theirs.'
-            : `Shared by ${f.owner?.name || 'someone'}. This deletes your copy only, on each of your computers.`,
-          f.folderId && folderById(f.folderId)?.shared ? 'It won’t come back from the shared folder unless you ask for it.' : null
-        ].filter(Boolean).join(' ')
-        if (await confirmAction({ title: `Remove “${f.title}”?`, body, confirm: 'Remove' })) {
-          await cp.removeFile(f.docId)
-          toast('Removed from your Drive')
-        }
-      }
-    }
+    { label: 'Move to the trash', danger: true, onSelect: () => trashFile(f) }
   ], { label: f.title })
+}
+
+export async function trashFile (f) {
+  await cp.trashFile(f.docId)
+  toast(`Moved “${f.title || 'Untitled'}” to the trash`, { label: 'Undo', run: () => cp.untrashFile(f.docId) })
 }
 
 function detailsDialog (f) {
   const rows = [
     ['Type', f.appName || 'Unknown'],
     ['Owner', f.role === 'owner' ? 'You' : (f.owner?.name || 'Unknown')],
-    ['Your access', { owner: 'Owner', editor: 'Can edit', viewer: 'Can view' }[f.role] || (f.access.removed ? 'Removed' : 'Not yet confirmed')],
+    ['Your access', { owner: 'Owner', editor: 'Can edit', commenter: 'Can comment', viewer: 'Can view', respondent: 'Can answer' }[f.role] || (f.access.removed ? 'Removed' : 'Not yet confirmed')],
     ['Written by', f.contributors.length ? listNames(f.contributors) : 'Nobody yet'],
     ['Folder', f.folderId ? folderPath(f.folderId).map((p) => p.name).join(' / ') : 'commonDrive'],
     ['Last change', [ago(f.lastChangeAt || f.addedAt), f.lastChangedBy ? `by ${f.lastChangedBy}` : null].filter(Boolean).join(' ') || '—'],
