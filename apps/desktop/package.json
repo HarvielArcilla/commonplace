@@ -26,6 +26,7 @@
     "@commonplace/calendar": "0.1.0",
     "@commonplace/whiteboard": "0.1.0",
     "@commonplace/forms": "0.1.0",
+    "@commonplace/relay": "0.1.0",
     "hyperdht": "^6.34.1",
     "y-protocols": "^1.0.7",
     "yjs": "^13.6.33"

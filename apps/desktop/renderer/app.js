@@ -5,7 +5,7 @@ import { $, el, ago, toast, confirmAction, cleanError } from './ui.js'
 import { state, cp } from './state.js'
 import { initDrive, renderDrive } from './drive-view.js'
 import { initDocView, openDocument, renderDocMargin } from './doc-view.js'
-import { renderStorage, renderLimits, renderNetwork } from './settings-view.js'
+import { renderStorage, renderLimits, renderNetwork, renderLocalRelay } from './settings-view.js'
 import { moveOutDialog, relayStatus } from './share.js'
 import { renderRecovery, restoreDialog } from './recovery-view.js'
 import { openActivity, showActivityCount } from './activity-view.js'
@@ -131,7 +131,7 @@ function openProfileDialog (page = null) {
     for (const r of document.querySelectorAll('#setting-theme input')) r.checked = r.value === x.theme
     setTheme(x.theme)
   }).catch(() => {})
-  if (!firstRun) { renderComputers(); renderMyRelays(); renderRecovery(); renderStorage(); renderLimits(); renderNetwork() }
+  if (!firstRun) { renderComputers(); renderMyRelays(); renderRecovery(); renderStorage(); renderLimits(); renderNetwork(); renderLocalRelay() }
   if (!d.open) d.showModal()
 }
 
@@ -163,6 +163,8 @@ async function renderComputers () {
       el('span', { class: 'person-note' }, dv.thisComputer ? 'This computer' : dv.online ? 'Online now' : `Last seen ${ago(dv.lastSeenAt)}`)),
     dv.thisComputer ? null : el('button', { type: 'button', class: 'btn btn-quiet btn-danger', onclick: () => unlink(dv) }, 'Unlink'))))
 }
+
+window.addEventListener('commonplace:relays', () => renderMyRelays())
 
 async function renderMyRelays () {
   const relays = await cp.myRelays()

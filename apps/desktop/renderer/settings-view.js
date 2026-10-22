@@ -48,6 +48,37 @@ async function block (p) {
   renderStorage()
 }
 
+// ---- this computer as a relay ------------------------------------------------------
+
+export async function renderLocalRelay (r = null) {
+  r = r || await cp.getLocalRelay()
+  $('#local-relay-on').checked = r.on
+  const info = $('#local-relay-info')
+  info.hidden = !r.on
+  if (!r.on) return
+  const quota = el('input', { type: 'number', class: 'limit-number', min: String(r.limits.min), max: String(r.limits.max), step: '1', value: String(r.quotaGB), 'aria-label': 'Most it keeps, in GB' })
+  quota.addEventListener('change', async () => { await cp.setLocalRelay({ quotaGB: Number(quota.value) }); toast('Saved') })
+  info.replaceChildren(
+    el('p', { class: 'local-relay-address' }, el('code', { class: 'relay-key', title: r.address }, `${r.address.slice(0, 24)}…`),
+      el('button', { type: 'button', class: 'btn btn-quiet', onclick: async () => { await cp.copyText(r.address); toast('Address copied. Anyone you share files with can add it.') } }, 'Copy address')),
+    el('p', { class: 'fineprint-plain' }, `Keeping ${formatBytes(r.usedBytes)} for ${r.boxes} file${r.boxes === 1 ? '' : 's'}, with ${r.connections} computer${r.connections === 1 ? '' : 's'} connected.`),
+    el('label', { class: 'limit-label' }, 'Keep at most', el('span', { class: 'limit-amount' }, quota, ' GB')))
+}
+
+$('#local-relay-on').addEventListener('change', async (e) => {
+  const on = e.target.checked
+  e.target.disabled = true
+  try {
+    const r = await cp.setLocalRelay({ on, useForMine: on })
+    toast(on ? 'This computer is now a relay. Your new files use it.' : 'This computer stopped being a relay.')
+    renderLocalRelay(r)
+    window.dispatchEvent(new Event('commonplace:relays'))
+  } catch (err) { toast(cleanError(err)); e.target.checked = !on }
+  e.target.disabled = false
+})
+
+cp.onLocalRelay((r) => { if (!$('#profile-relays').hidden) renderLocalRelay(r) })
+
 // ---- network -----------------------------------------------------------------------
 
 export async function renderNetwork () {

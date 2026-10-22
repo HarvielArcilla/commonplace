@@ -182,6 +182,10 @@ To run on a private network instead of the public DHT, set `COMMONPLACE_BOOTSTRA
 
 A relay is a small program you leave running on any computer that stays on: an old laptop, a Raspberry Pi, a free cloud VM. It keeps encrypted copies of files it can't read, so people who are never online at the same time still sync, and it passes changes along live when two computers can't reach each other directly. It can't forge edits either: every change is signed by the person who made it and checked against the file's members.
 
+The easiest way: on the computer you leave on, open commonplace and turn on **Settings → Always-on relay → Keep files for others on this computer**. Your new files use it straight away, and **Copy address** gives the address for others. It runs while commonplace does; closing the window leaves commonplace in the tray.
+
+Or run it on its own, without the app (a server or a Raspberry Pi, say):
+
 ```sh
 npm run relay                     # from a clone of this repo, or:
 node packages/relay/bin/commonplace-relay.js --dir ~/relay-data --quota 4

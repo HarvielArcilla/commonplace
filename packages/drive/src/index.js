@@ -99,7 +99,7 @@ export class Drive extends EventEmitter {
       })
       : null
     this.relays = this.transport
-      ? new RelayClient(this.engine, { connect: (key) => this.transport.joinPeer(key), disconnect: (key) => this.transport.leavePeer(key) })
+      ? new RelayClient(this.engine, { connect: (key) => this._connectRelay(key), disconnect: (key) => this._disconnectRelay(key) })
       : null
     this.relays?.on('status', () => this._changed())
     if (this.relays) {

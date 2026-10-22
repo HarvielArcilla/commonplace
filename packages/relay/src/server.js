@@ -55,7 +55,7 @@ export class RelayServer extends EventEmitter {
     }
     this.chunkBytes = countBytes(path.join(this.dir, 'chunks'))
     this.swarm = new Hyperswarm({ ...this.swarmOpts, keyPair: this.swarmOpts.keyPair || loadKeyPair(this.dir) })
-    this.swarm.on('connection', (socket) => this._accept(socket))
+    this.swarm.on('connection', (socket) => this.accept(socket))
     await this.swarm.listen()
     return this.address
   }
@@ -64,7 +64,16 @@ export class RelayServer extends EventEmitter {
     await this.swarm?.destroy()
   }
 
-  _accept (socket) {
+  get key () { return this.swarm?.keyPair.publicKey.toString('hex') || null }
+
+  // How full it is, for the app's settings.
+  stats () {
+    return { boxes: this.boxes.size, usedBytes: this.usedBytes, quotaBytes: this.quotaBytes, connections: this.connections.size }
+  }
+
+  // Takes a connection: from the network, or in memory from a Drive running
+  // in the same process.
+  accept (socket) {
     socket.on('error', () => {})
     const conn = { socket, send: (head, payload) => socket.write(encodeMsg(head, payload)) }
     this.connections.add(conn)

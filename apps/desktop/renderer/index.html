@@ -136,6 +136,11 @@
       <section id="profile-relays" class="settings-page" data-page="relays" hidden>
         <h2>Always-on relay</h2>
         <p class="fineprint-plain">A computer you leave on keeps encrypted copies it can’t read, of documents and uploaded files alike, so your files and your computers sync even when nothing else is online. New files you make use it.</p>
+        <h4 class="settings-sub">This computer</h4>
+        <label class="check"><input type="checkbox" id="local-relay-on"> Keep files for others on this computer, as a relay</label>
+        <div id="local-relay-info" class="local-relay" hidden></div>
+        <p class="fineprint-plain">It works while commonplace is running. While it’s on, closing the window leaves commonplace running in the tray (the menu bar on a Mac).</p>
+        <h4 class="settings-sub">Relays you use</h4>
         <ul class="people" id="profile-relay-list" aria-label="Your relays"></ul>
         <div class="invite-row">
           <input id="profile-relay-input" class="relay-input" placeholder="Paste a relay address (cpr1.…)" aria-label="Relay address" spellcheck="false">

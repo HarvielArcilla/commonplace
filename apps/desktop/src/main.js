@@ -3,14 +3,14 @@
 // talks to this process over a narrow IPC surface defined in preload.cjs.
 
 import fsSync from 'node:fs'
-import { app, BrowserWindow, ipcMain, clipboard, shell, dialog, Notification, nativeImage, Menu, screen, nativeTheme } from 'electron'
+import { app, BrowserWindow, ipcMain, clipboard, shell, dialog, Notification, nativeImage, Menu, screen, nativeTheme, Tray } from 'electron'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import * as Y from 'yjs'
 import * as awarenessProtocol from 'y-protocols/awareness'
 import DHT from 'hyperdht'
-import { Drive, sendDrive, receiveDrive, newMoveCode, Backups, readBackupFile, restoreBackup, fileKind, safeFileName, POLICY_FIELDS, POLICY_GROUPS } from '@commonplace/drive'
+import { Drive, sendDrive, receiveDrive, newMoveCode, Backups, readBackupFile, restoreBackup, fileKind, safeFileName, POLICY_FIELDS, POLICY_GROUPS, NetworkSettings } from '@commonplace/drive'
 import { docsApps } from '@commonplace/docs'
 import { sheetsApp } from '@commonplace/sheets'
 import { exportXlsx, importXlsx, exportCsv, importCsv } from '@commonplace/sheets/convert'
@@ -27,6 +27,7 @@ import { formServices } from './forms.js'
 import { linkServices } from './links.js'
 import { Reminders } from './reminders.js'
 import { Updates } from './updates.js'
+import { LocalRelay, cleanQuota, QUOTA_GB } from './local-relay.js'
 import { readPage, PAGE_SIZES, DEFAULT_PAGE, pageLine } from '@commonplace/docs/page'
 import { exportDocx, importDocx } from '@commonplace/docs/convert'
 
@@ -376,7 +377,7 @@ function registerIpc () {
     const code = newMoveCode()
     const controller = new AbortController()
     move = controller
-    sendDrive({ code, drive, swarm: moveSwarm(), signal: controller.signal, leaving: !keep, onStatus: (s) => send('move:status', s) })
+    sendDrive({ code, drive, swarm: ownSwarm(), signal: controller.signal, leaving: !keep, onStatus: (s) => send('move:status', s) })
       .then(async ({ count }) => {
         move = null
         if (keep) { send('move:status', { phase: 'linked', count }); return }
@@ -403,7 +404,7 @@ function registerIpc () {
       code,
       dataDir: app.getPath('userData'),
       isEmpty: () => drive.isEmpty,
-      swarm: moveSwarm(),
+      swarm: ownSwarm(),
       onStatus: (s) => send('move:status', s),
       beforeInstall: () => drive.stop()
     })
@@ -467,6 +468,8 @@ function registerIpc () {
   })
   ipcMain.handle('storage:usage', () => drive.storageUsage())
   ipcMain.handle('network:get', () => drive.networkInfo())
+  ipcMain.handle('relay:local', () => relayState())
+  ipcMain.handle('relay:local:set', (_e, patch) => setLocalRelay(patch || {}))
   ipcMain.handle('network:set', (e, patch) => drive.setNetwork(patch))
   ipcMain.handle('network:forget', () => drive.forgetNetworkNodes())
   ipcMain.handle('storage:settings', (_e, patch) => drive.setStorageSettings(patch || {}))
@@ -556,19 +559,57 @@ function swarmOptions () {
   return { bootstrap }
 }
 
-// Moving or linking computers uses its own short-lived connection, with the
-// same bootstrap addresses as everything else.
-function moveSwarm () {
+// Moving or linking computers, and this computer's own relay, use network
+// connections of their own, with the same bootstrap addresses as the rest.
+function ownSwarm () {
   const env = swarmOptions()
   if (env.dht || env.bootstrap) return env
-  const { bootstrap } = drive.network.swarmOptions()
+  const { bootstrap } = new NetworkSettings(app.getPath('userData')).swarmOptions()
   return bootstrap ? { bootstrap } : {}
+}
+
+// ---- this computer as a relay ----------------------------------------------------
+
+let localRelay = null
+let tray = null
+
+const relaySettings = () => ({ on: Boolean(readSettings().relay?.on), quotaGB: cleanQuota(readSettings().relay?.quotaGB) })
+
+async function setLocalRelay ({ on, quotaGB, useForMine = false }) {
+  const next = { ...relaySettings(), ...(on !== undefined ? { on: Boolean(on) } : {}), ...(quotaGB !== undefined ? { quotaGB: cleanQuota(quotaGB) } : {}) }
+  writeSettings({ relay: next })
+  if (next.on) {
+    const server = await localRelay.start({ quotaGB: next.quotaGB })
+    drive.useLocalRelay(server)
+    if (useForMine && !drive.myRelays().some((r) => r.key === server.key)) drive.addMyRelay(server.address)
+  } else if (localRelay.on) {
+    drive.useLocalRelay(null)
+    await localRelay.stop()
+  }
+  return relayState()
+}
+
+const relayState = () => ({ ...localRelay.status(), quotaGB: relaySettings().quotaGB, limits: QUOTA_GB })
+
+// While the relay runs, commonplace lives on in the tray when its window closes.
+function updateTray () {
+  if (!localRelay?.on) { tray?.destroy(); tray = null; return }
+  if (tray) return
+  tray = new Tray(nativeImage.createFromPath(ICON).resize({ width: 16, height: 16 }))
+  tray.setToolTip('commonplace is keeping files as a relay')
+  tray.setContextMenu(Menu.buildFromTemplate([
+    { label: 'Open commonplace', click: () => { if (win) win.show(); else createWindow() } },
+    { type: 'separator' },
+    { label: 'Quit (stops the relay)', click: () => app.quit() }
+  ]))
+  tray.on('click', () => { if (win) win.show(); else createWindow() })
 }
 
 async function startDrive () {
   // COMMONPLACE_CHECKPOINT_SECONDS shortens the pause before a version is saved (for testing).
   const pause = Number(process.env.COMMONPLACE_CHECKPOINT_SECONDS) * 1000
   drive = new Drive({ dataDir: app.getPath('userData'), apps: APPS, swarm: swarmOptions(), history: pause ? { idleMs: pause } : {}, makeThumb, appVersion: app.getVersion() })
+  if (localRelay?.server) drive.useLocalRelay(localRelay.server)
   drive.on('error', (err) => console.error('[commonplace]', err))
   // Another of my computers unlinked this one: sign out and delete it all here.
   drive.on('unlinked', () => {
@@ -649,6 +690,8 @@ app.whenReady().then(async () => {
   const last = updates.takeLastResult()
   if (last) pendingNotice = last.ok ? 'commonplace was updated to the newest version.' : `commonplace couldn’t update itself. Run the install command again, or see ${last.log}.`
   registerIpc()
+  localRelay = new LocalRelay({ dataDir: app.getPath('userData'), swarm: ownSwarm, onChange: () => { send('relay:changed', relayState()); updateTray() } })
+  if (relaySettings().on) await localRelay.start({ quotaGB: relaySettings().quotaGB }).catch((err) => console.error('[commonplace] relay', err))
   await startDrive()
   createWindow()
   updates.start()
@@ -657,14 +700,15 @@ app.whenReady().then(async () => {
   app.on('activate', () => { if (!win) createWindow() })
 })
 
-// Closing the window quits, on every platform. Files stop syncing until
-// commonplace is opened again.
-app.on('window-all-closed', () => app.quit())
+// Closing the window quits, on every platform, and files stop syncing until
+// commonplace is opened again; unless this computer is a relay, which keeps
+// running in the tray.
+app.on('window-all-closed', () => { if (!localRelay?.on) app.quit() })
 
 let stopping = false
 app.on('before-quit', (event) => {
   if (stopping || !drive) return
   event.preventDefault()
   stopping = true
-  drive.stop().catch(() => {}).finally(() => app.quit())
+  Promise.all([drive.stop(), localRelay?.stop()]).catch(() => {}).finally(() => app.quit())
 })

@@ -114,6 +114,32 @@ test('an uploaded file downloads from the relay while whoever uploaded it is off
   for (const h of real) assert.ok(!names.includes(h), 'a chunk stored under its hash')
 })
 
+test('a computer can be its own relay: its Drive fills it in memory, and others read it over the network', async (t) => {
+  const testnet = await createTestnet(3)
+  const swarm = () => ({ dht: new DHT({ bootstrap: testnet.bootstrap, host: '127.0.0.1' }), refreshMs: 500 })
+  const relay = new RelayServer({ dir: tmp(), swarm: { dht: new DHT({ bootstrap: testnet.bootstrap, host: '127.0.0.1' }) } })
+  const address = await relay.start()
+  const opts = { apps: [docsApp], lan: false }
+  const alice = new Drive({ dataDir: tmp(), swarm: swarm(), ...opts })
+  const bob = new Drive({ dataDir: tmp(), swarm: swarm(), ...opts })
+  t.after(async () => { await alice.stop(); await bob.stop(); await relay.stop(); await testnet.destroy() })
+  await alice.start()
+  await bob.start()
+
+  alice.useLocalRelay(relay)
+  alice.addMyRelay(address)
+  const docId = await alice.create('docs', 'Minutes')
+  write(alice, docId, 'Kept on my own relay.')
+  await until(() => alice.describe(docId).sync.relays[0]?.online, 10000, 'alice’s Drive to reach its relay')
+  assert.equal(relay.stats().connections, 1, 'in memory, not over the network')
+  await until(() => relay.stats().usedBytes > 0, 10000, 'the relay to hold a copy')
+  const link = alice.invite(docId, 'viewer')
+  await alice.stop() // the window closed; the relay keeps running
+
+  await bob.join(link)
+  await until(() => text(bob, docId) === 'Kept on my own relay.', 30000, 'bob to read it from the relay')
+})
+
 test('a relay keeps only one blob per file after compacting, and rejects writes without the box key', async (t) => {
   const testnet = await createTestnet(3)
   const relayDir = tmp()

@@ -1,6 +1,9 @@
 // Always-on relays: mine (for new files and my own computers) and each
-// file's (listed in the file, so everyone working on it uses them).
+// file's (listed in the file, so everyone working on it uses them). When
+// this computer runs a relay itself, the Drive talks to it in memory
+// rather than over the network.
 
+import { duplexPair } from 'node:stream'
 import { formatRelayAddress, parseRelayAddress, canEdit } from '@commonplace/core'
 
 // Relays used to be called helpers; files and Drives made then keep their
@@ -53,5 +56,35 @@ export class Relays {
     if (!entry || !doc) return
     const keys = new Set([...doc.ydoc.getMap(RELAYS_MAP).keys(), ...(entry.inviteRelays || entry.inviteHelpers || [])])
     this.relays.setRelays(docId, this._shouldSync(entry) ? [...keys] : [])
+  }
+
+  // The relay running in this process (a RelayServer), or null to go back
+  // to reaching it over the network.
+  useLocalRelay (server) {
+    const old = this.localRelay
+    this.localRelay = server || null
+    if (!this.relays) return
+    if (old?.key && this.relays.isRelay(old.key) && old.key !== server?.key) {
+      this.relays.links.get(old.key)?.socket.destroy()
+      this.transport.joinPeer(Buffer.from(old.key, 'hex'))
+    }
+    if (server?.key && this.relays.isRelay(server.key)) {
+      this.transport.leavePeer(Buffer.from(server.key, 'hex'))
+      this.relays.links.get(server.key)?.socket.destroy()
+      this._connectRelay(Buffer.from(server.key, 'hex'))
+    }
+  }
+
+  _connectRelay (key) {
+    const hex = key.toString('hex')
+    if (this.localRelay?.key !== hex) { this.transport.joinPeer(key); return }
+    const [mine, theirs] = duplexPair()
+    mine.on('close', () => theirs.destroy())
+    this.localRelay.accept(theirs)
+    this.relays.addConnection(mine, hex)
+  }
+
+  _disconnectRelay (key) {
+    if (this.localRelay?.key !== key.toString('hex')) this.transport.leavePeer(key)
   }
 }
