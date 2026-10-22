@@ -47,6 +47,10 @@ export const GIVEN_ROLES = ['viewer', 'commenter', 'respondent', 'editor']
 export const canEdit = (role) => role === 'editor' || role === 'owner'
 export const canRespond = (role) => role === 'respondent'
 export const canComment = (role) => role === 'commenter'
+// A role a newer app gave (one this app doesn't know) counts as view-only
+// here: they still get the file's key, and nothing they send is taken.
+const roleHere = (role) => (GIVEN_ROLES.includes(role) ? role : 'viewer')
+const isRole = (role) => typeof role === 'string' && /^[a-z-]{1,24}$/.test(role)
 export const AFTER = ['keep', 'hide']
 const cleanUntil = (v) => (Number.isFinite(v) && v > 0 ? Math.floor(v) : null)
 const cleanAfter = (v) => (AFTER.includes(v) ? v : 'keep')
@@ -114,13 +118,13 @@ function apply (s, e, i) {
       if (e.legacy === false) s.legacyLinks = false
       break
     case 'add': {
-      if (!GIVEN_ROLES.includes(e.role) && !(e.userId === s.owner && e.role === 'owner')) throw new Error('bad role')
+      if (!isRole(e.role) || (e.role === 'owner' && e.userId !== s.owner)) throw new Error('bad role')
       // Adding someone again (to hand them a new key) keeps when their
       // access ends unless the entry says otherwise.
       const prev = s.members.get(e.userId)
       const owner = e.userId === s.owner
       s.members.set(e.userId, {
-        role: owner ? 'owner' : e.role,
+        role: owner ? 'owner' : roleHere(e.role),
         enc: e.enc || prev?.enc || null,
         folder: typeof e.folder === 'string' ? e.folder : null,
         until: owner ? null : 'until' in e ? cleanUntil(e.until) : prev?.until ?? null,
@@ -139,8 +143,8 @@ function apply (s, e, i) {
       break
     }
     case 'role':
-      if (!s.members.has(e.userId) || e.userId === s.owner || !GIVEN_ROLES.includes(e.role)) throw new Error('bad role change')
-      s.members.get(e.userId).role = e.role
+      if (!s.members.has(e.userId) || e.userId === s.owner || !isRole(e.role) || e.role === 'owner') throw new Error('bad role change')
+      s.members.get(e.userId).role = roleHere(e.role)
       break
     case 'remove':
       if (e.userId === s.owner) throw new Error('the owner cannot be removed')
@@ -347,6 +351,7 @@ export class Membership {
   // `until`, `after`: when their access ends and what happens then
   // (leave both out to keep what they had).
   admit (identity, { userId, role, enc, epochSecret, via, folder, until, after }) {
+    if (userId !== this.state.owner && !GIVEN_ROLES.includes(role)) throw new Error('Unknown role.')
     const key = this.state.epoch > 0 && enc && epochSecret
       ? { epoch: this.state.epoch, sealed: sealTo(enc, epochSecret) }
       : undefined
@@ -360,6 +365,7 @@ export class Membership {
   }
 
   setRole (identity, userId, role) {
+    if (!GIVEN_ROLES.includes(role)) throw new Error('Unknown role.')
     return [this.append(identity, { type: 'role', userId, role })]
   }
 

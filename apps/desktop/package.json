@@ -1,7 +1,7 @@
 {
   "name": "@commonplace/desktop",
   "productName": "commonplace",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "A free office suite with no servers and no accounts: documents, spreadsheets, presentations, tasks, calendars, whiteboards, forms and a shared drive.",
   "author": "Harviel Arcilla",
   "license": "MIT",

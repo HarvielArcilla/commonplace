@@ -76,6 +76,8 @@ jobs:
           v="v$(node -p "require('./apps/desktop/package.json').version")"
           echo "tag=$v" >> "$GITHUB_OUTPUT"
           if gh release view "$v" >/dev/null 2>&1; then echo "new=false" >> "$GITHUB_OUTPUT"; else echo "new=true" >> "$GITHUB_OUTPUT"; fi
+          # Release notes, if written: docs/releases/<tag>.md
+          if [ -f "docs/releases/$v.md" ]; then echo "notes=docs/releases/$v.md" >> "$GITHUB_OUTPUT"; fi
       - uses: actions/download-artifact@v4
         if: steps.v.outputs.new == 'true'
         with: { path: dist, merge-multiple: true }
@@ -91,4 +93,5 @@ jobs:
           name: commonplace ${{ steps.v.outputs.tag }}
           target_commitish: ${{ github.sha }}
           files: dist/*
-          generate_release_notes: true
+          body_path: ${{ steps.v.outputs.notes }}
+          generate_release_notes: ${{ steps.v.outputs.notes == '' }}

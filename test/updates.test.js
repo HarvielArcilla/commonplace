@@ -157,6 +157,12 @@ test('a membership entry from a newer app is skipped, unless it limits access', 
   assert.equal(copy.entries.length, 3, 'the log still replays')
   assert.equal(copy.member(sam.userId).role, 'editor')
   assert.equal(copy.needsNewer, false)
+  // A role a newer app knows and this one doesn't: view-only here, and the
+  // log (with everything after it) still replays.
+  const ana = loadOrCreateIdentity(tmp())
+  m.append(owner, { type: 'add', userId: ana.userId, role: 'reviewer', enc: ana.encPublic })
+  assert.equal(new Membership('doc9', m.entries).member(ana.userId).role, 'viewer')
+  assert.throws(() => m.admit(owner, { userId: ana.userId, role: 'reviewer', enc: ana.encPublic }), /Unknown role/)
   m.append(owner, { type: 'quarantine', userId: sam.userId, critical: true })
   const strict = new Membership('doc9', m.entries)
   assert.equal(strict.needsNewer, true, 'a critical one stops this app syncing the file')
