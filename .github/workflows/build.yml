@@ -15,7 +15,10 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: npm }
       - run: npm ci
-      - run: npm test
+      # Failures also become annotations, so they show without opening the log.
+      - run: |
+          set -o pipefail
+          npm test 2>&1 | tee test.log || { grep -E "^not ok|timed out|Error:|expected|actual" test.log | head -30 | sed 's/^/::error::/'; exit 1; }
 
   # This build syncs both ways with the two newest releases, each run from
   # its own checkout in its own process (scripts/compat.mjs).
@@ -27,7 +30,9 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: npm }
       - run: npm ci
-      - run: npm run compat
+      - run: |
+          set -o pipefail
+          npm run compat 2>&1 | tee compat.log || { grep -E "✗|timed out|Error" compat.log | head -30 | sed 's/^/::error::/'; exit 1; }
 
   package:
     needs: [test, compat]
