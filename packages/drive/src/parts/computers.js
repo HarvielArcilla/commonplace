@@ -116,6 +116,7 @@ export class Computers {
   leaveList () {
     const st = directory.state(this.identity.userId)
     if (!st?.valid.has(this.identity.deviceId)) return
+    this.removedHere = true // (on purpose: nothing to tell anyone)
     directory.merge(this.identity.userId, [this.identity.statement({ t: 'revoke', gen: st.gen, dev: this.identity.deviceId })])
     this.engine.announce()
   }
