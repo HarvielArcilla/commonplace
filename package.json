@@ -13,6 +13,7 @@
     "build": "npm run build -w @commonplace/desktop",
     "dist": "npm run dist -w @commonplace/desktop",
     "test": "node --test --test-concurrency=1 test/*.test.js",
+    "compat": "node scripts/compat.mjs",
     "start": "npm run dev -w @commonplace/desktop",
     "relay": "node packages/relay/bin/commonplace-relay.js"
   },

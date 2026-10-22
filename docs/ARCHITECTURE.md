@@ -143,6 +143,8 @@ Both have links (Ctrl/Cmd+click opens them in the browser), LaTeX math rendered 
 
 **Theme.** The window marks `<html>` with `data-theme` (light or dark, from the setting or the system) and the styles key their dark colors to it; the background process also sets Electron's `nativeTheme.themeSource` for native parts.
 
+**Checking against earlier releases (`scripts/compat.mjs`).** CI checks out the two newest release tags beside the build, runs each in its own process (`test/compat/peer.mjs`, the same script for every version), and has the old and new apps make, share and edit files both ways on a private DHT. A release is built only if that passes.
+
 **Window boundary.** The window is sandboxed, with no Node and no network. It keeps its own Y.Doc mirror and exchanges binary updates with the background process through `preload.cjs`.
 
 ## Known limits

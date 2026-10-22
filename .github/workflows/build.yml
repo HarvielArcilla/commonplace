@@ -17,8 +17,20 @@ jobs:
       - run: npm ci
       - run: npm test
 
+  # This build syncs both ways with the two newest releases, each run from
+  # its own checkout in its own process (scripts/compat.mjs).
+  compat:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: npm run compat
+
   package:
-    needs: test
+    needs: [test, compat]
     strategy:
       fail-fast: false
       matrix:
