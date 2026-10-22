@@ -19,7 +19,7 @@ import * as awarenessProtocol from 'y-protocols/awareness'
 import { deriveDocKeys, epochKeys, seal, open } from './crypto.js'
 import { MSG, encodeFrame, FrameReader, encodeHello, decodeHello, helloProof, compatible } from './protocol.js'
 import { verifySignature } from './identity.js'
-import { Membership, canEdit, canRespond, canComment } from './members.js'
+import { Membership, canEdit, canRespond, canComment, canManage } from './members.js'
 import { isResponseUpdate, RESPONSES } from './respond.js'
 import { mayApply, usesOutbox } from './gate.js'
 import { ChunkExchange, BlobStore } from './chunks.js'
@@ -320,7 +320,9 @@ export class SyncEngine extends EventEmitter {
       // Why my invite link doesn't work, if it doesn't: expired, used, revoked.
       inviteProblem: !a && doc.invite && doc.members.exists ? doc.members.inviteProblem(doc.invite, { userId: this.identity.userId }) : null,
       hasMembership: doc.members.exists,
-      owner: doc.members.owner
+      owner: doc.members.owner,
+      // May change who has access (the owner, or a manager).
+      manage: doc.members.exists && doc.members.mayManage(this.identity.userId)
     }
   }
 
@@ -407,8 +409,8 @@ export class SyncEngine extends EventEmitter {
   checkEnds (now = Date.now()) {
     for (const doc of this.docs.values()) {
       if (!doc.members.exists) continue
-      if (doc.members.owner === this.identity.userId) {
-        const lapsed = doc.members.lapsed(now)
+      if (doc.members.mayManage(this.identity.userId)) {
+        const lapsed = doc.members.lapsed(now).filter((x) => doc.members.member(x.userId)?.role !== 'manager' || doc.members.owner === this.identity.userId)
         if (lapsed.length) {
           this._ownerAction(doc.docId, (d) => { for (const x of lapsed) d.members.remove(this.identity, x.userId, crypto.randomBytes(32), { after: x.after }) })
           continue
@@ -447,7 +449,7 @@ export class SyncEngine extends EventEmitter {
   // Two of my computers changed who has access at the same moment and the
   // other one's change won: make mine again on top of it, if it still applies.
   _redoDropped (doc, dropped = []) {
-    const mineNow = () => doc.members.owner === this.identity.userId
+    const mineNow = () => doc.members.mayManage(this.identity.userId)
     for (const e of dropped) {
       if (e.by !== this.identity.userId || !mineNow()) continue
       const m = doc.members
@@ -469,7 +471,7 @@ export class SyncEngine extends EventEmitter {
   _ownerAction (docId, fn) {
     const doc = this.docs.get(docId)
     if (!doc) throw new Error('No such file.')
-    if (doc.members.owner !== this.identity.userId) throw new Error('Only the owner can change who has access.')
+    if (!doc.members.mayManage(this.identity.userId)) throw new Error('Only the owner and people who can share can change who has access.')
     fn(doc)
     this._membersChanged(doc)
   }
@@ -752,7 +754,7 @@ export class SyncEngine extends EventEmitter {
     else if (newEpoch || info.again === true) this._sendHello(doc, conn, epoch) // (never with again: no loops)
 
     const access = this._checkAccess(doc, link)
-    if (doc.members.owner === this.identity.userId && access && link.user.userId !== this.identity.userId) this._ownerGreets(doc, link, access)
+    if (doc.members.mayManage(this.identity.userId) && access && link.user.userId !== this.identity.userId) this._ownerGreets(doc, link, access)
 
     // Content flows only on the current epoch, between people with access.
     link.sv = hello.stateVector
@@ -774,7 +776,7 @@ export class SyncEngine extends EventEmitter {
     return Boolean(link.role) && !link.incompatible && !doc.members.needsNewer && !this.isBlocked(link.user?.userId) && !link.gated && doc.contentEpoch != null && link.epochs.has(doc.contentEpoch)
   }
 
-  // As owner: let in people holding a valid invite (or note their request,
+  // As owner or manager: let in people holding a valid invite (or note their request,
   // for approval links), and hand the current key to members without it.
   _ownerGreets (doc, link, access) {
     const { userId } = link.user
@@ -792,6 +794,9 @@ export class SyncEngine extends EventEmitter {
       return
     }
     const m = doc.members.member(userId)
+    // (Managers can't change the owner or other managers, so they leave
+    // those to the owner, who seals every key to them anyway.)
+    if (canManage(m?.role) && doc.members.owner !== this.identity.userId) return
     const needsKey = doc.members.epoch > 0 && !doc.members.sealedKeyFor(userId, doc.members.epoch)
     if (!m?.enc || needsKey) {
       this._admit(doc, { userId, role: access.role, enc: link.enc, folder: m?.folder || undefined })

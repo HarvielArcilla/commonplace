@@ -2,6 +2,7 @@
 // their own, see shared-folders.js), and moving files between them.
 
 import { randomBytes } from 'node:crypto'
+import { canEdit } from '@commonplace/core'
 
 const cleanName = (name) => String(name ?? '').replace(/\s+/g, ' ').trim().slice(0, 120)
 
@@ -27,7 +28,7 @@ export class Folders {
   // no longer see.
   _leaveFolder (folderId) {
     const where = this.files.get(folderId)?.folderId
-    const canChange = ['owner', 'editor'].includes(this.engine.access(folderId)?.role)
+    const canChange = canEdit(this.engine.access(folderId)?.role)
     for (const [childId] of this.shared.items(folderId)) {
       const child = this.files.get(childId)
       if (!child) continue

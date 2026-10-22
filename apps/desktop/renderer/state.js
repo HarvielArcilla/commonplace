@@ -24,10 +24,12 @@ export function savePrefs () {
 // decided in one place. (The background process enforces the same rules for
 // itself; see core/gate.js.)
 
-export const ROLE_LABEL = { owner: 'Owner', editor: 'Can edit', commenter: 'Can comment', viewer: 'Can view', respondent: 'Can answer' }
-const ROLE_VERB = { owner: 'edit', editor: 'edit', commenter: 'comment on', viewer: 'view', respondent: 'answer' }
+export const ROLE_LABEL = { owner: 'Owner', manager: 'Can edit and share', editor: 'Can edit', commenter: 'Can comment', viewer: 'Can view', respondent: 'Can answer' }
+const ROLE_VERB = { owner: 'edit', manager: 'edit and share', editor: 'edit', commenter: 'comment on', viewer: 'view', respondent: 'answer' }
 export const roleVerb = (role) => ROLE_VERB[role] || 'view'
-export const editorRole = (role) => role === 'owner' || role === 'editor'
+export const editorRole = (role) => role === 'owner' || role === 'manager' || role === 'editor'
+// May invite and remove people (the owner, or someone who can share).
+export const manages = (file) => file?.role === 'owner' || Boolean(file?.access?.manage)
 
 // can(file, 'edit' | 'comment'): whether I can do that to this file now.
 export function can (file, what) {

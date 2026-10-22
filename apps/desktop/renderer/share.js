@@ -2,12 +2,12 @@
 // another computer.
 
 import { $, el, ago, toast, dialog, confirmAction, cleanError, listNames } from './ui.js'
-import { state, cp, when, editorRole, ROLE_LABEL } from './state.js'
-
+import { state, cp, when, editorRole, manages, ROLE_LABEL } from './state.js'
 
 // The roles someone can be given in a file: forms are answered, not viewed.
-const rolesFor = (kind) => (kind === 'form' ? ['respondent', 'editor'] : ['editor', 'commenter', 'viewer'])
-const roleOptions = (kind, selected) => rolesFor(kind).map((r) => el('option', { value: r, selected: r === selected || null }, ROLE_LABEL[r]))
+// Only the owner lets people share.
+const rolesFor = (kind, owner = false) => [...(owner ? ['manager'] : []), ...(kind === 'form' ? ['respondent', 'editor'] : ['editor', 'commenter', 'viewer'])]
+const roleOptions = (kind, selected, owner) => rolesFor(kind, owner).map((r) => el('option', { value: r, selected: r === selected || null }, ROLE_LABEL[r]))
 
 function currentFile (docId) {
   return state.files.find((f) => f.docId === docId)
@@ -20,14 +20,13 @@ function currentFile (docId) {
 export function shareDialog (docId) {
   const f = currentFile(docId)
   if (!f) return
-  const isOwner = f.role === 'owner'
   const live = el('div', { class: 'share-live' })
   const title = el('h2', {})
   const d = el('dialog', { class: 'dialog dialog-wide share' }, el('form', { method: 'dialog' },
     title,
     f.kind === 'folder' ? el('p', { class: 'share-folder-note' }, 'Everyone in this folder gets every file in it: editors can edit them, commenters can comment on them, viewers can view them (and answer forms). Leaving the folder takes away what they had only through it.') : null,
     el('div', { class: 'share-body' },
-      isOwner ? inviteControls(docId, f.kind) : el('p', {}, `Only ${f.owner?.name || 'the owner'} can invite people or change access.`),
+      manages(f) ? inviteControls(docId, f.kind, f.role === 'owner') : el('p', {}, `Only ${f.owner?.name || 'the owner'} and people who can share can invite people or change access.`),
       live),
     el('div', { class: 'dialog-actions' }, el('button', { class: 'btn btn-primary', value: 'done' }, 'Done'))))
   const render = () => {
@@ -45,19 +44,21 @@ export function shareDialog (docId) {
 
 function shareLists (docId, f) {
   const isOwner = f.role === 'owner'
+  const manage = manages(f)
   const out = []
-  if (isOwner && f.requests?.length) out.push(el('h3', {}, 'Asking to join'), requestList(docId, f.requests, f.kind))
+  if (manage && f.requests?.length) out.push(el('h3', {}, 'Asking to join'), requestList(docId, f.requests, f.kind, isOwner))
   const list = el('ul', { class: 'people', 'aria-label': 'People with access' })
   const members = f.members.length ? f.members : (f.owner ? [{ userId: f.owner.userId, name: f.owner.name, role: 'owner' }] : [])
   for (const m of members) {
     const isMe = m.userId === state.me.userId
     const controls = el('div', { class: 'person-controls' })
-    if (isOwner && m.role !== 'owner') {
+    // Managers change everyone but the owner and other managers.
+    if (manage && m.role !== 'owner' && (isOwner || m.role !== 'manager')) {
       const select = el('select', { class: 'tool-select', 'aria-label': `Role for ${m.name}`, onchange: (e) => act(() => cp.setMemberRole(docId, m.userId, e.target.value)) },
-        ...roleOptions(f.kind, m.role))
+        ...roleOptions(f.kind, m.role, isOwner))
       controls.append(select,
         m.via ? null : el('button', { type: 'button', class: 'btn btn-quiet', title: 'When their access ends', onclick: () => accessDialog(docId, m) }, m.until ? 'Change end' : 'Set an end'),
-        el('button', { type: 'button', class: 'btn btn-quiet', title: 'Make this person the owner', onclick: () => transfer(docId, m) }, 'Make owner'),
+        isOwner ? el('button', { type: 'button', class: 'btn btn-quiet', title: 'Make this person the owner', onclick: () => transfer(docId, m) }, 'Make owner') : null,
         el('button', { type: 'button', class: 'btn btn-quiet btn-danger', onclick: () => removePerson(docId, m) }, 'Remove'))
     } else {
       controls.append(el('span', { class: 'person-role' }, ROLE_LABEL[m.role] || m.role))
@@ -72,7 +73,7 @@ function shareLists (docId, f) {
   out.push(el('h3', {}, 'People with access'), list)
   if (isOwner && f.guests?.length) out.push(el('h3', {}, 'Guests, only while you’re online'), guestList(f.guests, f.kind))
   out.push(...relaySection(docId, f))
-  if (isOwner && f.access.managed) {
+  if (manage && f.access.managed) {
     out.push(el('div', { class: 'share-footer' },
       el('button', { type: 'button', class: 'btn btn-quiet', onclick: () => resetLinks(docId) }, 'Stop all invite links…'),
       el('span', { class: 'fineprint-plain' }, 'Removing someone, or their access ending, stops sending them changes and moves everyone else to a new key. commonplace can remove their copy if you choose, but can’t stop someone who saved it another way.')))
@@ -123,17 +124,19 @@ const loadInviteOptions = () => {
 }
 const saveInviteOptions = (o) => { try { localStorage.setItem(INVITE_KEY, JSON.stringify(o)) } catch {} }
 
-function inviteControls (docId, kind) {
+function inviteControls (docId, kind, owner) {
   const o = loadInviteOptions()
-  if (kind === 'form' || !rolesFor(kind).includes(o.role)) o.role = rolesFor(kind)[0] // a form's link is for answering
-  const role = el('select', { class: 'tool-select', 'aria-label': 'Role for people who use this link' }, ...roleOptions(kind, o.role))
+  if (kind === 'form' || !rolesFor(kind, owner).includes(o.role)) o.role = rolesFor(kind)[0] // a form's link is for answering
+  if (!owner && o.access === 'online') o.access = 'always'
+  const role = el('select', { class: 'tool-select', 'aria-label': 'Role for people who use this link' }, ...roleOptions(kind, o.role, owner))
   const expiry = el('select', { class: 'tool-select', 'aria-label': 'How long the link works' },
     ...EXPIRY.map((e) => el('option', { value: e.value, selected: e.value === String(o.expiresIn || '') || null }, e.label)))
   const once = el('input', { type: 'checkbox', checked: o.once || null })
   const ask = el('input', { type: 'checkbox', checked: o.ask || null })
   // How long the access the link gives lasts, and what happens after.
   const access = el('select', { class: 'tool-select', 'aria-label': 'How long their access lasts' },
-    ...ACCESS.map(([value, label]) => el('option', { value, selected: value === o.access || null }, label)))
+    // Guests are let in by the owner's computers, so only the owner makes guest links.
+    ...ACCESS.filter(([value]) => owner || value !== 'online').map(([value, label]) => el('option', { value, selected: value === o.access || null }, label)))
   const untilInput = el('input', { type: 'datetime-local', class: 'tool-select', 'aria-label': 'Access ends', value: localInput(Date.now() + 7 * 864e5) })
   const after = el('select', { class: 'tool-select', 'aria-label': 'When access ends' },
     ...AFTER.map(([value, label]) => el('option', { value, selected: value === o.after || null }, label)))
@@ -222,9 +225,9 @@ async function accessDialog (docId, m) {
   if (await act(() => cp.setMemberAccess(docId, m.userId, d.ends === 'at' ? { until: new Date(d.at).getTime(), after: d.after } : { until: null }))) toast('Saved')
 }
 
-function requestList (docId, requests, kind) {
+function requestList (docId, requests, kind, owner) {
   return el('ul', { class: 'people', 'aria-label': 'People asking to join' }, ...requests.map((r) => {
-    const role = el('select', { class: 'tool-select', 'aria-label': `Role for ${r.name}` }, ...roleOptions(kind, r.role))
+    const role = el('select', { class: 'tool-select', 'aria-label': `Role for ${r.name}` }, ...roleOptions(kind, r.role, owner))
     return el('li', { class: 'person' },
       el('span', { class: 'presence-dot on', 'aria-hidden': 'true' }),
       el('span', { class: 'person-name' }, r.name, el('span', { class: 'person-note' }, 'Asking to join')),

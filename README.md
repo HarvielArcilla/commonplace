@@ -84,7 +84,7 @@ Everything you share lives on the computers of the people you share it with, so 
 
 ## Sharing
 
-Invite people to edit, comment, only view, or (for forms) answer; change their role, remove them, or hand ownership to someone else. Invite links expire (after 7 days unless you choose otherwise) and can be limited to one person or need your approval for each person.
+Invite people to edit, comment, only view, or (for forms) answer; change their role, remove them, or hand ownership to someone else. Give someone **Can edit and share** and they can invite, let in and remove people too (everyone but you and others who can share), so nothing waits for your computer to be on. Invite links expire (after 7 days unless you choose otherwise) and can be limited to one person or need your approval for each person.
 
 **How long access lasts.** Each invite link, and each person in the Share dialog, can have access:
 

@@ -21,7 +21,7 @@
 // the download rules for uploaded files (drive/files.js). A file you never
 // opened that leaves the folder leaves your Drive too.
 
-import { deriveDocKeys } from '@commonplace/core'
+import { deriveDocKeys, canEdit } from '@commonplace/core'
 
 export const ITEMS = 'items'
 export const MAX_ITEMS = 1000
@@ -66,8 +66,7 @@ export function folderItems (ydoc) {
   return out
 }
 
-const RANK = { viewer: 0, respondent: 1, editor: 2, owner: 3 }
-const canEdit = (role) => role === 'editor' || role === 'owner'
+const RANK = { viewer: 0, commenter: 1, respondent: 1, editor: 2, manager: 3, owner: 4 }
 
 // The role a folder member gets on a file in it.
 const roleIn = (folderRole, type) => canEdit(folderRole) ? 'editor' : type === 'form' ? 'respondent' : folderRole === 'commenter' ? 'commenter' : 'viewer'

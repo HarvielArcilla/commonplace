@@ -23,7 +23,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
 import { EventEmitter } from 'node:events'
-import { CHUNK_SIZE } from '@commonplace/core'
+import { CHUNK_SIZE, canEdit } from '@commonplace/core'
 import { HARD_MAX_FILE_BYTES, DEFAULT_POLICY } from './policy.js'
 
 export const MAX_FILE_BYTES = DEFAULT_POLICY.maxFileBytes
@@ -171,7 +171,7 @@ export class Files extends EventEmitter {
   async uploadVersion (docId, filePath) {
     if (this.drive.describe(docId)?.kind !== 'file') throw new Error('That isn’t an uploaded file.')
     const access = this.engine.access(docId)
-    if (!['owner', 'editor'].includes(access?.role)) throw new Error('Only people who can edit can upload a new version.')
+    if (!canEdit(access?.role)) throw new Error('Only people who can edit can upload a new version.')
     const info = await this._read(filePath, null)
     this._addVersion(docId, info)
     this.drive.rename(docId, info.name)

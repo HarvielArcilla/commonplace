@@ -302,13 +302,14 @@ export class Drive extends EventEmitter {
         waitingForKey: Boolean(access.waitingForKey),
         waitingForApproval: Boolean(access.waitingForApproval),
         inviteProblem: access.inviteProblem || null,
-        managed: Boolean(access.hasMembership)
+        managed: Boolean(access.hasMembership),
+        manage: Boolean(access.manage)
       },
       members: [...members, ...waiting],
       // People who can open it only while I'm online (I own it).
       guests: isOwner ? this.guests.list(docId) : [],
       // People with an approval link asking the owner to let them in.
-      requests: isOwner ? this.engine.requests(docId).map((r) => ({ ...r, name: nameOf(r.userId, r.name) })) : [],
+      requests: access.manage ? this.engine.requests(docId).map((r) => ({ ...r, name: nameOf(r.userId, r.name) })) : [],
       contributed: Boolean(entry.contributed),
       contributors: entry.contributors || [],
       starred: Boolean(entry.starred),
@@ -448,7 +449,7 @@ export class Drive extends EventEmitter {
     const doc = this.engine.getDoc(docId)
     if (!entry || !doc) return null
     if (!doc.members.exists && readMeta(doc.ydoc)?.owner?.userId === this.identity.userId) this.engine.ensureMembership(docId)
-    if (doc.members.owner !== this.identity.userId) throw new Error('Only the owner can invite people to this file.')
+    if (!doc.members.mayManage(this.identity.userId)) throw new Error('Only the owner and people who can share can invite people to this file.')
     if (access === 'online') return this.guests.createInvite(docId, role, { after, expiresIn })
     if (access === 'until' && !(until > Date.now())) throw new Error('Choose when their access ends, later than now.')
     const expiresAt = expiresIn ? Date.now() + expiresIn : null
@@ -509,7 +510,7 @@ export class Drive extends EventEmitter {
     const roots = app.history.roots.filter((r) => r.name !== 'responses')
     const where = this.shared.placeOf(docId)
     const copyId = await this.create(entry.type, `Copy of ${entry.title || 'Untitled'}`.slice(0, 200), {
-      folderId: where && this.shared.isFolder(where) && ['owner', 'editor'].includes(this.engine.access(where)?.role) ? where : this.folders.has(entry.folderId) ? entry.folderId : null,
+      folderId: where && this.shared.isFolder(where) && canEdit(this.engine.access(where)?.role) ? where : this.folders.has(entry.folderId) ? entry.folderId : null,
       build: (ydoc) => { restoreContent(ydoc, doc.ydoc, roots); ydoc.getMap('meta').set('title', `Copy of ${entry.title || 'Untitled'}`.slice(0, 200)) }
     })
     return copyId

@@ -1,5 +1,6 @@
 // Membership: who may read and edit a document, as an append-only log that
-// only the current owner can sign.
+// only the owner, and the people the owner lets share it (managers), can
+// sign.
 //
 // Every peer holds the same log and checks every entry, so a document's
 // membership can't be forged by anyone but the owner. Entries:
@@ -9,7 +10,8 @@
 //   add     - give someone a role; may carry the current key, sealed to them,
 //             the shared folder that gave it (folder), and when their access
 //             ends (until) and what happens to their copy then (after)
-//   role    - change someone's role (viewer, respondent, editor)
+//   role    - change someone's role (viewer, commenter, respondent, editor,
+//             manager)
 //   access  - change when someone's access ends, and what happens then
 //   remove  - take someone out (after: what happens to their copy)
 //   rotate  - start a new key epoch; the new key is sealed to each remaining
@@ -18,7 +20,14 @@
 //   revoke-invites - stop all invite links issued so far
 //   retire-legacy  - stop accepting unsigned links from before roles existed
 //
-// Invite links carry an owner-signed token: the role, and optionally an
+// Managers (shown as "Can edit and share") edit, and do what the owner does
+// for everyone but the owner and other managers: invite, admit, change roles
+// and when access ends, remove people, and change the key. So the file
+// doesn't wait on one person's computer. Only the owner makes or removes
+// managers, and transfers ownership. If two of them change access at once,
+// the same fork rule as two of the owner's computers applies.
+//
+// Invite links carry a token signed by the owner or a manager: the role, and optionally an
 // expiry (x), single use (once: the first person admitted with it uses it
 // up) and approval (ask: the owner must say yes to each person). People
 // holding a single-use or approval link get nothing until the owner has
@@ -40,11 +49,14 @@ import crypto from 'node:crypto'
 import { verifySignature } from './identity.js'
 import { sealTo } from './seal.js'
 
-export const ROLES = ['viewer', 'commenter', 'respondent', 'editor', 'owner']
+export const ROLES = ['viewer', 'commenter', 'respondent', 'editor', 'manager', 'owner']
 // Roles the owner can give someone. A respondent reads the file and may add
 // only their own sealed answers to a form (see respond.js).
-export const GIVEN_ROLES = ['viewer', 'commenter', 'respondent', 'editor']
-export const canEdit = (role) => role === 'editor' || role === 'owner'
+export const GIVEN_ROLES = ['viewer', 'commenter', 'respondent', 'editor', 'manager']
+export const canEdit = (role) => role === 'editor' || role === 'manager' || role === 'owner'
+export const canManage = (role) => role === 'manager' || role === 'owner'
+// What a manager may sign: changes to anyone but the owner and managers.
+const MANAGER_TYPES = new Set(['add', 'role', 'access', 'remove', 'rotate', 'revoke-invites', 'retire-legacy'])
 export const canRespond = (role) => role === 'respondent'
 export const canComment = (role) => role === 'commenter'
 // A role a newer app gave (one this app doesn't know) counts as view-only
@@ -91,14 +103,26 @@ export function replay (docId, entries) {
     if (entry.seq !== i) throw new Error(`entry ${i}: wrong sequence number`)
     if ((entry.prev || null) !== prevHash) throw new Error(`entry ${i}: does not follow the previous entry`)
     if (entry.doc !== docId) throw new Error(`entry ${i}: belongs to another document`)
-    const signer = i === 0 ? entry.owner : s.owner
-    if (entry.by !== signer) throw new Error(`entry ${i}: not signed by the owner`)
+    if (i === 0 ? entry.by !== entry.owner : !maySign(s, entry)) throw new Error(`entry ${i}: not signed by the owner or a manager`)
     if (!verifyWith(entry.by, unsigned(entry), entry.sig)) throw new Error(`entry ${i}: bad signature`)
     apply(s, entry, i)
     prevHash = hashOf(entry)
   })
   s.head = { seq: entries.length - 1, hash: prevHash }
   return s
+}
+
+function maySign (s, e) {
+  if (e.by === s.owner) return true
+  if (s.members.get(e.by)?.role !== 'manager' || !MANAGER_TYPES.has(e.type)) return false
+  if (e.type === 'add' || e.type === 'role') {
+    if (e.role === 'manager' || e.role === 'owner') return false
+  }
+  if (e.userId !== undefined) {
+    const target = s.members.get(e.userId)
+    if (e.userId === s.owner || (target?.role === 'manager' && e.userId !== e.by)) return false
+  }
+  return true
 }
 
 function grant (s, userId, epoch, sealed) {
@@ -235,9 +259,14 @@ export class Membership {
     return true
   }
 
-  // Appends an entry signed by the current owner.
+  // Whether this person may change who has access (owner or manager).
+  mayManage (userId) {
+    return canManage(this.member(userId)?.role) && !this.hasEnded(userId)
+  }
+
+  // Appends an entry signed by the owner or a manager.
   append (identity, body) {
-    if (identity.userId !== this.state.owner) throw new Error('Only the owner can change who has access.')
+    if (!this.mayManage(identity.userId)) throw new Error('Only the owner and people who can share can change who has access.')
     const full = { ...body, seq: this.entries.length, prev: this.state.head.hash, doc: this.docId, by: identity.userId, at: Date.now() }
     const entry = { ...full, sig: signWith(identity, full) }
     const next = replay(this.docId, [...this.entries, entry])
@@ -301,7 +330,8 @@ export class Membership {
     if (!token || typeof token !== 'object') return 'invalid'
     const { sig, ...body } = token
     if (body.d !== this.docId || !GIVEN_ROLES.includes(body.r)) return 'invalid'
-    if (!this.state.owners.has(body.by) || !verifyWith(body.by, body, sig)) return 'invalid'
+    const signer = this.state.owners.has(body.by) || (this.member(body.by)?.role === 'manager' && body.r !== 'manager')
+    if (!signer || !verifyWith(body.by, body, sig)) return 'invalid'
     if (!(body.q >= this.state.invitesValidFrom)) return 'revoked'
     if (body.x != null && !(now < body.x)) return 'expired'
     if (body.u != null && !(now < body.u)) return 'expired' // the access it gives has ended
@@ -324,7 +354,8 @@ export class Membership {
   // guest: this is a guest link (see drive/guests.js): access only while
   // the owner is online.
   createInvite (identity, role, { expiresAt = null, once = false, ask = false, relays = [], until = null, after = 'keep', guest = false } = {}) {
-    if (identity.userId !== this.state.owner) throw new Error('Only the owner can invite people.')
+    if (!this.mayManage(identity.userId)) throw new Error('Only the owner and people who can share can invite people.')
+    if (role === 'manager' && identity.userId !== this.state.owner) throw new Error('Only the owner can let people share.')
     const body = {
       d: this.docId,
       r: GIVEN_ROLES.includes(role) ? role : 'editor',
