@@ -734,6 +734,11 @@ kbd { font: 11px var(--mono); border: 1px solid var(--rule); border-bottom-width
 /* ---- your computers ------------------------------------------------------ */
 .computers h3 { font: 500 15px/1.3 var(--serif); margin: 16px 0 6px; }
 .computer-actions { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+.protection { border: 1px solid var(--rule); border-radius: 8px; padding: 10px 14px; margin: 0 0 14px; font-size: 13px; color: var(--ink-soft); }
+.protection p { margin: 0 0 6px; }
+.protection strong { color: var(--ink); font-weight: 600; }
+.protection-on { border-color: color-mix(in srgb, var(--live) 40%, var(--rule)); }
+.protection-removed { border-color: color-mix(in srgb, var(--danger) 45%, var(--rule)); }
 .local-relay { margin: 2px 0 6px 26px; }
 .local-relay-address { display: flex; align-items: center; gap: 10px; margin: 4px 0; }
 .network-bootstrap { width: 100%; box-sizing: border-box; font: 13px var(--mono); border: 1px solid var(--rule); border-radius: 6px; padding: 6px 8px; background: var(--paper); color: var(--ink); resize: vertical; margin: 4px 0 8px; }

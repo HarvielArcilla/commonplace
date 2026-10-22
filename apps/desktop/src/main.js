@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url'
 import * as Y from 'yjs'
 import * as awarenessProtocol from 'y-protocols/awareness'
 import DHT from 'hyperdht'
-import { Drive, sendDrive, receiveDrive, newMoveCode, Backups, readBackupFile, restoreBackup, fileKind, safeFileName, POLICY_FIELDS, POLICY_GROUPS, NetworkSettings } from '@commonplace/drive'
+import { Drive, sendDrive, receiveDrive, newMoveCode, Backups, readBackupFile, restoreBackup, normalizeRecoveryKey, fileKind, safeFileName, POLICY_FIELDS, POLICY_GROUPS, NetworkSettings } from '@commonplace/drive'
 import { docsApps } from '@commonplace/docs'
 import { sheetsApp } from '@commonplace/sheets'
 import { exportXlsx, importXlsx, exportCsv, importCsv } from '@commonplace/sheets/convert'
@@ -397,7 +397,22 @@ function registerIpc () {
   ipcMain.handle('relays:removeMine', (_e, key) => drive.removeMyRelay(key))
   ipcMain.handle('relays:add', (_e, docId, address) => drive.addRelay(docId, address))
   ipcMain.handle('relays:remove', (_e, docId, key) => drive.removeRelay(docId, key))
-  ipcMain.handle('devices:unlink', (_e, id) => drive.unlinkDevice(id))
+  ipcMain.handle('devices:unlink', (_e, id) => drive.removeComputer(id))
+  // Protection (per-computer keys): see drive/parts/computers.js.
+  ipcMain.handle('protection:get', () => ({ ...drive.protection(), backup: backups.status().on }))
+  ipcMain.handle('protection:on', (_e, recoveryKey) => {
+    const key = normalizeRecoveryKey(recoveryKey)
+    if (!key || !backups.matches(key)) throw new Error('That isn’t the recovery key of your backup. Check it and try again.')
+    const r = drive.protect(key)
+    backups.refresh() // the backup now carries the sealed account key
+    return r
+  })
+  ipcMain.handle('protection:recover', (_e, recoveryKey) => {
+    const key = normalizeRecoveryKey(recoveryKey)
+    if (!key) throw new Error('A recovery key is 25 letters and numbers.')
+    return drive.recover(key)
+  })
+  ipcMain.handle('drive:signOut', async () => { await signOutAndWipe(); return true })
   ipcMain.handle('move:receive', async (_e, code) => {
     if (!drive.isEmpty) throw new Error('This computer already has files. A Drive can only be moved to a computer with an empty Drive.')
     const result = await receiveDrive({
@@ -617,6 +632,9 @@ async function startDrive () {
     pendingNotice = 'This computer was unlinked from your Drive on another computer, so its copy was deleted.'
     signOutAndWipe().catch((err) => console.error('[commonplace]', err))
   })
+  // Another of my computers removed this one (protection on): say so, and
+  // let the person choose; never wipe on someone else's word.
+  drive.on('removed', () => send('drive:removed'))
   drive.on('changed', () => send('drive:changed', drive.list(), drive.me(), drive.listFolders(), drive.activity.unread()))
   // Mentions, replies and comments on my files: a notification, unless I'm
   // looking at that very file.

@@ -102,6 +102,8 @@ For the last two, you choose what happens to their copy when access ends (or, fo
 
 Use the same Drive on several computers: **Link another computer** in your profile keeps them in sync. Or move your Drive to a new computer.
 
+**If a computer is lost or stolen.** Make a backup (Settings → Recovery) and let its recovery key protect your account: the key that is you gets locked away, and each computer gets a key of its own. Removing the lost computer (Settings → Your computers) then cuts it off for real: nobody accepts what it signs any more, and your files move to new keys it never gets.
+
 **Recovery.** Make a backup in your profile and you get a recovery key. If you lose your computer, a new one plus the backup file and the key becomes you again, with your files. The backup stays up to date once a day.
 
 ## How it works

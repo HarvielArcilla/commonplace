@@ -1,7 +1,7 @@
 // Window entry point: wires commonDrive and commonDocs to the background process.
 // Bundled by build.mjs into renderer/dist/app.js.
 
-import { $, el, ago, toast, confirmAction, cleanError } from './ui.js'
+import { $, el, toast, confirmAction, cleanError } from './ui.js'
 import { state, cp } from './state.js'
 import { initDrive, renderDrive } from './drive-view.js'
 import { initDocView, openDocument, renderDocMargin } from './doc-view.js'
@@ -11,6 +11,7 @@ import { renderRecovery, restoreDialog } from './recovery-view.js'
 import { openActivity, showActivityCount } from './activity-view.js'
 import { showThread } from './comments-view.js'
 import { showShortcuts } from './shortcuts.js'
+import { renderComputers, watchRemoval } from './computers-view.js'
 import { setTheme } from './theme.js'
 
 const COLORS = ['#b4532a', '#2f6f5e', '#4a5aa8', '#8a4f8c', '#a2741b', '#2d6f8f', '#9b3d4f', '#55703a']
@@ -147,22 +148,15 @@ function showSettingsPage (key) {
 // Anything can open a settings page: dispatch 'commonplace:settings' { page }.
 window.addEventListener('commonplace:settings', (e) => openProfileDialog(e.detail?.page || null))
 
+const PAGE_RENDER = { computers: renderComputers, recovery: renderRecovery, relays: () => { renderMyRelays(); renderLocalRelay() }, network: renderNetwork, storage: renderStorage, limits: renderLimits }
 $('#open-shortcuts').addEventListener('click', () => showShortcuts())
 $('#settings-nav').addEventListener('click', (e) => {
   const b = e.target.closest('button[data-page]')
   if (!b) return
   showSettingsPage(b.dataset.page)
+  PAGE_RENDER[b.dataset.page]?.() // each page shows what's true now
   if (b.dataset.anchor) document.getElementById(`limits-${b.dataset.anchor}`)?.scrollIntoView({ block: 'start' })
 })
-
-async function renderComputers () {
-  const devices = await cp.listDevices()
-  $('#profile-devices').replaceChildren(...devices.map((dv) => el('li', { class: 'person' },
-    el('span', { class: `presence-dot${dv.online ? ' on' : ''}`, 'aria-hidden': 'true' }),
-    el('span', { class: 'person-name' }, dv.name,
-      el('span', { class: 'person-note' }, dv.thisComputer ? 'This computer' : dv.online ? 'Online now' : `Last seen ${ago(dv.lastSeenAt)}`)),
-    dv.thisComputer ? null : el('button', { type: 'button', class: 'btn btn-quiet btn-danger', onclick: () => unlink(dv) }, 'Unlink'))))
-}
 
 window.addEventListener('commonplace:relays', () => renderMyRelays())
 
@@ -183,16 +177,6 @@ $('#profile-relay-add').addEventListener('click', async () => {
     renderMyRelays()
   } catch (err) { toast(cleanError(err)) }
 })
-
-async function unlink (dv) {
-  const ok = await confirmAction({
-    title: `Unlink ${dv.name}?`,
-    body: `${dv.name} will sign out and delete its copy of your Drive the next time it connects. Your files stay on this computer and with your collaborators. If that computer was lost or stolen, also remove yourself from files that matter, since it has your identity until it connects.`,
-    confirm: 'Unlink'
-  })
-  if (!ok) return
-  try { await cp.unlinkDevice(dv.id); toast(`${dv.name} will sign out when it next connects`); renderComputers() } catch (err) { toast(cleanError(err)) }
-}
 
 $('#profile-form').addEventListener('submit', async (e) => {
   e.preventDefault()
@@ -257,6 +241,7 @@ cp.onUpdates(showUpdate)
 cp.updateState().then(showUpdate)
 cp.getPolicy().then((p) => { state.trashDays = p.values.trashDays }).catch(() => {})
 cp.getSettings().then((x) => setTheme(x.theme)).catch(() => {})
+watchRemoval()
 
 // ---- boot ----------------------------------------------------------------------
 

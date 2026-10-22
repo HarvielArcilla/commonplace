@@ -28,18 +28,25 @@ async function makeBackup () {
   try { made = await cp.createBackup() } catch (err) { toast(cleanError(err)); return }
   if (!made) return
   renderRecovery()
-  await showRecoveryKey(made.recoveryKey)
+  const p = await cp.protection()
+  const res = await showRecoveryKey(made.recoveryKey, { offerProtection: p.canTurnOn })
+  if (res?.data?.protect) {
+    try { await cp.turnOnProtection(made.recoveryKey); toast('Your account is protected by this key') } catch (err) { toast(cleanError(err)) }
+  }
 }
 
 // Shown once. The key is never stored anywhere, so it can't be shown again.
-async function showRecoveryKey (key) {
+// offerProtection: also offer to protect the account with it (per-computer
+// keys; see Your computers).
+async function showRecoveryKey (key, { offerProtection = false } = {}) {
   const copy = el('button', { type: 'button', class: 'btn', onclick: async () => { await cp.copyText(key); toast('Recovery key copied') } }, 'Copy')
-  await dialog({
+  return dialog({
     title: 'Your recovery key',
     body: 'Write this down, or keep it in a password manager. To restore, you need it and the backup file. This is the only time it’s shown: commonplace doesn’t keep it.',
     fields: [
       el('div', { class: 'move-code-row' }, el('code', { class: 'move-code recovery-key' }, key), copy),
       el('p', { class: 'fineprint-plain' }, 'Anyone with both the file and this key can become you. Keep them in different places.'),
+      offerProtection ? el('label', { class: 'check' }, el('input', { type: 'checkbox', name: 'protect', checked: true }), 'Also protect my account with it, so a lost computer can be removed for real') : null,
       el('label', { class: 'check' }, el('input', { type: 'checkbox', name: 'saved' }), 'I’ve saved my recovery key')
     ],
     confirm: 'Done',

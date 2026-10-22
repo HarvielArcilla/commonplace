@@ -134,6 +134,13 @@ export class Backups extends EventEmitter {
     this._save({ path: file, userId: this.drive.identity.userId, salt: salt.toString('hex'), key: key.toString('hex'), lastAt: 0, error: null })
   }
 
+  // Whether `recoveryKey` is the one this backup was made with.
+  matches (recoveryKey) {
+    const s = this.settings
+    if (!s) return false
+    try { return crypto.timingSafeEqual(deriveKey(recoveryKey, Buffer.from(s.salt, 'hex')), Buffer.from(s.key, 'hex')) } catch { return false }
+  }
+
   // Writes the backup again now (same file, same recovery key).
   refresh () {
     const s = this.settings
