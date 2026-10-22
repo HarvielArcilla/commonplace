@@ -12,9 +12,9 @@ import path from 'node:path'
 import { randomBytes } from 'node:crypto'
 import * as Y from 'yjs'
 import {
-  FileStore, SyncEngine, SwarmTransport, LanTransport, RelayClient, formatRelayAddress, parseRelayAddress, loadOrCreateIdentity, canEdit,
+  FileStore, SyncEngine, SwarmTransport, LanTransport, RelayClient, formatRelayAddress, loadOrCreateIdentity, canEdit,
   newDocSecret, deriveDocKeys, encodeInvite, parseInvite, initContainer, readMeta, updatePerson,
-  findConflicts, conflictId, docFrom, History, restoreContent, BlobStore
+  History, restoreContent, BlobStore
 } from '@commonplace/core'
 import { Files, filesApp } from './files.js'
 import { Policy } from './policy.js'
@@ -24,14 +24,16 @@ import { openThreadCount } from '@commonplace/core/threads'
 import { Activity } from './activity.js'
 import { Templates } from './templates.js'
 import { NetworkSettings } from './network.js'
+import { Access } from './parts/access.js'
+import { Conflicts, openConflicts } from './parts/conflicts.js'
+import { Folders } from './parts/folders.js'
+import { Limits } from './parts/limits.js'
+import { Relays, RELAYS_MAP } from './parts/relays.js'
+import { VersionHistory } from './parts/history.js'
 
 // How long a guest waits for the owner before treating them as offline.
 const GUEST_GRACE_MS = 60e3
 const guestOf = (token) => (token?.g ? { after: token.a === 'hide' ? 'hide' : 'keep' } : null)
-
-// Relays used to be called helpers; files and Drives made then keep their
-// relay list under this name, so it stays.
-const RELAYS_MAP = 'helpers'
 
 export { sendDrive, receiveDrive, newMoveCode, parseMoveCode } from './move.js'
 export { Backups, readBackupFile, restoreBackup, newRecoveryKey, normalizeRecoveryKey } from './backup.js'
@@ -455,245 +457,6 @@ export class Drive extends EventEmitter {
     return encodeInvite(Buffer.from(entry.secret, 'base64'), this.engine.createInvite(docId, role, { expiresAt, once, ask, relays, ...ends }))
   }
 
-  // ---- always-on relays ------------------------------------------------------
-
-  myRelays () {
-    return [...this.myRelaysMap.keys()].map((key) => ({ key, address: formatRelayAddress(key), ...(this.relays?.status(this.indexId).find((h) => h.key === key) || {}) }))
-  }
-
-  // Adds a relay for my computers' Drive and for new files. `everywhere`
-  // also adds it to every file I own now.
-  addMyRelay (address, { everywhere = false } = {}) {
-    const key = parseRelayAddress(address)
-    if (!key) throw new Error('That isn\u2019t a relay address. It starts with cpr1.')
-    this.myRelaysMap.set(key, { addedAt: Date.now() })
-    if (everywhere) for (const f of this.list()) if (f.role === 'owner') this.addRelay(f.docId, address)
-    return key
-  }
-
-  removeMyRelay (key) {
-    this.myRelaysMap.delete(key)
-  }
-
-  // Relays for one file are part of the file, so everyone working on it
-  // uses them.
-  addRelay (docId, address) {
-    const key = parseRelayAddress(address)
-    if (!key) throw new Error('That isn\u2019t a relay address. It starts with cpr1.')
-    const doc = this.engine.getDoc(docId)
-    if (!doc || !canEdit(this.engine.access(docId)?.role)) throw new Error('Only people who can edit can add a relay.')
-    doc.ydoc.transact(() => doc.ydoc.getMap(RELAYS_MAP).set(key, { addedBy: this.identity.userId, at: Date.now() }), 'local')
-    return key
-  }
-
-  removeRelay (docId, key) {
-    const doc = this.engine.getDoc(docId)
-    if (!doc || !canEdit(this.engine.access(docId)?.role)) throw new Error('Only people who can edit can remove a relay.')
-    doc.ydoc.transact(() => doc.ydoc.getMap(RELAYS_MAP).delete(key), 'local')
-  }
-
-  approveRequest (docId, userId, role) { this.engine.approveRequest(docId, userId, role) }
-  declineRequest (docId, userId) { this.engine.declineRequest(docId, userId) }
-
-  // ---- conflicts -------------------------------------------------------------
-
-  // Open conflicts with both versions and what the merge currently shows.
-  conflicts (docId) {
-    const doc = this.engine.getDoc(docId)
-    const entry = this.files.get(docId)
-    const app = entry && this.appsByType.get(entry.type)
-    if (!doc || !app?.units) return []
-    const now = app.units(doc.ydoc)
-    const people = doc.ydoc.getMap('people')
-    return openConflicts(doc.ydoc).map((c) => ({
-      ...c,
-      versions: c.versions.map(({ snapshot, ...v }) => ({ ...v, name: v.userId === this.identity.userId ? this.identity.name : (people.get(v.userId)?.name || v.name || 'Someone') })),
-      current: now.get(c.unit) ? { exists: true, text: now.get(c.unit).text } : { exists: false, text: '' }
-    }))
-  }
-
-  // Only the owner decides conflicts. The decision is an ordinary edit, so it
-  // reaches everyone like any other change.
-  resolveConflict (docId, id, choice) {
-    const doc = this.engine.getDoc(docId)
-    const entry = this.files.get(docId)
-    const app = entry && this.appsByType.get(entry.type)
-    if (!doc || !app?.resolve) throw new Error('No such file.')
-    if (doc.members.exists && doc.members.owner !== this.identity.userId) throw new Error('Only the owner can decide conflicts.')
-    const map = doc.ydoc.getMap('conflicts')
-    const rec = map.get(id)
-    if (!rec || rec.status !== 'open') return
-    doc.ydoc.transact(() => {
-      this._signLocalEdits(doc)
-      app.resolve(doc.ydoc, rec, choice)
-      map.set(id, { ...rec, status: 'resolved', choice, resolvedBy: this.identity.userId, resolvedAt: Date.now() })
-    }, 'local')
-    this._patch(docId, { lastEditedAt: Date.now(), contributed: true })
-    this._changed()
-  }
-
-  // ---- version history -------------------------------------------------------
-
-  versions (docId) {
-    const doc = this.engine.getDoc(docId)
-    if (!doc) return []
-    const people = doc.ydoc.getMap('people')
-    const nameOf = (userId) => (userId === this.identity.userId ? this.identity.name : people.get(userId)?.name || this.files.get(docId)?.names?.[userId] || 'Someone')
-    return this.history.list(docId).reverse().map((v) => ({ ...v, names: v.by.map(nameOf) }))
-  }
-
-  // The file as it was at a version (a Yjs update the window can show).
-  version (docId, id) {
-    return this.history.load(docId, id)
-  }
-
-  nameVersion (docId, id, label) {
-    this.history.name(docId, id, label)
-    this._changed()
-  }
-
-  // Saves a checkpoint now if anything changed since the last one.
-  checkpoint (docId, opts = {}) {
-    const pending = this._checkpoints.get(docId)
-    if (pending) { clearTimeout(pending.timer); this._checkpoints.delete(docId) }
-    const doc = this.engine.getDoc(docId)
-    if (!doc || !this.files.get(docId)?.type) return null
-    const authors = doc.ydoc.getMap('authors')
-    return this.history.record(docId, doc.ydoc, { ...opts, authorOf: (client) => authors.get(String(client))?.userId || null })
-  }
-
-  // Puts the file back to an earlier version. That is an ordinary edit, so it
-  // reaches everyone, and the version it replaced stays in the history.
-  restoreVersion (docId, id) {
-    const doc = this.engine.getDoc(docId)
-    const entry = this.files.get(docId)
-    const app = entry && this.appsByType.get(entry.type)
-    if (!doc || !app?.history) throw new Error('This file can\u2019t be restored.')
-    if (!canEdit(this.engine.access(docId)?.role)) throw new Error('Only people who can edit can restore a version.')
-    const target = this.history.list(docId).find((v) => v.id === id)
-    const past = this.history.load(docId, id)
-    if (!target || !past) throw new Error('That version is no longer here.')
-    this.checkpoint(docId)
-    doc.ydoc.transact(() => {
-      this._signLocalEdits(doc)
-      restoreContent(doc.ydoc, docFrom(past), app.history.roots)
-    }, 'local')
-    this._patch(docId, { contributed: true, lastEditedAt: Date.now() })
-    this.checkpoint(docId, { kind: 'restore', restoredFrom: target.at })
-    this._changed()
-  }
-
-  // Someone who had a file through a shared folder and is given a role by
-  // hand keeps it directly, whatever happens to the folder.
-  setMemberRole (docId, userId, role) {
-    const m = this.engine.membersDetailed(docId).find((x) => x.userId === userId)
-    if (m?.folder) this.engine.addMember(docId, { userId, role, enc: m.enc })
-    else this.engine.setRole(docId, userId, role)
-  }
-
-  // Someone who has a file through a shared folder they're still in would
-  // only get it back: say so instead.
-  // after: 'keep' (their copy stays, read-only) or 'hide' (their computer deletes it).
-  removeMember (docId, userId, { after } = {}) {
-    this._refuseIfFromFolder(docId, userId)
-    this.engine.removeMember(docId, userId, { after })
-  }
-
-  _refuseIfFromFolder (docId, userId) {
-    const m = this.engine.membersDetailed(docId).find((x) => x.userId === userId)
-    const folder = m?.folder && this.shared.containers().get(docId)?.includes(m.folder) ? this.files.get(m.folder) : null
-    if (folder && this.engine.membersDetailed(folder.docId).some((x) => x.userId === userId)) {
-      throw new Error(`They have this through the shared folder “${folder.title}”. Remove them from the folder, or move the file out of it.`)
-    }
-  }
-
-  // ---- when my own access ends ------------------------------------------------------
-
-  // The owner took me out, or my time ran out: stop, and keep a read-only
-  // copy or delete it, as the owner chose.
-  _checkMyAccess (docId) {
-    const entry = this.files.get(docId)
-    const doc = this.engine.getDoc(docId)
-    if (!entry || !doc?.members.exists) return
-    const removal = doc.members.removal(this.identity.userId)
-    if (removal && !doc.members.member(this.identity.userId)) this._accessEnded(docId, removal.after)
-    else if (entry.ended && doc.myAccess) this._patch(docId, { ended: null }) // given back
-  }
-
-  _accessEnded (docId, after = 'keep') {
-    const entry = this.files.get(docId)
-    if (!entry || entry.ended) return
-    if (this._ownerOf(docId) === this.identity.userId) return
-    this._patch(docId, { ended: { at: Date.now(), after: after === 'hide' ? 'hide' : 'keep' } })
-    if (after === 'hide') this._wipe(docId)
-    this.emit('access-ended', docId, after)
-    this._changed()
-  }
-
-  // Deletes this computer's copy of a file's contents, keeping its place in
-  // the Drive (so it can say what happened, and be removed).
-  _wipe (docId) {
-    this.relays?.setRelays(docId, [])
-    this.uploads.unwatch(docId)
-    this.engine.closeDoc(docId, { deleteLocalData: true })
-    this._attached.delete(docId)
-    this._leaveTopics(docId)
-    this._changed()
-  }
-
-  // ---- as a guest: only while the owner is online -------------------------------------
-
-  _watchGuestHost (status) {
-    const entry = status && this.files.get(status.docId)
-    if (!entry?.guest) return
-    const ownerId = this._ownerOf(status.docId)
-    if (status.peers.some((p) => p.userId === ownerId)) {
-      this._hostSeen.set(status.docId, Date.now())
-      if (entry.guestAway) this._patch(status.docId, { guestAway: false })
-    }
-  }
-
-  // A guest's copy with 'hide' is deleted once the owner has been gone a
-  // minute (it comes back when they are online again); with 'keep' it just
-  // can't be edited meanwhile.
-  _checkGuestHosts (now = Date.now()) {
-    for (const entry of this.files.values()) {
-      if (!entry.guest || entry.ended) continue
-      const ownerId = this._ownerOf(entry.docId)
-      if ((this.engine.status(entry.docId)?.peers || []).some((p) => p.userId === ownerId)) {
-        this._hostSeen.set(entry.docId, now)
-        if (entry.guestAway) this._patch(entry.docId, { guestAway: false })
-        continue
-      }
-      const seen = this._hostSeen.get(entry.docId) || 0
-      if (now - seen < this.guestGraceMs) continue
-      if (!entry.guestAway) this._patch(entry.docId, { guestAway: true })
-      const doc = this.engine.getDoc(entry.docId)
-      const hasContent = doc && doc.ydoc.store.clients.size > 0
-      if (entry.guest.after === 'hide' && hasContent) {
-        this._wipe(entry.docId)
-        this._attach(this.files.get(entry.docId))
-      }
-    }
-  }
-
-  // Guests are served by the owner, so they end when ownership moves.
-  transferOwnership (docId, userId) {
-    this.engine.transferOwnership(docId, userId)
-    this.guests.endAllFor(docId)
-  }
-
-  // When someone's access ends (until: ms, or null for never) and what their
-  // computer does with its copy then. Not for access a shared folder gives:
-  // the folder would only give it back.
-  setMemberAccess (docId, userId, { until = null, after = 'keep' } = {}) {
-    this._refuseIfFromFolder(docId, userId)
-    if (until != null && !(until > Date.now())) throw new Error('Choose a time later than now, or remove them instead.')
-    this.engine.setMemberAccess(docId, userId, { until, after })
-  }
-
-  resetInvites (docId) { this.engine.resetInvites(docId) }
-
   // 'always': sync whenever commonplace is running (default).
   // 'open': sync only while the file is open in a window.
   setSyncMode (docId, mode) {
@@ -782,156 +545,6 @@ export class Drive extends EventEmitter {
   async emptyTrash ({ olderThan = 0 } = {}) {
     const cutoff = Date.now() - olderThan
     for (const e of [...this.files.values()]) if (e.trashedAt && e.trashedAt <= cutoff) await this.remove(e.docId)
-  }
-
-  // The shared folder of mine that lists a file, if any.
-  _inMyFolders (docId) {
-    for (const f of this.shared.folders()) if (this.shared.items(f.docId).has(docId)) return f.docId
-    return null
-  }
-
-  // Files I removed from a shared folder, and bringing them back.
-  removedFrom (folderId) {
-    return [...this.dismissed.entries()].filter(([, d]) => d?.folderId === folderId).map(([docId]) => docId)
-  }
-
-  restoreRemoved (folderId) {
-    for (const docId of this.removedFrom(folderId)) this.dismissed.delete(docId)
-    this.shared.soon()
-  }
-
-  // Before a shared folder leaves my Drive: what I own comes out of it (to
-  // where the folder was), so it stops being shared through a folder I can
-  // no longer see.
-  _leaveFolder (folderId) {
-    const where = this.files.get(folderId)?.folderId
-    const canChange = ['owner', 'editor'].includes(this.engine.access(folderId)?.role)
-    for (const [childId] of this.shared.items(folderId)) {
-      const child = this.files.get(childId)
-      if (!child) continue
-      if (canChange && this.engine.access(childId)?.owner === this.identity.userId) this.shared.remove(folderId, childId)
-      this._patch(childId, { folderId: this.folders.has(where) ? where : null, viaFolder: child.viaFolder === folderId ? null : child.viaFolder })
-    }
-    for (const e of this.files.values()) if (e.folderId === folderId) this._patch(e.docId, { folderId: this.folders.has(where) ? where : null })
-  }
-
-  // Someone else's file, found in a shared folder of mine: join it with its
-  // secret alone. Its owner adds me to it; until then nothing arrives.
-  _joinFromFolder (docId, item, folderId) {
-    // Files from people you've blocked, and more files in a day than your
-    // limit, arrive paused: listed, but nothing syncs until you say so.
-    const mine = item.owner === this.identity.userId
-    const blocked = !mine && this.policy.isBlocked(item.owner)
-    const many = !mine && !blocked && !this.policy.allowJoin(folderId)
-    this.files.set(docId, {
-      ...(blocked || many ? { held: true, heldReason: blocked ? 'blocked' : 'many', heldBytes: 0 } : {}),
-      docId,
-      secret: item.secret,
-      invite: null,
-      type: null,
-      title: item.title || 'Waiting for a peer…',
-      owner: { userId: item.owner, name: item.ownerName },
-      folderId: null,
-      viaFolder: folderId,
-      addedAt: Date.now()
-    })
-    this._attach(this.files.get(docId))
-    if (item.owner !== this.identity.userId) this.activity.shared(docId, folderId, { userId: item.owner, name: item.ownerName })
-  }
-
-  // ---- folders -------------------------------------------------------------
-
-  createFolder (name, parentId = null) {
-    const id = randomBytes(8).toString('hex')
-    this.folders.set(id, { id, name: cleanName(name) || 'Untitled folder', parentId: this.folders.has(parentId) ? parentId : null, createdAt: Date.now() })
-    this._changed()
-    return id
-  }
-
-  renameFolder (id, name) {
-    if (this.shared.isFolder(id)) { if (cleanName(name)) this.rename(id, cleanName(name)); return }
-    const f = this.folders.get(id)
-    if (f && cleanName(name)) { this.folders.set(id, { ...f, name: cleanName(name) }); this._changed() }
-  }
-
-  // Deleting a folder never deletes files: its contents move up one level.
-  deleteFolder (id) {
-    if (this.shared.isFolder(id)) return this.remove(id)
-    const f = this.folders.get(id)
-    if (!f) return
-    const parent = this.folders.has(f.parentId) ? f.parentId : null
-    this.index.transact(() => {
-      for (const entry of this.files.values()) if (entry.folderId === id) this.files.set(entry.docId, { ...entry, folderId: parent })
-      for (const sub of this.folders.values()) if (sub.parentId === id) this.folders.set(sub.id, { ...sub, parentId: parent })
-      this.folders.delete(id)
-    })
-    this._changed()
-  }
-
-  // Moves a file (or a shared folder) into one of my folders, a shared
-  // folder, or the top. Into a shared folder means sharing it with everyone
-  // there; out of one means they lose what they had only through it.
-  // Returns { localOnly } when it's in a shared folder for me only.
-  moveFile (docId, folderId) {
-    const entry = this.files.get(docId)
-    if (!entry) return {}
-    const containers = this.shared.containers()
-    const from = this.shared.placeOf(docId, containers)
-    if (from === folderId) return {}
-    const toShared = folderId && this.shared.isFolder(folderId)
-    if (from && this.shared.isFolder(from) && (containers.get(docId) || []).includes(from)) this.shared.remove(from, docId)
-    if (toShared) {
-      try {
-        this.shared.add(folderId, docId)
-        this._patch(docId, { folderId: null })
-      } catch (err) {
-        if (!err.localOnly) throw err
-        this._patch(docId, { folderId })
-        return { localOnly: true, message: err.message }
-      }
-    } else {
-      this._patch(docId, { folderId: this.folders.has(folderId) ? folderId : null })
-    }
-    this._changed()
-    return {}
-  }
-
-  // A new shared folder, empty, with me as its owner.
-  async createSharedFolder (name, parentId = null) {
-    return this.create('folder', cleanName(name) || 'Shared folder', { folderId: parentId })
-  }
-
-  // Turns one of my folders into a shared folder, with its subfolders.
-  // What I own goes in it for everyone; files others own stay in it for me.
-  async shareFolder (id) {
-    const f = this.folders.get(id)
-    if (!f) throw new Error('No such folder.')
-    const docId = await this.create('folder', f.name, { folderId: this.folders.has(f.parentId) ? f.parentId : null })
-    for (const sub of [...this.folders.values()].filter((x) => x.parentId === id)) {
-      const subId = await this.shareFolder(sub.id)
-      this.moveFile(subId, docId)
-    }
-    for (const entry of [...this.files.values()].filter((e) => e.folderId === id)) this.moveFile(entry.docId, docId)
-    this.folders.delete(id)
-    this._changed()
-    return docId
-  }
-
-  moveFolder (id, parentId) {
-    if (this.shared.isFolder(id)) {
-      for (let p = parentId; p; p = this.shared.isFolder(p) ? this.shared.placeOf(p) : this.folders.get(p)?.parentId) if (p === id) return false
-      this.moveFile(id, parentId)
-      return true
-    }
-    if (parentId && this.shared.isFolder(parentId)) throw new Error('Share this folder first: only shared folders go inside a shared folder.')
-    const f = this.folders.get(id)
-    if (!f) return false
-    const target = this.folders.has(parentId) ? parentId : null
-    // Refuse to move a folder into itself or one of its own subfolders.
-    for (let p = target; p; p = this.folders.get(p)?.parentId) if (p === id) return false
-    this.folders.set(id, { ...f, parentId: target })
-    this._changed()
-    return true
   }
 
   getDoc (docId) {
@@ -1046,64 +659,10 @@ export class Drive extends EventEmitter {
     if (changed) this._patch(status.docId, { names })
   }
 
-  _recordConflicts ({ docId, peer, base, mine, theirs }) {
-    const doc = this.engine.getDoc(docId)
-    const entry = this.files.get(docId)
-    const app = entry && this.appsByType.get(entry.type)
-    if (!doc || !app?.units) return
-    let found
-    try {
-      found = findConflicts({ base: docFrom(base), mine: docFrom(mine), theirs: docFrom(theirs), units: app.units })
-    } catch (err) {
-      this.emit('error', err)
-      return
-    }
-    if (!found.length) return
-    const map = doc.ydoc.getMap('conflicts')
-    const version = (u, who) => ({
-      userId: who.userId,
-      name: who.name,
-      exists: Boolean(u),
-      text: u ? u.text : '',
-      snapshot: !u ? null : app.snapshotUnit ? app.snapshotUnit(u) : (u.el && app.snapshotBlock ? app.snapshotBlock(u.el) : null)
-    })
-    doc.ydoc.transact(() => {
-      for (const c of found) {
-        const id = conflictId(c.key, [c.mine?.sig, c.theirs?.sig])
-        if (map.has(id)) continue
-        const versions = [
-          version(c.mine, { userId: this.identity.userId, name: this.identity.name }),
-          version(c.theirs, peer)
-        ].sort((a, b) => a.userId.localeCompare(b.userId))
-        map.set(id, {
-          id,
-          kind: c.base.kind,
-          unit: c.key,
-          prev: c.base.prev,
-          index: c.base.index ?? null,
-          base: { text: c.base.text },
-          versions,
-          at: Date.now(),
-          status: 'open'
-        })
-      }
-    }, 'local')
-    this._changed()
-  }
-
   // Edits Drive makes itself (restores, conflict decisions) are mine too.
   _signLocalEdits (doc) {
     const authors = doc.ydoc.getMap('authors')
     if (!authors.has(String(doc.ydoc.clientID))) authors.set(String(doc.ydoc.clientID), { userId: this.identity.userId })
-  }
-
-  _scheduleCheckpoint (docId) {
-    const t = this._checkpoints.get(docId) || { first: Date.now(), timer: null }
-    clearTimeout(t.timer)
-    const { idleMs, maxMs } = this.historyTiming
-    t.timer = setTimeout(() => this.checkpoint(docId), Math.max(0, Math.min(idleMs, t.first + maxMs - Date.now())))
-    t.timer.unref?.()
-    this._checkpoints.set(docId, t)
   }
 
   _remoteChange (docId, update) {
@@ -1176,120 +735,9 @@ export class Drive extends EventEmitter {
     this._applyRelays(entry.docId)
   }
 
-  // Tells the relay client which relays a file (or my index) uses.
-  _applyRelays (docId) {
-    if (this.files.get(docId)?.guest) { this.relays?.setRelays(docId, []); return } // guests sync only with the owner
-    if (!this.relays) return
-    if (docId === this.indexId) { this.relays.setRelays(docId, [...this.myRelaysMap.keys()]); return }
-    const entry = this.files.get(docId)
-    const doc = this.engine.getDoc(docId)
-    if (!entry || !doc) return
-    const keys = new Set([...doc.ydoc.getMap(RELAYS_MAP).keys(), ...(entry.inviteRelays || entry.inviteHelpers || [])])
-    this.relays.setRelays(docId, this._shouldSync(entry) ? [...keys] : [])
-  }
-
   _shouldSync (entry) {
     if (entry.held) return false
     return entry.syncMode !== 'open' || this._open.has(entry.docId)
-  }
-
-  // ---- protecting the disk ----------------------------------------------------------
-
-  // A file stops syncing (until I say to keep going) when changes from
-  // others would hurt this computer:
-  //   'size'  someone else's file grew past my limit for one file;
-  //   'own'   my own file grew past my (higher) limit through others' edits;
-  //   'total' all the files others made, together, passed my limit;
-  //   'space' the disk got down to the free space I keep.
-  // Others: 'many' (a shared folder brought too many files today) and
-  // 'blocked' (from someone I've blocked).
-  _guardSoon (docId) {
-    this._guardTimers = this._guardTimers || new Map()
-    if (this._guardTimers.has(docId)) return
-    this._guardTimers.set(docId, setTimeout(() => { this._guardTimers.delete(docId); this._guard(docId) }, 2000))
-  }
-
-  _guard (docId) {
-    const entry = this.files.get(docId)
-    if (!entry || entry.held) return
-    const p = this.policy
-    const mine = this._ownerOf(docId) === this.identity.userId
-    const bytes = this.store.sizeOf(docId)
-    const allowed = entry.allowBytes || 0
-    let reason = null
-    if (this.uploads.freeBytes() < p.get('keepFreeBytes')) reason = 'space'
-    else if (bytes > Math.max(p.get(mine ? 'ownDocGuardBytes' : 'docGuardBytes'), allowed)) reason = mine ? 'own' : 'size'
-    else if (!mine && bytes > allowed && this._othersBytes() > p.get('othersDocsBytes')) reason = 'total'
-    if (reason) this._hold(docId, reason, bytes)
-  }
-
-  _hold (docId, reason, bytes = this.store.sizeOf(docId)) {
-    this._patch(docId, { held: true, heldReason: reason, heldBytes: bytes })
-    this._applyActive(docId)
-    this.emit('held', docId, bytes, reason)
-  }
-
-  _ownerOf (docId) {
-    return this.engine.access(docId)?.owner || this.files.get(docId)?.owner?.userId || null
-  }
-
-  // Bytes of every document others made, together.
-  _othersBytes () {
-    let n = 0
-    for (const entry of this.files.values()) if (this._ownerOf(entry.docId) !== this.identity.userId) n += this.store.sizeOf(entry.docId)
-    return n
-  }
-
-  // Keep syncing a paused file. A size limit then lets it double before
-  // asking again.
-  keepSyncing (docId) {
-    const entry = this.files.get(docId)
-    if (!entry?.held) return
-    const owner = this._ownerOf(docId)
-    if (owner && this.policy.isBlocked(owner)) throw new Error('You’ve blocked the person who made this file. Unblock them in Settings first.')
-    const grows = ['size', 'own', 'total', 'space'].includes(entry.heldReason || 'size')
-    this._patch(docId, { held: false, heldReason: null, allowBytes: grows ? Math.max(entry.allowBytes || 0, (entry.heldBytes || 0) * 2) : entry.allowBytes || 0 })
-    this._applyActive(docId)
-  }
-
-  // Everything a shared folder brought paused today, in one go.
-  keepSyncingFolder (folderId) {
-    for (const entry of [...this.files.values()]) if (entry.held && entry.heldReason === 'many' && entry.viaFolder === folderId) this.keepSyncing(entry.docId)
-  }
-
-  // ---- limits and blocking ------------------------------------------------------------
-
-  policySettings () { return { values: this.policy.all(), defaults: this.policy.defaults, blocked: this.policy.blocked } }
-
-  setPolicy (patch) {
-    this.policy.set(patch || {})
-    this._changed()
-    return this.policySettings()
-  }
-
-  resetPolicy () {
-    this.policy.reset()
-    this._changed()
-    return this.policySettings()
-  }
-
-  // Ignore someone everywhere: their files pause, their uploads never
-  // download, and this computer stops exchanging anything with them.
-  block (userId, name) {
-    if (userId === this.identity.userId) throw new Error('You can’t block yourself.')
-    this.policy.block({ userId, name })
-    for (const entry of [...this.files.values()]) if (!entry.held && this._ownerOf(entry.docId) === userId) this._hold(entry.docId, 'blocked')
-    this.engine.recheckUser(userId)
-    this.uploads.decideAll()
-    this._changed()
-  }
-
-  unblock (userId) {
-    this.policy.unblock(userId)
-    for (const entry of [...this.files.values()]) if (entry.held && entry.heldReason === 'blocked' && this._ownerOf(entry.docId) === userId) this.keepSyncing(entry.docId)
-    this.engine.recheckUser(userId)
-    this.uploads.decideAll()
-    this._changed()
   }
 
   // ---- uploads ---------------------------------------------------------------------
@@ -1375,8 +823,14 @@ export class Drive extends EventEmitter {
   }
 }
 
-function openConflicts (ydoc) {
-  return [...ydoc.getMap('conflicts').values()].filter((c) => c?.status === 'open').sort((a, b) => a.at - b.at)
+// The Drive's methods are grouped by subject in ./parts. Each part is a class
+// whose methods become the Drive's own, so callers see one object.
+for (const part of [Access, Conflicts, Folders, Limits, Relays, VersionHistory]) {
+  for (const name of Object.getOwnPropertyNames(part.prototype)) {
+    if (name === 'constructor') continue
+    if (name in Drive.prototype) throw new Error(`Drive.${name} is defined twice`)
+    Object.defineProperty(Drive.prototype, name, Object.getOwnPropertyDescriptor(part.prototype, name))
+  }
 }
 
 // A stable id for this computer, kept outside the identity so linking or
@@ -1406,6 +860,3 @@ function safePreview (app, ydoc) {
   }
 }
 
-function cleanName (name) {
-  return String(name ?? '').replace(/\s+/g, ' ').trim().slice(0, 120)
-}

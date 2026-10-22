@@ -36,6 +36,10 @@
 
 All payloads are sealed with the file key. One connection carries many files.
 
+**Who may change what (`core/src/gate.js`).** One function decides whether to take an update from someone with a given role, used for peers and relay boxes alike: editors and the owner anything, respondents only new answers of their own, commenters only the comments, everyone else nothing. The window asks the same question through `can(file, 'edit' | 'comment')` in `renderer/state.js`.
+
+**The Drive (`drive/src/index.js`, `drive/src/parts/`).** One object that the app and the tests talk to. Its core (the file list, joining, creating, syncing topics) is in `index.js`; the rest is grouped by subject in `parts/` (access, conflicts, folders, limits, relays, version history), each a class whose methods become the Drive's own.
+
 **Discovery (`core/src/swarm.js`).** Each file's DHT topic is a hash of its secret. Files with no connected peers are re-looked-up every 15 seconds, so two people who open at almost the same moment still find each other. A peer that gains a key epoch after connecting (someone admitted after a removal) is greeted again on that epoch, so content starts right away.
 
 **Same network (`core/src/lan.js`).** Every few seconds each computer multicasts its connection key, a TCP port, a random nonce and, for each topic it's syncing, `HMAC(topic, nonce)`. A computer holding the same topic recognizes the tag; nobody else learns anything, and tags change with every announcement. The computer with the smaller key dials, over TCP, wrapped in Hyperswarm's secret-stream (Noise) with the announced key as the expected remote key. It uses the same key pair as the DHT transport, so the engine sees one peer either way.
