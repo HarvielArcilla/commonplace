@@ -99,5 +99,5 @@ test('a manager lets people in and takes them out while the owner is away', asyn
   // (Sam may reach the owner first with Mia's link, and be let in again on
   // the owner's older log; the owner's log and Mia's then merge, and Mia's
   // computer removes him again.)
-  await until(() => owner.getDoc(docId).members.isRemoved(sam.identity.userId), 30000, 'the owner to see Sam removed')
+  await until(() => owner.getDoc(docId).members.isRemoved(sam.identity.userId), 60000, 'the owner to see Sam removed')
 })

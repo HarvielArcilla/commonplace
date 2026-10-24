@@ -1345,3 +1345,17 @@ textarea.a-text { resize: vertical; }
   .cp-toc { background: none !important; border: 0 !important; padding: 0 !important; }
   .cp-toc li { color: inherit !important; }
 }
+
+/* ---- team drives -------------------------------------------------------------- */
+.crumb-drive-wrap { margin: 0; display: inline-flex; min-width: 0; }
+.crumb-drive { display: inline-flex; align-items: baseline; gap: 5px; }
+.crumb-drive.current { font-weight: 500; color: var(--ink); }
+.crumb-drive.current:hover { text-decoration: none; background: var(--select); }
+.crumb-caret { font-size: 11px; color: var(--ink-faint); }
+.drive-bar { display: flex; align-items: center; gap: 10px; padding: 10px 20px 10px calc(var(--margin-w) + 16px); color: var(--ink-soft); font: italic 13px var(--serif); border-bottom: 1px solid var(--rule); }
+.drive-bar .btn { font-style: normal; }
+.drive-bar .spacer { flex: 1; }
+.drive-bar-text { min-width: 0; }
+.servers { display: grid; gap: 14px; margin: 12px 0; }
+.server-card { border: 1px solid var(--rule); border-radius: 6px; padding: 12px 14px; }
+.server-name { display: flex; align-items: center; gap: 8px; margin: 0 0 2px; font: 500 16px var(--serif); }

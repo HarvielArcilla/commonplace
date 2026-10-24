@@ -16,6 +16,11 @@
 //     access directly keep it.
 //   - Shared folders can hold shared folders; access flows down the same way.
 //
+// A team drive (docs/TEAM-DRIVES.md) is a shared folder owned by a server,
+// marked `meta.drive = { host }`. For files anywhere inside one, the host
+// (a manager of each) does the adding and removing instead of the owners,
+// so a team drive never waits for anyone's computer.
+//
 // For the person receiving, what arrives is bounded like everything else:
 // at most MAX_ITEMS files per folder, the size guard on each document, and
 // the download rules for uploaded files (drive/files.js). A file you never
@@ -90,6 +95,25 @@ export class SharedFolders {
   }
 
   roleIn (folderId) { return this.engine.access(folderId)?.role || null }
+
+  // The team drive a folder is (or is inside), or null.
+  driveOf (docId, containers = this.containers(), seen = new Set()) {
+    if (seen.has(docId)) return null
+    seen.add(docId)
+    if (this.isFolder(docId) && this.driveInfo(docId)) return docId
+    for (const parent of containers.get(docId) || []) {
+      const d = this.driveOf(parent, containers, seen)
+      if (d) return d
+    }
+    return null
+  }
+
+  // { host } for a team drive's catalog, else null. (A file in a team
+  // drive says which one in its meta.drive too, with the drive's id.)
+  driveInfo (folderId) {
+    const d = this.engine.getDoc(folderId)?.ydoc.getMap('meta').get('drive')
+    return d && !d.id && /^[0-9a-f]{64}$/.test(String(d.host)) ? { host: d.host } : null
+  }
 
   // childId -> [folderId, ...]: which of my shared folders hold each file.
   containers () {
@@ -194,16 +218,20 @@ export class SharedFolders {
     }
   }
 
-  // As the owner of files in shared folders: the folders' people get them.
+  // As the owner of files in shared folders, or the host of a team drive
+  // they're in: the folders' people get them.
   _grantAccess (containers) {
     for (const entry of this.drive.files.values()) {
       const doc = this.engine.getDoc(entry.docId)
-      if (!doc?.members.exists || doc.members.owner !== this.me) continue
+      if (!doc?.members.exists) continue
+      const drive = this.driveOf(entry.docId, containers)
+      const host = drive && drive !== entry.docId ? this.driveInfo(drive).host : null
+      if (host ? host !== this.me || !doc.members.mayManage(this.me) : doc.members.owner !== this.me) continue
       const want = new Map() // userId -> { role, enc, folder }
       for (const folderId of containers.get(entry.docId) || []) {
         if (!this.engine.getDoc(folderId)?.members.exists) continue
         for (const m of this.engine.membersDetailed(folderId)) {
-          if (m.userId === this.me || !m.enc) continue
+          if (m.userId === this.me || !m.enc || m.userId === doc.members.owner) continue
           const role = roleIn(m.role, entry.type)
           const cur = want.get(m.userId)
           if (!cur || RANK[role] > RANK[cur.role]) want.set(m.userId, { role, enc: m.enc, folder: folderId })
@@ -221,7 +249,7 @@ export class SharedFolders {
         }
         // People who had it only through a folder that no longer gives it.
         for (const [userId, cur] of have) {
-          if (cur.folder && cur.role !== 'owner' && !want.has(userId) && !unsure) this.engine.removeMember(entry.docId, userId)
+          if (cur.folder && cur.role !== 'owner' && cur.role !== 'manager' && !want.has(userId) && !unsure) this.engine.removeMember(entry.docId, userId)
         }
       } catch (err) { this.drive.emit('error', err) }
     }
@@ -232,7 +260,7 @@ export class SharedFolders {
   _dropGone (containers) {
     for (const entry of [...this.drive.files.values()]) {
       if (!entry.viaFolder || containers.has(entry.docId)) continue
-      if (entry.owner?.userId === this.me || entry.lastOpenedAt || entry.contributed) {
+      if (entry.owner?.userId === this.me || entry.lastOpenedAt || entry.contributed || this.drive.keepEverything) {
         this.drive._patch(entry.docId, { viaFolder: null })
         continue
       }

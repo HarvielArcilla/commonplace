@@ -197,6 +197,17 @@ It prints an address starting with `cpr1.`. Paste it into your profile in common
 
 A relay also keeps uploaded files (encrypted, under names it can't link to their contents), so they download while whoever uploaded them is away. `--no-files` keeps documents only. Everything counts toward `--quota`.
 
+## A server for your group (optional)
+
+When a group outgrows waiting for each other, it can run a **server**: commonplace with no window, on a computer that stays on. It hosts **team drives**. Files in a team drive stay owned by whoever added them, but the server keeps them and lets everyone in the drive in, so nobody has to be online at the same time and nobody's laptop is the bottleneck. Unlike a relay, a server can read what it hosts; files that shouldn't be read by it stay in My Drive.
+
+```sh
+npm run server                    # from a clone of this repo, or:
+node packages/server/bin/commonplace-server.js --dir ~/server-data --name "Acme server"
+```
+
+The first time, it prints a link. Open it in commonplace (**Join with invite**) to become the server's admin, then make team drives from **Settings → Servers and team drives**. The design, and what's not done yet, is in [docs/TEAM-DRIVES.md](docs/TEAM-DRIVES.md).
+
 **Your own bootstrap node.** commonplace first finds the network through Hyperswarm's public bootstrap nodes, then remembers the computers it meets and starts from those. A group that would rather not depend on the public nodes can run its own (`npx hyperdht --bootstrap --host <its public IP> --port 49737`) and list it under Settings → Network.
 
 ## Signed releases
@@ -232,6 +243,7 @@ packages/calendar commonCalendar: events, repeats, .ics
 packages/whiteboard commonBoard: shapes, drawing them as SVG
 packages/forms   commonForms: questions, sealed answers, .csv
 packages/relay  the optional always-on relay
+packages/server  the optional server that hosts team drives
 apps/desktop     Electron shell (background process + window UI)
 scripts/         one-step installers and launchers
 test/            end-to-end sync, access, conflict, history, relay, recovery and app tests

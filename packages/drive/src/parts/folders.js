@@ -28,7 +28,8 @@ export class Folders {
   // no longer see.
   _leaveFolder (folderId) {
     const where = this.files.get(folderId)?.folderId
-    const canChange = canEdit(this.engine.access(folderId)?.role)
+    // A team drive keeps what's in it: my files there stay the drive's.
+    const canChange = canEdit(this.engine.access(folderId)?.role) && !this.shared.driveInfo(folderId)
     for (const [childId] of this.shared.items(folderId)) {
       const child = this.files.get(childId)
       if (!child) continue
@@ -91,7 +92,8 @@ export class Folders {
 
   // Moves a file (or a shared folder) into one of my folders, a shared
   // folder, or the top. Into a shared folder means sharing it with everyone
-  // there; out of one means they lose what they had only through it.
+  // there; out of one means they lose what they had only through it. Into
+  // a team drive means its server hosts it too; out of one, it no longer does.
   // Returns { localOnly } when it's in a shared folder for me only.
   moveFile (docId, folderId) {
     const entry = this.files.get(docId)
@@ -100,7 +102,14 @@ export class Folders {
     const from = this.shared.placeOf(docId, containers)
     if (from === folderId) return {}
     const toShared = folderId && this.shared.isFolder(folderId)
+    // Into or out of a team drive (docs/TEAM-DRIVES.md): only the owner
+    // moves a file between drives, and the file learns its new host first.
+    const isCatalog = Boolean(this.shared.driveInfo(docId))
+    const fromDrive = isCatalog ? null : this.shared.driveOf(docId, containers)
+    const toDrive = isCatalog || !toShared ? null : this.shared.driveOf(folderId, containers)
+    if (toDrive && toDrive !== fromDrive) this._enterDrive(docId, toDrive)
     if (from && this.shared.isFolder(from) && (containers.get(docId) || []).includes(from)) this.shared.remove(from, docId)
+    if (fromDrive && fromDrive !== toDrive) this._leaveDrive(docId, fromDrive)
     if (toShared) {
       try {
         this.shared.add(folderId, docId)

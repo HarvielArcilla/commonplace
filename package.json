@@ -15,7 +15,8 @@
     "test": "node --test --test-concurrency=1 test/*.test.js",
     "compat": "node scripts/compat.mjs",
     "start": "npm run dev -w @commonplace/desktop",
-    "relay": "node packages/relay/bin/commonplace-relay.js"
+    "relay": "node packages/relay/bin/commonplace-relay.js",
+    "server": "node packages/server/bin/commonplace-server.js"
   },
   "engines": {
     "node": ">=20"

@@ -437,6 +437,11 @@ export class SyncEngine extends EventEmitter {
     }
   }
 
+  // The owner's handover to a team drive's server (see members.js).
+  setHandover (docId, { to = null, drive = null } = {}) {
+    this._ownerAction(docId, (doc) => doc.members.setHandover(this.identity, { to, drive }))
+  }
+
   transferOwnership (docId, userId) {
     this._ownerAction(docId, (doc) => doc.members.transfer(this.identity, userId))
   }
@@ -477,6 +482,7 @@ export class SyncEngine extends EventEmitter {
         else if (e.type === 'remove' && m.member(e.userId)) m.remove(this.identity, e.userId, crypto.randomBytes(32), { after: e.after })
         else if (e.type === 'rotate' && !dropped.some((x) => x.type === 'remove')) m.rotate(this.identity, crypto.randomBytes(32))
         else if (e.type === 'owner' && m.member(e.userId)) m.transfer(this.identity, e.userId)
+        else if (e.type === 'handover' && m.owner === this.identity.userId && (m.handover?.to || null) !== (e.to || null)) m.setHandover(this.identity, { to: e.to, drive: e.drive })
         else if (e.type === 'revoke-invites') m.revokeInvites(this.identity)
         else if (e.type === 'retire-legacy') m.retireLegacyLinks(this.identity)
         else continue

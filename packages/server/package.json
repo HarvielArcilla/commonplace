@@ -1,0 +1,22 @@
+{
+  "name": "@commonplace/server",
+  "version": "0.1.0",
+  "description": "A commonplace server: a commonplace with no window, left running, that hosts team drives for a group.",
+  "type": "module",
+  "main": "src/server.js",
+  "bin": { "commonplace-server": "bin/commonplace-server.js" },
+  "exports": { ".": "./src/server.js" },
+  "dependencies": {
+    "@commonplace/core": "0.1.0",
+    "@commonplace/drive": "0.1.0",
+    "@commonplace/docs": "0.1.0",
+    "@commonplace/sheets": "0.1.0",
+    "@commonplace/slides": "0.1.0",
+    "@commonplace/tasks": "0.1.0",
+    "@commonplace/calendar": "0.1.0",
+    "@commonplace/whiteboard": "0.1.0",
+    "@commonplace/forms": "0.1.0",
+    "hyperdht": "^6.34.1"
+  },
+  "license": "MIT"
+}

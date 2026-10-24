@@ -170,18 +170,20 @@ export function statusNotes (file, { detailed = false } = {}) {
   if (file.role === 'viewer') notes.push({ text: 'You can view this file' })
   if (file.role === 'commenter') notes.push({ text: 'You can view and comment on this file' })
   if (file.role === 'respondent') notes.push({ text: 'You can answer this form' })
-  if (file.role !== 'owner' && !file.sync.ownerOnline && file.owner?.name) {
+  // In a team drive its server, not the owner, is the one that matters.
+  if (file.drive?.in) {
+    if (!file.drive.online) notes.push({ text: `${file.drive.hostName} is offline. Edits reach the drive when it’s back`, cls: detailed ? 'warn' : '' })
+  } else if (file.role !== 'owner' && !file.sync.ownerOnline && file.owner?.name) {
     notes.push({ text: `${file.owner.name} (owner) is offline` })
   }
   if (file.sync.pending > 0 && file.sync.lastSyncedAt) {
     notes.push({ text: 'Some of your edits are only on this computer', cls: 'warn' })
   }
   if (detailed && file.kind !== 'file' && !here.length && !syncing.length && editorRole(file.role)) {
-    notes.push({
-      text: (file.sync.relays || []).length
-        ? 'You can keep writing. Edits are saved here and reach the others through the relay, even when nobody else is online.'
-        : 'You can keep writing. Edits are saved here and reach the others when anyone with this file is online at the same time as you.'
-    })
+    const reach = file.drive?.in
+      ? `through ${file.drive.hostName} when it’s online`
+      : (file.sync.relays || []).length ? 'through the relay, even when nobody else is online' : 'when anyone with this file is online at the same time as you'
+    notes.push({ text: `You can keep writing. Edits are saved here and reach the others ${reach}.` })
     if (file.sync.lastSyncedAt) notes.push({ text: 'Newer edits may exist on a computer that is offline right now.' })
   }
   return notes

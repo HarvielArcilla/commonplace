@@ -6,6 +6,7 @@ import { state, cp, statusNotes, renderNotes, marginMark, savePrefs, editorRole,
 import { shareDialog, setSyncMode, moveInDialog } from './share.js'
 import { restoreDialog } from './recovery-view.js'
 import { conflictsDialog } from './conflicts.js'
+import { teamDrives, driveOfFolder, driveCrumb, driveBar, driveEmpty, moveNote, driveSettings } from './teams-view.js'
 
 let handlers = { openDocument: async () => {}, openJoinDialog: () => {} }
 export function initDrive (h) {
@@ -101,7 +102,7 @@ function visibleItems () {
   if (searching) files = files.filter((f) => `${f.title} ${f.preview}`.toLowerCase().includes(q))
   let folders = everywhere || state.prefs.filter !== 'all' || state.prefs.type !== 'all'
     ? []
-    : state.folders.filter((f) => (f.parentId || null) === (state.folderId || null))
+    : state.folders.filter((f) => (f.parentId || null) === (state.folderId || null) && !f.teamDrive)
   if (searching) folders = state.folders.filter((f) => f.name.toLowerCase().includes(q))
 
   const by = state.prefs.sort
@@ -122,6 +123,11 @@ export function renderDrive () {
   renderCrumbs()
   renderControls()
   $('#me-name').textContent = state.me?.name || ''
+  // True for My Drive; a team drive's files are also kept on its server.
+  const onTeam = driveOfFolder(state.folderId)
+  $('#me-note').textContent = onTeam
+    ? `Files here are kept by ${onTeam.teamDrive.hostName}, a server your group runs, and sync with everyone in ${onTeam.name}.`
+    : 'Files sync directly between computers. Nothing is stored on a server.'
   $('#me-swatch').style.setProperty('--swatch', state.me?.color)
 
   const list = $('#file-list')
@@ -130,7 +136,13 @@ export function renderDrive () {
   const { files, folders, searching } = visibleItems()
 
   if (inTrash()) list.append(trashBar(files))
-  if (!docs().length && !state.folders.length && !inTrash()) {
+  const team = !inTrash() && state.prefs.filter === 'all' && !state.query.trim() ? driveOfFolder(state.folderId) : null
+  if (team) list.append(driveBar(team))
+  if (team && state.folderId === team.id && !files.length && !folders.length) {
+    list.append(driveEmpty(team))
+    return
+  }
+  if (!team && !docs().length && !state.folders.some((f) => !f.teamDrive) && !inTrash()) {
     list.append(emptyState())
     return
   }
@@ -140,6 +152,7 @@ export function renderDrive () {
       : inTrash() ? ['The trash is empty', 'Files you remove from your Drive wait here, so you can bring them back.']
         : state.prefs.filter === 'starred' ? ['No starred files', 'Star a file from its menu to find it here, whatever folder it’s in.']
           : state.folderId ? ['This folder is empty', 'Drag files here from another folder, or start a new document while you’re in it.']
+            : teamDrives().length && state.prefs.filter === 'all' && state.prefs.type === 'all' ? ['My Drive is empty', 'Your team drives are in the menu at the top left. What you make here is yours alone until you share it.']
             : ['Nothing matches these filters', 'Change the filters above to see more.']
     list.append(el('div', { class: 'empty' }, el('h2', {}, title), el('p', {}, hint)))
     return
@@ -175,12 +188,20 @@ const star = (f) => (f.trashedAt ? null : el('button', {
 function renderCrumbs () {
   const nav = $('#crumbs')
   nav.replaceChildren()
-  const path = folderPath(state.folderId)
-  const crumbs = [{ id: null, name: 'commonDrive' }, ...path]
+  let path = folderPath(state.folderId)
+  // The first crumb is the drive: My Drive, or the team drive it's in.
+  const team = path[0]?.teamDrive ? path[0] : null
+  if (team) path = path.slice(1)
+  const crumbs = [{ id: team?.id || null, name: team?.name || 'commonDrive', drive: true }, ...path]
   crumbs.forEach((c, i) => {
     const last = i === crumbs.length - 1
     if (i > 0) nav.append(el('span', { class: 'crumb-sep', 'aria-hidden': 'true' }, '/'))
-    if (last) {
+    const switcher = c.drive ? driveCrumb(team, { last }) : null
+    if (switcher) {
+      if (!last) dropTarget(switcher, c.id)
+      nav.append(switcher)
+      if (last && team) nav.append(el('button', { type: 'button', class: 'btn btn-quiet btn-icon', 'aria-label': `Options for ${c.name}`, onclick: (e) => folderMenu(e.currentTarget, team) }, svg(icons.more)))
+    } else if (last) {
       const title = el('h1', { class: 'crumb current' }, c.name)
       if (c.id) {
         const more = el('button', { type: 'button', class: 'btn btn-quiet btn-icon', 'aria-label': `Options for folder ${c.name}`, onclick: (e) => folderMenu(e.currentTarget, folderById(c.id)) }, svg(icons.more))
@@ -540,6 +561,7 @@ async function importFile () {
 }
 
 function folderMenu (anchor, f) {
+  if (f.teamDrive) return teamDriveMenu(anchor, f)
   if (f.shared) return sharedFolderMenu(anchor, f)
   openMenu(anchor, [
     { label: 'Open', onSelect: () => goTo(f.id) },
@@ -586,6 +608,25 @@ function sharedFolderMenu (anchor, f) {
       }
     }
   ].filter(Boolean), { label: `Shared folder ${f.name}` })
+}
+
+function teamDriveMenu (anchor, d) {
+  openMenu(anchor, [
+    { label: 'People…', icon: icons.share, onSelect: () => shareDialog(d.id) },
+    d.teamDrive.admin ? { label: 'Drive settings…', onSelect: () => driveSettings(d) } : null,
+    { sep: true },
+    {
+      label: 'Hide from this computer…',
+      danger: true,
+      onSelect: async () => {
+        const body = `${d.name} leaves your Drive here; you stay in it, and your files in it stay there for everyone. To leave the drive for good, ask one of its admins to remove you.`
+        if (await confirmAction({ title: `Hide “${d.name}”?`, body, confirm: 'Hide' })) {
+          if (driveOfFolder(state.folderId)?.id === d.id) state.folderId = null
+          await cp.removeFile(d.id)
+        }
+      }
+    }
+  ].filter(Boolean), { label: `Team drive ${d.name}` })
 }
 
 function sharedNote (f) {
@@ -670,9 +711,11 @@ function detailsDialog (f) {
   const rows = [
     ['Type', f.appName || 'Unknown'],
     ['Owner', f.role === 'owner' ? 'You' : (f.owner?.name || 'Unknown')],
+    ['Drive', f.drive ? f.drive.name : 'My Drive'],
+    ['Hosted by', f.drive ? `${f.drive.hostName}${f.drive.online ? '' : ' (offline now)'}` : f.role === 'owner' ? 'You, and the people you share it with' : 'The people who have it'],
     ['Your access', ROLE_LABEL[f.role] || (f.access.removed ? 'Removed' : 'Not yet confirmed')],
     ['Written by', f.contributors.length ? listNames(f.contributors) : 'Nobody yet'],
-    ['Folder', f.folderId ? folderPath(f.folderId).map((p) => p.name).join(' / ') : 'commonDrive'],
+    ['Folder', folderPath(f.folderId).filter((p) => !p.teamDrive).map((p) => p.name).join(' / ') || 'Top level'],
     ['Last change', [ago(f.lastChangeAt || f.addedAt), f.lastChangedBy ? `by ${f.lastChangedBy}` : null].filter(Boolean).join(' ') || '—'],
     ['Sync', statusNotes(f).map((n) => n.text).join('. ')]
   ]
@@ -681,19 +724,25 @@ function detailsDialog (f) {
 
 async function moveDialog ({ kind, id, name, current }) {
   const blocked = kind === 'folder' ? descendantIds(id) : new Set()
-  const options = [{ id: '', label: 'commonDrive', depth: 0 }]
+  const options = [{ id: '', label: teamDrives().length ? 'My Drive' : 'commonDrive', depth: 0 }]
   const walk = (parentId, depth) => {
-    for (const f of state.folders.filter((x) => (x.parentId || null) === parentId).sort((a, b) => a.name.localeCompare(b.name))) {
+    for (const f of state.folders.filter((x) => (x.parentId || null) === parentId && !x.teamDrive).sort((a, b) => a.name.localeCompare(b.name))) {
       if (blocked.has(f.id)) continue
       options.push({ id: f.id, label: f.name, depth })
       walk(f.id, depth + 1)
     }
   }
   walk(null, 1)
+  // Each team drive, with its folders.
+  for (const d of teamDrives()) {
+    if (blocked.has(d.id)) continue
+    options.push({ id: d.id, label: d.name, depth: 0, drive: true })
+    walk(d.id, 1)
+  }
   const list = el('fieldset', { class: 'folder-picker' }, el('legend', { class: 'sr-only' }, 'Destination'),
     ...options.map((o) => el('label', { class: 'folder-option', style: `padding-left:${8 + o.depth * 18}px` },
       el('input', { type: 'radio', name: 'target', value: o.id, checked: (o.id || null) === (current || null) || null }),
-      svg(folderIcon(folderById(o.id))), el('span', {}, o.label))))
+      svg(o.drive ? icons.drive : folderIcon(folderById(o.id))), el('span', {}, o.label))))
   const res = await dialog({ title: `Move “${name}”`, fields: [list], confirm: 'Move here' })
   if (res?.action !== 'confirm') return
   moveTo({ kind, id }, res.data.target || null)
@@ -706,7 +755,11 @@ async function moveTo ({ kind, id }, target) {
   const from = folderById(kind === 'file' ? item?.folderId : item?.parentId)
   if ((from?.id || null) === (target || null)) return
   const mine = kind === 'folder' || item?.role === 'owner'
-  if (dest?.shared && mine) {
+  const across = moveNote(item, driveOfFolder(from?.id || null), driveOfFolder(target))
+  if (across?.refuse) { toast(across.refuse); return }
+  if (across) {
+    if (!await confirmAction({ title: across.title, body: across.body, confirm: across.confirm, danger: false })) return
+  } else if (dest?.shared && mine) {
     const ok = await confirmAction({ title: `Share with everyone in “${dest.name}”?`, body: `Everyone in the folder gets “${item?.title || item?.name}”: the folder’s editors can edit it, its viewers can view it.`, confirm: 'Move and share', danger: false })
     if (!ok) return
   } else if (from?.shared && mine && !dest?.shared) {
@@ -716,6 +769,6 @@ async function moveTo ({ kind, id }, target) {
   try {
     const res = kind === 'file' ? await cp.moveFile(id, target) : await cp.moveFolder(id, target)
     if (res === false) toast('A folder can’t go inside itself.')
-    else toast(res?.localOnly ? res.message : `Moved to ${dest?.name || 'commonDrive'}`)
+    else toast(res?.localOnly ? res.message : `Moved to ${dest?.name || (teamDrives().length ? 'My Drive' : 'commonDrive')}`)
   } catch (err) { toast(cleanError(err)) }
 }

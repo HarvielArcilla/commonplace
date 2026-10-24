@@ -49,7 +49,7 @@
       <button type="button" class="me-button" data-action="profile" aria-label="Change your name and color">
         <span class="swatch" id="me-swatch"></span><span id="me-name"></span>
       </button>
-      <span class="me-note">Files sync directly between computers. Nothing is stored on a server.</span>
+      <span class="me-note" id="me-note">Files sync directly between computers. Nothing is stored on a server.</span>
       <div id="update-note" class="update-note" role="status" hidden></div>
     </footer>
   </section>
@@ -100,6 +100,7 @@
         <button type="button" data-page="computers">Your computers</button>
         <button type="button" data-page="recovery">Recovery</button>
         <button type="button" data-page="relays">Always-on relay</button>
+        <button type="button" data-page="servers">Servers and team drives</button>
         <button type="button" data-page="network">Network</button>
         <button type="button" data-page="writing">Appearance and writing</button>
         <button type="button" data-page="storage">Storage and people</button>
@@ -148,6 +149,14 @@
           <button type="button" class="btn" id="profile-relay-add">Add relay</button>
         </div>
         <label class="check"><input type="checkbox" id="profile-relay-all"> Also use it for every file I own now</label>
+      </section>
+      <section id="profile-servers" class="settings-page" data-page="servers" hidden>
+        <h2>Servers and team drives</h2>
+        <p class="fineprint-plain">A server is commonplace with no window, left running on a computer that stays on. It hosts team drives: files in one stay owned by whoever added them, and the server keeps them and gives everyone in the drive access, so nobody has to be online at the same time. Unlike a relay, a server can read what it hosts.</p>
+        <div id="servers-list" class="servers"></div>
+        <p class="fineprint-plain" id="servers-empty">You don’t help run any servers yet. Someone who does can add you to their team drives with an ordinary invite.</p>
+        <h4 class="settings-sub">Connect a server</h4>
+        <p class="fineprint-plain">Run <code>commonplace-server</code> on the computer that will host your drives. The first time, it prints a link: open it here with <b>Join with invite</b> to become the server’s first admin. The link works once.</p>
       </section>
       <section id="profile-network" class="settings-page" data-page="network" hidden>
         <h2>Network</h2>

@@ -31,6 +31,8 @@ import { Limits } from './parts/limits.js'
 import { Relays, RELAYS_MAP } from './parts/relays.js'
 import { VersionHistory } from './parts/history.js'
 import { Computers } from './parts/computers.js'
+import { TeamDrives } from './parts/drives.js'
+import { serverApp } from './team-drives.js'
 
 // How long a guest waits for the owner before treating them as offline.
 const GUEST_GRACE_MS = 60e3
@@ -41,6 +43,7 @@ export { Backups, readBackupFile, restoreBackup, newRecoveryKey, normalizeRecove
 export { MAX_FILE_BYTES, GUARD_BYTES, fileKind, safeFileName, formatBytes, filesApp } from './files.js'
 export { POLICY_FIELDS, POLICY_GROUPS, DEFAULT_POLICY, normalizePolicy } from './policy.js'
 export { NetworkSettings, parseNodes } from './network.js'
+export { serverApp, readServerDoc, drivePolicy, DEFAULT_DRIVE_POLICY, REQUESTS, DRIVES, STATUS, POLICY } from './team-drives.js'
 
 // Where the index lived before it synced between computers (still used to
 // hand an index over when moving or linking a Drive).
@@ -57,15 +60,18 @@ export class Drive extends EventEmitter {
   // policy: values that replace the default limits (see policy.js);
   // guardBytes is the old name for policy.docGuardBytes.
   // appVersion: this app's version, shown to the people you sync with.
-  constructor ({ dataDir, apps = [], swarm = {}, transport = true, lan = true, history = {}, deviceName = defaultDeviceName(), makeThumb = null, guardBytes = null, policy = {}, guestGraceMs = GUEST_GRACE_MS, appVersion = null }) {
+  // keepEverything: a server's Drive, which keeps files that leave its
+  // folders (see docs/TEAM-DRIVES.md) instead of letting them go.
+  constructor ({ dataDir, apps = [], swarm = {}, transport = true, lan = true, history = {}, deviceName = defaultDeviceName(), makeThumb = null, guardBytes = null, policy = {}, guestGraceMs = GUEST_GRACE_MS, appVersion = null, keepEverything = false }) {
     super()
     this.dataDir = dataDir
+    this.keepEverything = keepEverything
     this.policy = new Policy(dataDir, { ...(guardBytes ? { docGuardBytes: guardBytes } : {}), ...policy })
     this.network = new NetworkSettings(dataDir)
     // Options passed in (tests, or COMMONPLACE_BOOTSTRAP) win over the settings.
     this.swarmOpts = { ...this.network.swarmOptions(), ...swarm }
     this.networkOverridden = Boolean(swarm.dht || swarm.bootstrap)
-    this.appsByType = new Map([...apps, filesApp, folderApp].map((a) => [a.type, a]))
+    this.appsByType = new Map([...apps, filesApp, folderApp, serverApp].map((a) => [a.type, a]))
     // What I know of people's lists of computers (public, signed; see
     // core/devices.js), kept across runs.
     this._usersFile = path.join(dataDir, 'users.json')
@@ -163,6 +169,7 @@ export class Drive extends EventEmitter {
     this._guestTimer.unref?.()
     this.devicesMap.observe(() => { this._checkUnlinked(); this._changed() })
     this._watchComputers()
+    this._watchTeamDrives()
 
     this.engine.on('status', (status) => { this._rememberNames(status); this._changed() })
     this.engine.on('members', () => { this.shared.soon(); this._changed() })
@@ -229,7 +236,9 @@ export class Drive extends EventEmitter {
   // Everything in my Drive, shared folders included (kind 'folder').
   list () {
     const containers = this.shared.containers()
+    // Server documents show in Settings → Servers, not as files.
     return [...this.files.values()]
+      .filter((e) => e.type !== 'server')
       .map((e) => this.describe(e.docId, containers))
       .sort((a, b) => (b.lastActivityAt || 0) - (a.lastActivityAt || 0))
   }
@@ -240,12 +249,16 @@ export class Drive extends EventEmitter {
     const containers = this.shared.containers()
     const mine = [...this.folders.values()]
       .map((f) => ({ ...f, parentId: this.folders.has(f.parentId) ? f.parentId : null }))
+    const teams = new Map(this.teamDrives().map((d) => [d.id, d]))
     const shared = this.shared.folders().map((e) => {
       const access = this.engine.access(e.docId) || {}
+      const team = teams.get(e.docId)
       return {
+        // A team drive: shown as a drive of its own, not a folder.
+        teamDrive: team ? { host: team.host, hostName: team.hostName, online: team.online, admin: team.admin, policy: team.policy, server: team.server } : null,
         id: e.docId,
         name: e.title || 'Shared folder',
-        parentId: this.shared.placeOf(e.docId, containers),
+        parentId: team ? null : this.shared.placeOf(e.docId, containers),
         shared: true,
         role: access.role || null,
         owner: e.owner || null,
@@ -314,6 +327,9 @@ export class Drive extends EventEmitter {
         manage: Boolean(access.manage)
       },
       members: [...members, ...waiting],
+      // The team drive it belongs to ({ id, name, host, hostName, online }),
+      // or null for My Drive. Owner · Drive · Hosted by.
+      drive: this._driveSummary(docId, nameOf),
       // People who can open it only while I'm online (I own it).
       guests: isOwner ? this.guests.list(docId) : [],
       // People with an approval link asking the owner to let them in.
@@ -838,7 +854,7 @@ export class Drive extends EventEmitter {
 
 // The Drive's methods are grouped by subject in ./parts. Each part is a class
 // whose methods become the Drive's own, so callers see one object.
-for (const part of [Access, Computers, Conflicts, Folders, Limits, Relays, VersionHistory]) {
+for (const part of [Access, Computers, Conflicts, Folders, Limits, Relays, TeamDrives, VersionHistory]) {
   for (const name of Object.getOwnPropertyNames(part.prototype)) {
     if (name === 'constructor') continue
     if (name in Drive.prototype) throw new Error(`Drive.${name} is defined twice`)

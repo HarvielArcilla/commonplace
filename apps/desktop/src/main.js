@@ -216,6 +216,12 @@ function registerIpc () {
   ipcMain.handle('folder:restoreRemoved', (_e, id) => drive.restoreRemoved(id))
   ipcMain.handle('folder:move', (_e, id, parentId) => drive.moveFolder(id, parentId))
   ipcMain.handle('file:move', (_e, docId, folderId) => drive.moveFile(docId, folderId))
+  // Servers I help run, and their team drives (docs/TEAM-DRIVES.md).
+  ipcMain.handle('servers:list', () => drive.servers())
+  ipcMain.handle('servers:createDrive', (_e, serverId, name) => drive.createTeamDrive(serverId, name))
+  ipcMain.handle('servers:adminLink', (_e, serverId) => drive.serverAdminLink(serverId))
+  ipcMain.handle('teamDrive:policy', (_e, driveId, patch) => drive.setDrivePolicy(driveId, patch || {}))
+  ipcMain.handle('teamDrive:makeAdmin', (_e, driveId, userId) => drive.makeDriveAdmin(driveId, userId))
   ipcMain.handle('link:open', (_e, url) => openExternal(url))
   ipcMain.handle('clipboard:write', (_e, text) => clipboard.writeText(String(text)))
 

@@ -19,6 +19,11 @@
 //   owner   - hand ownership to another member
 //   revoke-invites - stop all invite links issued so far
 //   retire-legacy  - stop accepting unsigned links from before roles existed
+//   handover - the owner's standing promise for a file in a team drive (see
+//             docs/TEAM-DRIVES.md): `to` (the drive's server) may pass
+//             ownership to another member if the owner leaves the drive.
+//             `to: null` withdraws it. Only the owner signs it, and it's
+//             marked critical, so apps that don't know it stop syncing.
 //
 // Managers (shown as "Can edit and share") edit, and do what the owner does
 // for everyone but the owner and other managers: invite, admit, change roles
@@ -120,7 +125,9 @@ export function replay (docId, entries) {
 }
 
 function maySign (s, e) {
-  if (e.by === s.owner) return true
+  if (e.by === s.owner) return e.type !== 'owner' || e.userId !== e.by
+  // The handover's delegate may pass ownership on, to someone else.
+  if (e.type === 'owner' && s.handover?.to === e.by) return e.userId !== e.by
   if (s.members.get(e.by)?.role !== 'manager' || !MANAGER_TYPES.has(e.type)) return false
   if (e.type === 'add' || e.type === 'role') {
     if (e.role === 'manager' || e.role === 'owner') return false
@@ -195,6 +202,11 @@ function apply (s, e, i) {
       s.owner = e.userId
       s.owners.add(e.userId)
       Object.assign(s.members.get(e.userId), { role: 'owner', until: null })
+      s.handover = null // the new owner hasn't promised anything
+      break
+    case 'handover':
+      if (e.to != null && !/^[0-9a-f]{64}$/.test(String(e.to))) throw new Error('bad handover')
+      s.handover = e.to ? { to: e.to, drive: typeof e.drive === 'string' ? e.drive.slice(0, 64) : null } : null
       break
     case 'revoke-invites':
       s.invitesValidFrom = i + 1
@@ -228,6 +240,8 @@ export class Membership {
   get epoch () { return this.state.epoch }
   get head () { return this.state.head }
   get acceptsLegacyLinks () { return this.state.legacyLinks }
+  // { to, drive } while the owner's handover stands, else null.
+  get handover () { return this.state.handover || null }
   // The log has an entry only a newer app understands, and it limits access.
   get needsNewer () { return Boolean(this.state.needsNewer) }
 
@@ -443,8 +457,15 @@ export class Membership {
     return this.append(identity, { type: 'rotate', epoch: this.state.epoch + 1, keys })
   }
 
+  // By the owner, or by the handover's delegate (to someone else).
   transfer (identity, userId) {
     return [this.append(identity, { type: 'owner', userId })]
+  }
+
+  // The owner's handover to a team drive's server (to: null withdraws it).
+  setHandover (identity, { to = null, drive = null } = {}) {
+    if (identity.userId !== this.state.owner) throw new Error('Only the owner can promise a handover.')
+    return [this.append(identity, to ? { type: 'handover', to, drive, critical: true } : { type: 'handover', to: null, critical: true })]
   }
 
   revokeInvites (identity) {

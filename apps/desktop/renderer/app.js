@@ -3,8 +3,9 @@
 
 import { $, el, toast, confirmAction, cleanError } from './ui.js'
 import { state, cp } from './state.js'
-import { initDrive, renderDrive } from './drive-view.js'
-import { initDocView, openDocument, renderDocMargin } from './doc-view.js'
+import { initDrive, renderDrive, goTo } from './drive-view.js'
+import { renderServers } from './teams-view.js'
+import { initDocView, openDocument, renderDocMargin, closeDocument } from './doc-view.js'
 import { renderStorage, renderLimits, renderNetwork, renderLocalRelay } from './settings-view.js'
 import { moveOutDialog, moveInDialog, relayStatus } from './share.js'
 import { renderRecovery, restoreDialog } from './recovery-view.js'
@@ -149,7 +150,7 @@ function showSettingsPage (key) {
 // Anything can open a settings page: dispatch 'commonplace:settings' { page }.
 window.addEventListener('commonplace:settings', (e) => openProfileDialog(e.detail?.page || null))
 
-const PAGE_RENDER = { computers: renderComputers, recovery: renderRecovery, relays: () => { renderMyRelays(); renderLocalRelay() }, network: renderNetwork, storage: renderStorage, limits: renderLimits }
+const PAGE_RENDER = { computers: renderComputers, recovery: renderRecovery, relays: () => { renderMyRelays(); renderLocalRelay() }, servers: renderServers, network: renderNetwork, storage: renderStorage, limits: renderLimits }
 $('#open-shortcuts').addEventListener('click', () => showShortcuts())
 $('#settings-nav').addEventListener('click', (e) => {
   const b = e.target.closest('button[data-page]')
@@ -160,6 +161,15 @@ $('#settings-nav').addEventListener('click', (e) => {
 })
 
 window.addEventListener('commonplace:relays', () => renderMyRelays())
+// From anywhere: open a settings page, or a folder (a team drive) in the Drive.
+window.addEventListener('commonplace:settings', (e) => { openProfileDialog(e.detail?.page); PAGE_RENDER[e.detail?.page]?.() })
+window.addEventListener('commonplace:goto', async (e) => {
+  if ($('#profile-dialog').open) $('#profile-dialog').close()
+  state.folders = await cp.listFolders()
+  if (state.open) await closeDocument()
+  showDrive()
+  goTo(e.detail?.folderId || null)
+})
 
 async function renderMyRelays () {
   const relays = await cp.myRelays()
