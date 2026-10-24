@@ -186,7 +186,7 @@ function apply (s, e, i) {
       break
     case 'remove':
       if (e.userId === s.owner) throw new Error('the owner cannot be removed')
-      s.removed.set(e.userId, { after: cleanAfter(e.after || s.members.get(e.userId)?.after), at: e.at || 0 })
+      s.removed.set(e.userId, { after: cleanAfter(e.after || s.members.get(e.userId)?.after), at: e.at || 0, seq: i })
       s.members.delete(e.userId)
       break
     case 'rotate':
@@ -361,8 +361,11 @@ export class Membership {
     if (!this.exists) return { role: 'editor', pending: false, gated: false } // no membership yet: invite link = editor
     const m = this.member(userId)
     if (m) return this.hasEnded(userId, now) ? null : { role: m.role, pending: false, gated: false, until: m.until || null }
+    // Someone taken out can't come back with a link made before that: only
+    // with a new one (or by being added again).
+    const removed = this.removal(userId)
+    if (removed && !(Number(invite?.q) > removed.seq)) return null
     if (this.validInvite(invite, { userId, now })) return { role: invite.r, pending: true, gated: Boolean(invite.once || invite.ask) }
-    if (this.isRemoved(userId)) return null
     if (!invite && this.state.legacyLinks) return { role: 'editor', pending: true, gated: false }
     return null
   }
