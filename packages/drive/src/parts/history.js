@@ -1,13 +1,13 @@
 // Version history: checkpoints saved on this computer as edits pause, and
 // putting a file back to one (an ordinary edit, so it reaches everyone).
 
-import { canEdit, docFrom, restoreContent } from '@commonplace/core'
+import { canEdit, docFrom, restoreContent, PEOPLE, AUTHORS } from '@commonplace/core'
 
 export class VersionHistory {
   versions (docId) {
     const doc = this.engine.getDoc(docId)
     if (!doc) return []
-    const people = doc.ydoc.getMap('people')
+    const people = doc.ydoc.getMap(PEOPLE)
     const nameOf = (userId) => (userId === this.identity.userId ? this.identity.name : people.get(userId)?.name || this.files.get(docId)?.names?.[userId] || 'Someone')
     return this.history.list(docId).reverse().map((v) => ({ ...v, names: v.by.map(nameOf) }))
   }
@@ -28,7 +28,7 @@ export class VersionHistory {
     if (pending) { clearTimeout(pending.timer); this._checkpoints.delete(docId) }
     const doc = this.engine.getDoc(docId)
     if (!doc || !this.files.get(docId)?.type) return null
-    const authors = doc.ydoc.getMap('authors')
+    const authors = doc.ydoc.getMap(AUTHORS)
     return this.history.record(docId, doc.ydoc, { ...opts, authorOf: (client) => authors.get(String(client))?.userId || null })
   }
 

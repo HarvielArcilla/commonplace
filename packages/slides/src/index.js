@@ -4,8 +4,9 @@
 import * as Y from 'yjs'
 import { initSlides, preview, thumbnail, slideIds, readSlide, plainText, slideMap, SLIDES, SLIDE_DATA, DECK } from './model.js'
 import { slideTemplates } from './templates.js'
+import { chosenVersions } from '@commonplace/core/container'
 
-// Conflict units: every element on every slide (plus the title). An
+// Conflict units: every element on every slide. An
 // element's signature covers where it is, how it looks and its text.
 function units (ydoc) {
   const out = new Map()
@@ -16,8 +17,6 @@ function units (ydoc) {
       out.set(`${slideId}|${id}`, { kind: 'element', sig: JSON.stringify({ ...props, words }), text: words || describe(el), props, words, prev: null })
     }
   }
-  const title = ydoc.getMap('meta').get('title')
-  if (title != null) out.set('title', { kind: 'title', sig: String(title), text: String(title), prev: null })
   return out
 }
 
@@ -28,12 +27,7 @@ const snapshotUnit = (u) => (u?.props ? JSON.stringify({ props: u.props, words: 
 // or 'both' (each version's text, one after the other, in one box).
 function resolve (ydoc, rec, choice) {
   if (choice === 'current') return
-  const picked = choice === 'both' ? rec.versions : [rec.versions[Number(String(choice).slice(1))]].filter(Boolean)
-  const present = picked.filter((v) => v.exists)
-  if (rec.kind === 'title') {
-    if (present.length) ydoc.getMap('meta').set('title', present.map((v) => v.text).join(' / '))
-    return
-  }
+  const present = chosenVersions(rec, choice)
   const [slideId, elId] = rec.unit.split('|')
   const elements = slideMap(ydoc, slideId)?.get('elements')
   if (!elements) return

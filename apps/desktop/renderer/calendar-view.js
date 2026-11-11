@@ -11,6 +11,7 @@ import { $, el, svg, dialog, selectField, toast } from './ui.js'
 import { toolButton, labeledButton, toolbarGroups, setToolbar } from './toolbar.js'
 import { countBy, badges } from './comment-marks.js'
 import { cp, openFile } from './state.js'
+import { META } from '@commonplace/core/container'
 
 const ICON = {
   prev: '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="m10 3-5 5 5 5"/></svg>',
@@ -77,7 +78,7 @@ export function mountCalendar (o) {
       v.root.hidden = true
       const shown = el('div', { class: 'cal-app' }, monthGrid({ ...v, ydoc, writable: false, showTasks: false }))
       $('#desk').append(shown)
-      return { title: ydoc.getMap('meta').get('title') || '', close () { shown.remove(); ydoc.destroy(); v.root.hidden = false } }
+      return { title: ydoc.getMap(META).get('title') || '', close () { shown.remove(); ydoc.destroy(); v.root.hidden = false } }
     },
     async exportPayload () { return { payload: {} } },
     comments: {

@@ -15,6 +15,7 @@ import { commentAnchors, textAnchor, suggestionList } from '@commonplace/docs/ed
 import { el, ago, toast } from './ui.js'
 import { state, can } from './state.js'
 import { openPanel, closePanel, openPanelName } from './panel.js'
+import { PEOPLE } from '@commonplace/core/container'
 
 let view = null // { o, body, drafts: Map, composing: { quote, anchor? } | null, active, showResolved }
 
@@ -33,8 +34,8 @@ const canComment = () => can(openFile(), 'comment')
 // People who can't edit (viewers, commenters) aren't in the file's people
 // map; their names come from the members list.
 const memberName = (userId) => fileOf(state.open)?.members?.find((m) => m.userId === userId)?.name
-const nameOf = (ydoc, userId) => (userId === state.me.userId ? 'You' : ydoc.getMap('people').get(userId)?.name || memberName(userId) || 'Someone')
-const colorOf = (ydoc, userId) => (userId === state.me.userId ? state.me.color : ydoc.getMap('people').get(userId)?.color || fileOf(state.open)?.members?.find((m) => m.userId === userId)?.color || '#777777')
+const nameOf = (ydoc, userId) => (userId === state.me.userId ? 'You' : ydoc.getMap(PEOPLE).get(userId)?.name || memberName(userId) || 'Someone')
+const colorOf = (ydoc, userId) => (userId === state.me.userId ? state.me.color : ydoc.getMap(PEOPLE).get(userId)?.color || fileOf(state.open)?.members?.find((m) => m.userId === userId)?.color || '#777777')
 
 // ---- wiring per open document ----------------------------------------------------
 

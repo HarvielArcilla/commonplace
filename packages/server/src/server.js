@@ -16,6 +16,7 @@ import { tasksApp } from '@commonplace/tasks'
 import { calendarApp } from '@commonplace/calendar'
 import { whiteboardApp } from '@commonplace/whiteboard'
 import { formsApp } from '@commonplace/forms'
+import { META } from '@commonplace/core'
 
 const APPS = [...docsApps, sheetsApp, slidesApp, tasksApp, calendarApp, whiteboardApp, formsApp]
 const GB = 1024 ** 3
@@ -136,7 +137,7 @@ export class TeamServer {
     const id = await this.drive.createSharedFolder(title)
     const catalog = this.drive.getDoc(id)
     catalog.ydoc.transact(() => {
-      catalog.ydoc.getMap('meta').set('drive', { host: this.me })
+      catalog.ydoc.getMap(META).set('drive', { host: this.me })
       const policy = catalog.ydoc.getMap(POLICY)
       for (const [k, v] of Object.entries(DEFAULT_DRIVE_POLICY)) policy.set(k, v)
     }, 'local')

@@ -9,7 +9,7 @@
 // handover. Moving it out undoes all three.
 
 import crypto from 'node:crypto'
-import { deriveDocKeys } from '@commonplace/core'
+import { deriveDocKeys, META, PEOPLE, isHex64, isDocId } from '@commonplace/core'
 import { readServerDoc, drivePolicy, REQUESTS, POLICY, DEFAULT_DRIVE_POLICY } from '../team-drives.js'
 
 const ASK_TIMEOUT_MS = 60e3
@@ -51,7 +51,7 @@ export class TeamDrives {
         id: e.docId,
         name: e.title,
         host,
-        hostName: doc?.ydoc.getMap('people').get(host)?.name || e.owner?.name || 'its server',
+        hostName: doc?.ydoc.getMap(PEOPLE).get(host)?.name || e.owner?.name || 'its server',
         online: this._hostOnline(e.docId, host),
         role,
         admin: role === 'manager',
@@ -64,8 +64,8 @@ export class TeamDrives {
   // Where a file belongs, from the file itself: { id, name, host } for a
   // team drive, or null for My Drive. Everyone who has the file sees it.
   driveOfFile (docId) {
-    const d = this.engine.getDoc(docId)?.ydoc.getMap('meta').get('drive')
-    return d && /^[0-9a-f]{32}$/.test(String(d.id)) && /^[0-9a-f]{64}$/.test(String(d.host))
+    const d = this.engine.getDoc(docId)?.ydoc.getMap(META).get('drive')
+    return d && isDocId(String(d.id)) && isHex64(String(d.host))
       ? { id: d.id, name: typeof d.name === 'string' ? d.name.slice(0, 120) : 'Team drive', host: d.host, online: this._hostOnline(docId, d.host) }
       : null
   }
@@ -184,7 +184,7 @@ export class TeamDrives {
     if (!cur) this.engine.addMember(docId, { userId: info.host, role: 'manager', enc: hostEnc })
     else if (cur.role !== 'manager') this.engine.setRole(docId, info.host, 'manager')
     if (drivePolicy(catalog.ydoc).handover && doc.members.handover?.to !== info.host) this.engine.setHandover(docId, { to: info.host, drive: driveId })
-    doc.ydoc.transact(() => doc.ydoc.getMap('meta').set('drive', { id: driveId, name: this.files.get(driveId)?.title || 'Team drive', host: info.host }), 'local')
+    doc.ydoc.transact(() => doc.ydoc.getMap(META).set('drive', { id: driveId, name: this.files.get(driveId)?.title || 'Team drive', host: info.host }), 'local')
     if (entry.type === 'folder') {
       for (const [childId, it] of this.shared.items(docId)) if (it.owner === this.identity.userId) this._enterDrive(childId, driveId, seen)
     }
@@ -204,7 +204,7 @@ export class TeamDrives {
       const keep = drivePolicy(this.engine.getDoc(driveId)?.ydoc).keepCopies
       this.engine.removeMember(docId, info.host, { after: keep ? 'keep' : 'hide' })
     }
-    doc.ydoc.transact(() => doc.ydoc.getMap('meta').delete('drive'), 'local')
+    doc.ydoc.transact(() => doc.ydoc.getMap(META).delete('drive'), 'local')
     if (this.files.get(docId)?.type === 'folder') for (const childId of this.shared.items(docId).keys()) this._leaveDrive(childId, driveId, seen)
   }
 }

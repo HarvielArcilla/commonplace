@@ -20,6 +20,7 @@ import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import { EventEmitter } from 'node:events'
+import { isHex64 } from './ids.js'
 
 export const CHUNK_SIZE = 256 * 1024
 const MAX_ASK = 32 // hashes per WANT
@@ -27,7 +28,6 @@ const IN_FLIGHT = 8 // per connection per file
 const TIMEOUT_MS = 30e3
 
 export const sha256 = (data) => crypto.createHash('sha256').update(data).digest('hex')
-const HEX64 = /^[0-9a-f]{64}$/
 
 export class BlobStore {
   constructor (dir) {
@@ -36,7 +36,7 @@ export class BlobStore {
   }
 
   _path (hash) {
-    if (!HEX64.test(hash)) throw new Error('bad chunk name')
+    if (!isHex64(hash)) throw new Error('bad chunk name')
     return path.join(this.dir, hash.slice(0, 2), hash)
   }
 
@@ -62,7 +62,7 @@ export class BlobStore {
     const out = []
     for (const sub of fs.existsSync(this.dir) ? fs.readdirSync(this.dir) : []) {
       if (!/^[0-9a-f]{2}$/.test(sub)) continue
-      for (const name of fs.readdirSync(path.join(this.dir, sub))) if (HEX64.test(name)) out.push(name)
+      for (const name of fs.readdirSync(path.join(this.dir, sub))) if (isHex64(name)) out.push(name)
     }
     return out
   }
@@ -93,7 +93,7 @@ export class ChunkExchange extends EventEmitter {
   // Asks peers for these chunks of a file, as they become available.
   want (docId, hashes) {
     const set = this.wanted.get(docId) || new Set()
-    for (const h of hashes) if (HEX64.test(h) && !this.blobs.has(h)) set.add(h)
+    for (const h of hashes) if (isHex64(h) && !this.blobs.has(h)) set.add(h)
     if (set.size) this.wanted.set(docId, set)
     this.pump(docId)
   }
@@ -136,7 +136,7 @@ export class ChunkExchange extends EventEmitter {
       if (!Array.isArray(ask)) return
       const missing = []
       for (const hash of ask.slice(0, MAX_ASK)) {
-        if (typeof hash !== 'string' || !HEX64.test(hash) || !this.allow(docId, hash) || !this.blobs.has(hash)) { missing.push(hash); continue }
+        if (typeof hash !== 'string' || !isHex64(hash) || !this.allow(docId, hash) || !this.blobs.has(hash)) { missing.push(hash); continue }
         this.send(conn, this.T.CHUNK, docId, Buffer.concat([Buffer.from(hash, 'hex'), this.blobs.read(hash)]))
       }
       if (missing.length) this.send(conn, this.T.NOCHUNK, docId, Buffer.from(JSON.stringify({ h: missing.filter((h) => typeof h === 'string') })))

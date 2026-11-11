@@ -15,6 +15,7 @@
 
 import crypto from 'node:crypto'
 import * as Y from 'yjs'
+import { META } from './container.js'
 
 const KEEP_ALL_MS = 2 * 24 * 3600e3 // everything from the last two days
 const DAILY_MS = 60 * 24 * 3600e3 // then one a day for two months, then one a week
@@ -134,6 +135,6 @@ export function restoreContent (ydoc, past, roots) {
       for (const [key, value] of from) to.set(key, copy(value))
     }
   }
-  const title = past.getMap('meta').get('title')
-  if (title != null) ydoc.getMap('meta').set('title', title)
+  const title = past.getMap(META).get('title')
+  if (title != null) ydoc.getMap(META).set('title', title)
 }

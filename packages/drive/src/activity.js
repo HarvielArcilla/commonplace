@@ -7,6 +7,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { EventEmitter } from 'node:events'
 import { readThreads, COMMENTS } from '@commonplace/core/threads'
+import { PEOPLE } from '@commonplace/core'
 
 const MAX_ITEMS = 300
 const GRACE_MS = 60e3
@@ -62,7 +63,7 @@ export class Activity extends EventEmitter {
     const entry = this.drive.files.get(docId)
     const known = this.known.get(docId)
     if (!doc || !entry || !known) return
-    const people = doc.ydoc.getMap('people')
+    const people = doc.ydoc.getMap(PEOPLE)
     const owner = this.drive.engine.access(docId)?.owner || entry.owner?.userId
     const fresh = []
     for (const { t, m } of this._messages(doc.ydoc)) {

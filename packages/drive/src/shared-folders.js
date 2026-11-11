@@ -26,11 +26,10 @@
 // the download rules for uploaded files (drive/files.js). A file you never
 // opened that leaves the folder leaves your Drive too.
 
-import { deriveDocKeys, canEdit } from '@commonplace/core'
+import { deriveDocKeys, canEdit, META, isHex64, isDocId } from '@commonplace/core'
 
 export const ITEMS = 'items'
 export const MAX_ITEMS = 1000
-const HEX32 = /^[0-9a-f]{32}$/
 
 export const folderApp = {
   type: 'folder',
@@ -54,7 +53,7 @@ export function folderItems (ydoc) {
   const out = new Map()
   for (const [docId, it] of ydoc.getMap(ITEMS).entries()) {
     if (out.size >= MAX_ITEMS) break
-    if (!HEX32.test(docId) || !it || typeof it.secret !== 'string') continue
+    if (!isDocId(docId) || !it || typeof it.secret !== 'string') continue
     let secret
     try { secret = Buffer.from(it.secret, 'base64') } catch { continue }
     if (secret.length !== 32 || deriveDocKeys(secret).docId !== docId) continue
@@ -62,7 +61,7 @@ export function folderItems (ydoc) {
       secret: it.secret,
       type: typeof it.type === 'string' ? it.type.slice(0, 40) : null,
       title: typeof it.title === 'string' ? it.title.slice(0, 200) : null,
-      owner: typeof it.owner === 'string' && /^[0-9a-f]{64}$/.test(it.owner) ? it.owner : null,
+      owner: typeof it.owner === 'string' && isHex64(it.owner) ? it.owner : null,
       ownerName: typeof it.ownerName === 'string' ? it.ownerName.slice(0, 40) : null,
       by: typeof it.by === 'string' ? it.by : null,
       at: Number(it.at) || 0
@@ -111,8 +110,8 @@ export class SharedFolders {
   // { host } for a team drive's catalog, else null. (A file in a team
   // drive says which one in its meta.drive too, with the drive's id.)
   driveInfo (folderId) {
-    const d = this.engine.getDoc(folderId)?.ydoc.getMap('meta').get('drive')
-    return d && !d.id && /^[0-9a-f]{64}$/.test(String(d.host)) ? { host: d.host } : null
+    const d = this.engine.getDoc(folderId)?.ydoc.getMap(META).get('drive')
+    return d && !d.id && isHex64(String(d.host)) ? { host: d.host } : null
   }
 
   // childId -> [folderId, ...]: which of my shared folders hold each file.

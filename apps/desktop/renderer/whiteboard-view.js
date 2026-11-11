@@ -12,6 +12,7 @@ import {
 import { shapeSvg, boardSvg, hits, FONT, DEFS } from '@commonplace/whiteboard/render'
 import { $, el } from './ui.js'
 import { toolButton, toolbarGroups, setToolbar, press, swatchMenu } from './toolbar.js'
+import { META } from '@commonplace/core/container'
 
 const NS = 'http://www.w3.org/2000/svg'
 const I = (d) => `<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`
@@ -107,7 +108,7 @@ export function mountWhiteboard (o) {
       const shown = el('div', { class: 'board-app board-preview' })
       shown.innerHTML = boardSvg(allShapes(ydoc), { measure: v.measure })
       $('#desk').append(shown)
-      return { title: ydoc.getMap('meta').get('title') || '', close () { shown.remove(); ydoc.destroy(); v.root.hidden = false } }
+      return { title: ydoc.getMap(META).get('title') || '', close () { shown.remove(); ydoc.destroy(); v.root.hidden = false } }
     },
     async exportPayload (format) {
       const svg = boardSvg(allShapes(v.ydoc), { measure: v.measure })

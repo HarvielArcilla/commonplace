@@ -4,9 +4,10 @@
 import * as Y from 'yjs'
 import { initTasks, preview, thumbnail, allCards, readLists, LISTS, LIST_DATA, CARDS } from './model.js'
 import { taskTemplates } from './templates.js'
+import { chosenVersions } from '@commonplace/core/container'
 
 // Conflict units: each card (everything but its exact place in the list),
-// each list's name, and the title.
+// each list's name.
 function units (ydoc) {
   const out = new Map()
   for (const c of allCards(ydoc)) {
@@ -14,20 +15,16 @@ function units (ydoc) {
     out.set(`card|${id}`, { kind: 'card', sig: JSON.stringify(props), text: [c.title || 'Untitled task', c.notes].filter(Boolean).join('\n'), props: c, prev: null })
   }
   for (const l of readLists(ydoc)) out.set(`list|${l.id}`, { kind: 'list', sig: l.name, text: l.name, prev: null })
-  const title = ydoc.getMap('meta').get('title')
-  if (title != null) out.set('title', { kind: 'title', sig: String(title), text: String(title), prev: null })
   return out
 }
 
 const snapshotUnit = (u) => (u?.props ? JSON.stringify(u.props) : null)
 
-// The owner's decision: one version of a card (or list name, or title).
+// The owner's decision: one version of a card (or list name).
 // 'both' keeps the first and adds the second as another card.
 function resolve (ydoc, rec, choice) {
   if (choice === 'current') return
-  const picked = choice === 'both' ? rec.versions : [rec.versions[Number(String(choice).slice(1))]].filter(Boolean)
-  const present = picked.filter((v) => v.exists)
-  if (rec.kind === 'title') { if (present.length) ydoc.getMap('meta').set('title', present.map((v) => v.text).join(' / ')); return }
+  const present = chosenVersions(rec, choice)
   const [kind, id] = rec.unit.split('|')
   if (kind === 'list') { if (present.length) ydoc.getMap(LIST_DATA).get(id)?.set('name', present.map((v) => v.text).join(' / ')); return }
   const cards = ydoc.getMap(CARDS)

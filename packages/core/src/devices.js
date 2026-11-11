@@ -29,10 +29,10 @@
 import crypto from 'node:crypto'
 import { EventEmitter } from 'node:events'
 import { canonical } from './canonical.js'
+import { isHex64 } from './ids.js'
 
 export const DEVICE_SIG = 0xd1 // first byte of a signature made by a computer's key
 const ED25519_SPKI_PREFIX = Buffer.from('302a300506032b6570032100', 'hex')
-const HEX64 = /^[0-9a-f]{64}$/
 const MAX_STATEMENTS = 400
 const MAX_STATEMENT_BYTES = 16 * 1024
 const TYPES = new Set(['root', 'add', 'revoke', 'key', 'protect'])
@@ -63,16 +63,16 @@ export function signatureDevice (sig) {
   return b.length === 97 && b[0] === DEVICE_SIG ? b.subarray(1, 33).toString('hex') : null
 }
 
-const validDevice = (d) => d && HEX64.test(d.id) && HEX64.test(d.enc)
+const validDevice = (d) => d && isHex64(d.id) && isHex64(d.enc)
 
 function wellFormed (userId, s) {
   if (!s || typeof s !== 'object' || s.u !== userId || !TYPES.has(s.t) || typeof s.sig !== 'string') return false
   if (Buffer.byteLength(JSON.stringify(s)) > MAX_STATEMENT_BYTES) return false
   if (s.t !== 'protect' && !(Number.isInteger(s.gen) && s.gen >= 1)) return false
   if (s.t === 'root') return Array.isArray(s.devs) && s.devs.length <= 64 && s.devs.every(validDevice)
-  if (s.t === 'add') return validDevice(s.dev) && (s.by === 'root' || HEX64.test(s.by))
-  if (s.t === 'revoke') return HEX64.test(s.dev) && (s.by === 'root' || HEX64.test(s.by))
-  if (s.t === 'key') return Number.isInteger(s.n) && s.n >= 1 && HEX64.test(s.pub) && HEX64.test(s.by) && s.grants && typeof s.grants === 'object'
+  if (s.t === 'add') return validDevice(s.dev) && (s.by === 'root' || isHex64(s.by))
+  if (s.t === 'revoke') return isHex64(s.dev) && (s.by === 'root' || isHex64(s.by))
+  if (s.t === 'key') return Number.isInteger(s.n) && s.n >= 1 && isHex64(s.pub) && isHex64(s.by) && s.grants && typeof s.grants === 'object'
   return true
 }
 
@@ -126,7 +126,7 @@ export function userState (userId, statements = []) {
     for (const k of keys) if (k.n === key.n && k.pub === key.pub) Object.assign(grants, k.grants)
     key = { ...key, grants }
   }
-  const enc = roots.find((r) => r.gen === gen && HEX64.test(r.enc || ''))?.enc || null
+  const enc = roots.find((r) => r.gen === gen && isHex64(r.enc || ''))?.enc || null
   return {
     userId,
     gen,
@@ -170,7 +170,7 @@ export class Directory extends EventEmitter {
   // Adds statements; true if anything new was learned. Statements that
   // can't belong to this person are dropped.
   merge (userId, statements) {
-    if (!HEX64.test(String(userId)) || !Array.isArray(statements)) return false
+    if (!isHex64(String(userId)) || !Array.isArray(statements)) return false
     const log = this.logs.get(userId) || new Map()
     const before = new Set(log.keys())
     let added = false

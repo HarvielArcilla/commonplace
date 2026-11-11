@@ -3,8 +3,9 @@
 
 import * as Y from 'yjs'
 import { initCalendar, preview, thumbnail, allEvents, EVENTS } from './model.js'
+import { chosenVersions } from '@commonplace/core/container'
 
-// Conflict units: each event, and the title.
+// Conflict units: each event.
 function units (ydoc) {
   const out = new Map()
   for (const e of allEvents(ydoc)) {
@@ -12,8 +13,6 @@ function units (ydoc) {
     const when = e.allDay ? e.start : new Date(e.start).toLocaleString()
     out.set(`event|${id}`, { kind: 'event', sig: JSON.stringify(props), text: `${e.title || 'Untitled event'} (${when})${e.location ? `\n${e.location}` : ''}`, props, prev: null })
   }
-  const title = ydoc.getMap('meta').get('title')
-  if (title != null) out.set('title', { kind: 'title', sig: String(title), text: String(title), prev: null })
   return out
 }
 
@@ -22,9 +21,7 @@ const snapshotUnit = (u) => (u?.props ? JSON.stringify(u.props) : null)
 // The owner's decision: one version of an event; 'both' keeps both events.
 function resolve (ydoc, rec, choice) {
   if (choice === 'current') return
-  const picked = choice === 'both' ? rec.versions : [rec.versions[Number(String(choice).slice(1))]].filter(Boolean)
-  const present = picked.filter((v) => v.exists)
-  if (rec.kind === 'title') { if (present.length) ydoc.getMap('meta').set('title', present.map((v) => v.text).join(' / ')); return }
+  const present = chosenVersions(rec, choice)
   const id = rec.unit.split('|')[1]
   const events = ydoc.getMap(EVENTS)
   if (!present.length) { events.delete(id); return }

@@ -17,7 +17,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import Hyperswarm from 'hyperswarm'
 import * as Y from 'yjs'
-import { seal, open, installIdentity, newDeviceKeys, FileStore } from '@commonplace/core'
+import { seal, open, installIdentity, newDeviceKeys, FileStore, isDocId } from '@commonplace/core'
 
 const PREFIX = 'cpmove1.'
 const EXPIRES_MS = 15 * 60 * 1000
@@ -136,7 +136,7 @@ export function receiveDrive ({ code, dataDir, isEmpty, swarm = {}, onStatus = (
           if (msg.type === 'identity') identity = msg.identity
           else if (msg.type === 'index') index = msg.index
           else if (msg.type === 'doc') {
-            if (!/^[0-9a-f]{32}$/.test(msg.docId)) return
+            if (!isDocId(msg.docId)) return
             docs.push(msg.docId)
             new FileStore(path.join(staging, 'files')).importDoc(msg.docId, msg.files)
             onStatus({ phase: 'receiving', count: docs.length })

@@ -11,11 +11,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { randomBytes } from 'node:crypto'
 import * as Y from 'yjs'
-import {
-  FileStore, SyncEngine, SwarmTransport, LanTransport, RelayClient, formatRelayAddress, loadOrCreateIdentity, canEdit,
-  newDocSecret, deriveDocKeys, encodeInvite, parseInvite, initContainer, readMeta, updatePerson,
-  History, restoreContent, BlobStore, directory
-} from '@commonplace/core'
+import { FileStore, SyncEngine, SwarmTransport, LanTransport, RelayClient, formatRelayAddress, loadOrCreateIdentity, canEdit, newDocSecret, deriveDocKeys, encodeInvite, parseInvite, initContainer, readMeta, updatePerson, History, restoreContent, BlobStore, directory, META, PEOPLE, AUTHORS, isHex64 } from '@commonplace/core'
 import { Files, filesApp } from './files.js'
 import { Policy } from './policy.js'
 import { Guests } from './guests.js'
@@ -283,7 +279,7 @@ export class Drive extends EventEmitter {
     const status = this.engine.status(docId) || { peers: [], here: [], pending: 0, active: false }
     const app = this.appsByType.get(entry.type)
     const doc = this.engine.getDoc(docId)
-    const people = doc?.ydoc.getMap('people')
+    const people = doc?.ydoc.getMap(PEOPLE)
     // Names: what people wrote in the file, else what they told us when they
     // connected (remembered for when they're offline), else a placeholder.
     const nameOf = (userId, fallback) => people?.get(userId)?.name || fallback || entry.names?.[userId] || 'Someone'
@@ -448,7 +444,7 @@ export class Drive extends EventEmitter {
       docId,
       secret: parsed.secret.toString('base64'),
       invite: parsed.token,
-      inviteRelays: Array.isArray(parsed.token.h) ? parsed.token.h.filter((k) => /^[0-9a-f]{64}$/.test(k)).slice(0, 4) : [],
+      inviteRelays: Array.isArray(parsed.token.h) ? parsed.token.h.filter((k) => isHex64(k)).slice(0, 4) : [],
       type: null,
       title: 'Waiting for a peer…',
       owner: { userId: parsed.token.by, name: typeof parsed.token.n === 'string' ? parsed.token.n.slice(0, 40) : null },
@@ -535,7 +531,7 @@ export class Drive extends EventEmitter {
     const where = this.shared.placeOf(docId)
     const copyId = await this.create(entry.type, `Copy of ${entry.title || 'Untitled'}`.slice(0, 200), {
       folderId: where && this.shared.isFolder(where) && canEdit(this.engine.access(where)?.role) ? where : this.folders.has(entry.folderId) ? entry.folderId : null,
-      build: (ydoc) => { restoreContent(ydoc, doc.ydoc, roots); ydoc.getMap('meta').set('title', `Copy of ${entry.title || 'Untitled'}`.slice(0, 200)) }
+      build: (ydoc) => { restoreContent(ydoc, doc.ydoc, roots); ydoc.getMap(META).set('title', `Copy of ${entry.title || 'Untitled'}`.slice(0, 200)) }
     })
     return copyId
   }
@@ -583,7 +579,7 @@ export class Drive extends EventEmitter {
     for (const entry of this.files.values()) {
       const doc = this.engine.getDoc(entry.docId)
       if (!doc || !entry.type) continue
-      const known = doc.ydoc.getMap('people').has(this.identity.userId)
+      const known = doc.ydoc.getMap(PEOPLE).has(this.identity.userId)
       if (known || entry.contributed || doc.members.owner === this.identity.userId) this.touchPerson(entry.docId)
     }
     this._changed()
@@ -690,7 +686,7 @@ export class Drive extends EventEmitter {
 
   // Edits Drive makes itself (restores, conflict decisions) are mine too.
   _signLocalEdits (doc) {
-    const authors = doc.ydoc.getMap('authors')
+    const authors = doc.ydoc.getMap(AUTHORS)
     if (!authors.has(String(doc.ydoc.clientID))) authors.set(String(doc.ydoc.clientID), { userId: this.identity.userId })
   }
 
@@ -699,8 +695,8 @@ export class Drive extends EventEmitter {
     let by = null
     try {
       const client = Y.decodeUpdate(update).structs[0]?.id.client
-      const userId = doc?.ydoc.getMap('authors').get(String(client))?.userId
-      if (userId && userId !== this.identity.userId) by = doc.ydoc.getMap('people').get(userId)?.name || null
+      const userId = doc?.ydoc.getMap(AUTHORS).get(String(client))?.userId
+      if (userId && userId !== this.identity.userId) by = doc.ydoc.getMap(PEOPLE).get(userId)?.name || null
     } catch {}
     const prev = this._recent.get(docId)
     this._recent.set(docId, { at: Date.now(), by: by || prev?.by || null })
@@ -736,16 +732,16 @@ export class Drive extends EventEmitter {
       // Files I created before membership existed get one now, keeping
       // everyone who has already worked on them as editors.
       if (meta.owner?.userId === this.identity.userId && !doc.members.exists) {
-        const members = [...doc.ydoc.getMap('people').keys()]
-          .filter((id) => id !== this.identity.userId && /^[0-9a-f]{64}$/.test(id))
+        const members = [...doc.ydoc.getMap(PEOPLE).keys()]
+          .filter((id) => id !== this.identity.userId && isHex64(id))
           .map((userId) => ({ userId, role: 'editor' }))
         this.engine.ensureMembership(entry.docId, { members })
       }
       this.engine.retireLegacyLinks(entry.docId)
     }
     doc.meta.observe(refresh)
-    doc.ydoc.getMap('authors').observe(refresh)
-    doc.ydoc.getMap('people').observe(refresh)
+    doc.ydoc.getMap(AUTHORS).observe(refresh)
+    doc.ydoc.getMap(PEOPLE).observe(refresh)
     doc.ydoc.getMap(RELAYS_MAP).observe(() => this._applyRelays(entry.docId))
     // A shared folder's contents decide who gets what.
     let watching = false

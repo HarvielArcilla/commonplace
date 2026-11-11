@@ -5,8 +5,9 @@ import { initSheets, preview, previewGrid, sheetList, sheetMap, context, SHEETS,
 import { RULES } from './rules.js'
 import { sheetTemplates } from './templates.js'
 import { toDisplay } from './formula.js'
+import { chosenVersions } from '@commonplace/core/container'
 
-// Conflict units: every cell that has something in it (plus the title).
+// Conflict units: every cell that has something in it.
 function units (ydoc) {
   const out = new Map()
   for (const s of sheetList(ydoc)) {
@@ -15,8 +16,6 @@ function units (ydoc) {
       out.set(`${s.id}|${key}`, { kind: 'cell', sheetId: s.id, key, sig: JSON.stringify(cell), text: toDisplay(cell.v, ctx) || '(empty)', cell, prev: null })
     }
   }
-  const title = ydoc.getMap('meta').get('title')
-  if (title != null) out.set('title', { kind: 'title', sig: String(title), text: String(title), prev: null })
   return out
 }
 
@@ -26,12 +25,7 @@ const snapshotUnit = (u) => (u?.cell ? JSON.stringify(u.cell) : null)
 // (the texts side by side in the cell) or 'current'.
 function resolve (ydoc, rec, choice) {
   if (choice === 'current') return
-  const picked = choice === 'both' ? rec.versions : [rec.versions[Number(String(choice).slice(1))]].filter(Boolean)
-  const present = picked.filter((v) => v.exists)
-  if (rec.kind === 'title') {
-    if (present.length) ydoc.getMap('meta').set('title', present.map((v) => v.text).join(' / '))
-    return
-  }
+  const present = chosenVersions(rec, choice)
   const [sheetId, key] = rec.unit.split('|')
   const cells = sheetMap(ydoc, sheetId)?.get('cells')
   if (!cells) return

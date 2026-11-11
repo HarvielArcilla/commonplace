@@ -54,6 +54,7 @@ import crypto from 'node:crypto'
 import { signatureStatus } from './devices.js'
 import { sealTo } from './seal.js'
 import { canonical } from './canonical.js'
+import { isHex64 } from './ids.js'
 
 export const ROLES = ['viewer', 'commenter', 'respondent', 'editor', 'manager', 'owner']
 // Roles the owner can give someone. A respondent reads the file and may add
@@ -205,7 +206,7 @@ function apply (s, e, i) {
       s.handover = null // the new owner hasn't promised anything
       break
     case 'handover':
-      if (e.to != null && !/^[0-9a-f]{64}$/.test(String(e.to))) throw new Error('bad handover')
+      if (e.to != null && !isHex64(String(e.to))) throw new Error('bad handover')
       s.handover = e.to ? { to: e.to, drive: typeof e.drive === 'string' ? e.drive.slice(0, 64) : null } : null
       break
     case 'revoke-invites':

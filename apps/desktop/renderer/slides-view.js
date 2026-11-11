@@ -16,6 +16,7 @@ import { toolButton, toolbarGroups, setToolbar, press, swatchMenu, showValue, TE
 import { countBy, badges } from './comment-marks.js'
 import { scaled, renderSlide, textColor } from './slide-render.js'
 import { present } from './slides-present.js'
+import { META } from '@commonplace/core/container'
 
 const SIZES = [12, 14, 16, 18, 20, 24, 28, 32, 36, 44, 54, 66, 80]
 const BACKGROUNDS = [['White', '#ffffff'], ['Paper', '#fbfbf9'], ['Mist', '#eef1f6'], ['Sand', '#f3e6cf'], ['Sage', '#e3ece4'], ['Ink', '#1f2430'], ['Navy', '#1d2c4d'], ['Forest', '#1f3a2e']]
@@ -84,7 +85,7 @@ export function mountSlides (o) {
       v.root.hidden = true
       const list = el('div', { class: 'slides-preview' }, ...slideIds(ydoc).map((id) => scaled(renderSlide(ydoc, id), 0.5)))
       $('#desk').append(list)
-      return { title: ydoc.getMap('meta').get('title') || '', close () { list.remove(); ydoc.destroy(); v.root.hidden = false } }
+      return { title: ydoc.getMap(META).get('title') || '', close () { list.remove(); ydoc.destroy(); v.root.hidden = false } }
     },
     async exportPayload (format) {
       if (format !== 'pdf') return { payload: {} }

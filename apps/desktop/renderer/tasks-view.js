@@ -11,6 +11,7 @@ import { $, el, openMenu, confirmAction } from './ui.js'
 import { state } from './state.js'
 import { toolButton, toolbarGroups, setToolbar, press } from './toolbar.js'
 import { countBy, badges } from './comment-marks.js'
+import { META } from '@commonplace/core/container'
 
 const ICON = {
   board: '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="2" y="2.5" width="3.5" height="11" rx="1"/><rect x="6.25" y="2.5" width="3.5" height="7" rx="1"/><rect x="10.5" y="2.5" width="3.5" height="9" rx="1"/></svg>',
@@ -73,7 +74,7 @@ export function mountTasks (o) {
       v.root.hidden = true
       const shown = el('div', { class: 'tasks-app' }, el('div', { class: 'tasks-main' }, board({ ...v, ydoc, writable: false, open: null, preview: true })))
       $('#desk').append(shown)
-      return { title: ydoc.getMap('meta').get('title') || '', close () { shown.remove(); ydoc.destroy(); v.root.hidden = false } }
+      return { title: ydoc.getMap(META).get('title') || '', close () { shown.remove(); ydoc.destroy(); v.root.hidden = false } }
     },
     async exportPayload () { return { payload: { names: memberNames(v) } } },
     comments: {

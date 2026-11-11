@@ -12,6 +12,7 @@ import { state, cp } from './state.js'
 import { toolButton, sep, swatchMenu, showValue, setToolbar, TEXT_COLORS } from './toolbar.js'
 import { attachReview, recordMySuggestions, newComment } from './comments-view.js'
 import { attachChipMenu, openChip, sendToTasks } from './doc-chips.js'
+import { META } from '@commonplace/core/container'
 
 // Fonts that ship with both macOS and Windows (plus Office's), so a document
 // looks the same on everyone's computer.
@@ -157,7 +158,7 @@ function previewDocs (o, update) {
     onLayout: ({ pages, geometry }) => { if (paper) drawSheets(paper, pages, geometry) }
   })
   return {
-    title: ydoc.getMap('meta').get('title') || '',
+    title: ydoc.getMap(META).get('title') || '',
     close () {
       editor.destroy()
       awareness.destroy()
@@ -219,7 +220,7 @@ function syncZoomControl (pref, zoom) {
 // The pages behind the text, with their header and footer lines.
 function drawSheets (paper, pages, g) {
   const sheets = paper.querySelector('.sheets')
-  const title = state.open?.ydoc.getMap('meta').get('title') || ''
+  const title = state.open?.ydoc.getMap(META).get('title') || ''
   const geo = JSON.stringify([g.width, g.height, g.header, g.footer, title, pages])
   if (sheets.dataset.geo !== geo) {
     sheets.dataset.geo = geo

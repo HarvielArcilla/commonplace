@@ -7,7 +7,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { randomBytes } from 'node:crypto'
 import * as Y from 'yjs'
-import { restoreContent } from '@commonplace/core'
+import { restoreContent, META } from '@commonplace/core'
 
 const MAX_MINE = 200
 const MAX_BYTES = 20 * 1024 * 1024
@@ -93,7 +93,7 @@ export class Templates {
     if (mine.length >= MAX_MINE) throw new Error(`You can keep up to ${MAX_MINE} templates. Delete one first.`)
     const snap = new Y.Doc()
     restoreContent(snap, doc.ydoc, app.history.roots)
-    snap.getMap('meta').delete('title')
+    snap.getMap(META).delete('title')
     const bytes = Y.encodeStateAsUpdate(snap)
     snap.destroy()
     if (bytes.length > MAX_BYTES) throw new Error('This file is too big to be a template.')

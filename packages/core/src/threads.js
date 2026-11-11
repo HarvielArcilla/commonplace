@@ -13,13 +13,14 @@
 // replying at once both land.
 
 import * as Y from 'yjs'
+import { isHex64 } from './ids.js'
 
 export const COMMENTS = 'comments'
 const MAX_TEXT = 4000
 const MAX_MENTIONS = 20
 const newId = () => Array.from(globalThis.crypto.getRandomValues(new Uint8Array(8)), (b) => b.toString(16).padStart(2, '0')).join('')
 const clean = (text) => String(text ?? '').trim().slice(0, MAX_TEXT)
-const cleanMentions = (list) => [...new Set((Array.isArray(list) ? list : []).filter((u) => typeof u === 'string' && /^[0-9a-f]{64}$/.test(u)))].slice(0, MAX_MENTIONS)
+const cleanMentions = (list) => [...new Set((Array.isArray(list) ? list : []).filter((u) => typeof u === 'string' && isHex64(u)))].slice(0, MAX_MENTIONS)
 const cleanAnchor = (a) => {
   if (!a || typeof a !== 'object') return null
   const out = {}

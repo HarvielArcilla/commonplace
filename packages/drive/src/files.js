@@ -23,7 +23,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
 import { EventEmitter } from 'node:events'
-import { CHUNK_SIZE, canEdit } from '@commonplace/core'
+import { CHUNK_SIZE, canEdit, isHex64 } from '@commonplace/core'
 import { HARD_MAX_FILE_BYTES, DEFAULT_POLICY } from './policy.js'
 
 export const MAX_FILE_BYTES = DEFAULT_POLICY.maxFileBytes
@@ -78,8 +78,8 @@ export const currentVersion = (ydoc) => {
 
 function validVersion (v) {
   return v && typeof v.id === 'string' && Number.isInteger(v.size) && v.size >= 0 && v.size <= HARD_MAX_FILE_BYTES &&
-    Array.isArray(v.chunks) && v.chunks.length === Math.ceil(v.size / CHUNK_SIZE) && v.chunks.every((h) => /^[0-9a-f]{64}$/.test(h)) &&
-    /^[0-9a-f]{64}$/.test(v.sha256)
+    Array.isArray(v.chunks) && v.chunks.length === Math.ceil(v.size / CHUNK_SIZE) && v.chunks.every((h) => isHex64(h)) &&
+    isHex64(v.sha256)
 }
 
 export const filesApp = {

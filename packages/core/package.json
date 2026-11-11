@@ -6,7 +6,9 @@
   "exports": {
     ".": "./src/index.js",
     "./relay-protocol": "./src/relay-protocol.js",
-    "./threads": "./src/threads.js"
+    "./threads": "./src/threads.js",
+    "./container": "./src/container.js",
+    "./ids": "./src/ids.js"
   },
   "dependencies": {
     "@hyperswarm/secret-stream": "^6.9.2",

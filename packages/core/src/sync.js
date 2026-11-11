@@ -25,6 +25,8 @@ import { mayApply, usesOutbox } from './gate.js'
 import { directory, signatureDevice } from './devices.js'
 import { ChunkExchange, BlobStore } from './chunks.js'
 import { stateVectorMap, hasOpsBeyond, sameState, docFrom } from './conflicts.js'
+import { META } from './container.js'
+import { isHex64 } from './ids.js'
 
 const EMPTY_UPDATE_BYTES = 2
 
@@ -85,7 +87,7 @@ class DocHandle {
     this._statusTimer = null
   }
 
-  get meta () { return this.ydoc.getMap('meta') }
+  get meta () { return this.ydoc.getMap(META) }
 
   // The current epoch: the membership log's, or for a document without
   // one (the Drive index) the newest key held (see setPrivateKey).
@@ -823,7 +825,7 @@ export class SyncEngine extends EventEmitter {
     const info = hello.info || {}
     // The peer proves who they are by signing this document, epoch and the
     // Noise key of this very connection.
-    if (typeof info.userId !== 'string' || !/^[0-9a-f]{64}$/.test(info.userId)) return
+    if (typeof info.userId !== 'string' || !isHex64(info.userId)) return
     if (Array.isArray(info.ul)) directory.merge(info.userId, info.ul)
     const sig = Buffer.from(String(info.sig || ''), 'base64')
     if (!conn.remoteId || !verifySignature(info.userId, helloProof(doc.docId, epoch, conn.remoteId, info.enc), sig, { fresh: true })) return
@@ -847,7 +849,7 @@ export class SyncEngine extends EventEmitter {
     link.device = info.device && typeof info.device === 'object'
       ? { id: String(info.device.id || '').slice(0, 32), name: String(info.device.name || 'Another computer').slice(0, 60) }
       : null
-    link.enc = typeof info.enc === 'string' && /^[0-9a-f]{64}$/.test(info.enc) ? info.enc : null
+    link.enc = typeof info.enc === 'string' && isHex64(info.enc) ? info.enc : null
     link.invite = info.invite && typeof info.invite === 'object' ? info.invite : null
     link.epochs.add(epoch)
     link.lastSV = stateVectorMap(hello.stateVector)

@@ -4,8 +4,9 @@
 import * as Y from 'yjs'
 import { initBoard, preview, thumbnail, allShapes, HAS_TEXT, SHAPES } from './model.js'
 import { boardTemplates } from './templates.js'
+import { chosenVersions } from '@commonplace/core/container'
 
-// Conflict units: each shape, and the title. A shape's signature covers its
+// Conflict units: each shape. A shape's signature covers its
 // place, look and text.
 function units (ydoc) {
   const out = new Map()
@@ -13,8 +14,6 @@ function units (ydoc) {
     const { id, ...props } = s
     out.set(`shape|${id}`, { kind: 'shape', sig: JSON.stringify(props), text: s.text || `${s.type} shape`, props, prev: null })
   }
-  const title = ydoc.getMap('meta').get('title')
-  if (title != null) out.set('title', { kind: 'title', sig: String(title), text: String(title), prev: null })
   return out
 }
 
@@ -24,9 +23,7 @@ const snapshotUnit = (u) => (u?.props ? JSON.stringify(u.props) : null)
 // second a little offset.
 function resolve (ydoc, rec, choice) {
   if (choice === 'current') return
-  const picked = choice === 'both' ? rec.versions : [rec.versions[Number(String(choice).slice(1))]].filter(Boolean)
-  const present = picked.filter((v) => v.exists)
-  if (rec.kind === 'title') { if (present.length) ydoc.getMap('meta').set('title', present.map((v) => v.text).join(' / ')); return }
+  const present = chosenVersions(rec, choice)
   const id = rec.unit.split('|')[1]
   const shapes = ydoc.getMap(SHAPES)
   if (!present.length) { shapes.delete(id); return }

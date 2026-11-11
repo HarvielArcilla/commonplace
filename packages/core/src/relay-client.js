@@ -32,6 +32,7 @@ import { usesOutbox } from './gate.js'
 import { directory } from './devices.js'
 import { verifySignature } from './identity.js'
 import { MsgReader, encodeMsg, boxKeys, putProof, compactProof, chunkProof, sha256hex, MAX_NAMES } from './relay-protocol.js'
+import { isHex64 } from './ids.js'
 
 const PUTS_IN_FLIGHT = 4 // chunks being sent to one relay at once
 
@@ -70,7 +71,7 @@ export class RelayClient extends EventEmitter {
 
   // Which relays a file uses (from the file itself, or the invite).
   setRelays (docId, keys) {
-    const next = new Set(keys.filter((k) => /^[0-9a-f]{64}$/.test(k)))
+    const next = new Set(keys.filter((k) => isHex64(k)))
     const before = new Set([...this.docRelays.values()].flatMap((s) => [...s]))
     if (next.size) this.docRelays.set(docId, next)
     else this.docRelays.delete(docId)

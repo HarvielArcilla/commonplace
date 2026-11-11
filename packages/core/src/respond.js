@@ -16,6 +16,7 @@
 
 import crypto from 'node:crypto'
 import * as Y from 'yjs'
+import { isHex64 } from './ids.js'
 
 export const RESPONSES = 'responses'
 export const MAX_RESPONSE_BYTES = 256 * 1024
@@ -32,7 +33,7 @@ export function responseUpdate (userId, value) {
 }
 
 export function isResponseUpdate (update, userId) {
-  if (!update || update.length > MAX_RESPONSE_BYTES || !/^[0-9a-f]{64}$/.test(String(userId))) return false
+  if (!update || update.length > MAX_RESPONSE_BYTES || !isHex64(String(userId))) return false
   let decoded
   try { decoded = Y.decodeUpdate(update) } catch { return false }
   const { structs, ds } = decoded

@@ -12,12 +12,12 @@
 // A team drive's catalog: a shared folder owned by the server's identity,
 // with meta.drive = { host } and its rules in the 'policy' map.
 
+import { isDocId } from '@commonplace/core'
+
 export const STATUS = 'status'
 export const DRIVES = 'drives'
 export const REQUESTS = 'requests'
 export const POLICY = 'policy'
-
-const HEX32 = /^[0-9a-f]{32}$/
 
 // What a server can be asked to do.
 export const REQUEST_KINDS = ['createDrive', 'adminLink', 'driveAdmin']
@@ -55,7 +55,7 @@ export function readServerDoc (ydoc) {
   const num = (k) => (Number.isFinite(s.get(k)) ? s.get(k) : null)
   const drives = []
   for (const [id, d] of ydoc.getMap(DRIVES).entries()) {
-    if (!HEX32.test(id) || !d || typeof d.secret !== 'string') continue
+    if (!isDocId(id) || !d || typeof d.secret !== 'string') continue
     drives.push({ id, name: typeof d.name === 'string' ? d.name.slice(0, 120) : 'Team drive', secret: d.secret, at: Number(d.at) || 0 })
   }
   return {

@@ -22,7 +22,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import zlib from 'node:zlib'
 import { EventEmitter } from 'node:events'
-import { seal, open, FileStore, bundleForNewComputer } from '@commonplace/core'
+import { seal, open, FileStore, bundleForNewComputer, isDocId } from '@commonplace/core'
 import { installStaged } from './move.js'
 
 const MAGIC = 'commonplace-backup 1\n'
@@ -86,7 +86,7 @@ export async function restoreBackup ({ payload, dataDir, beforeInstall, recovery
     const store = new FileStore(path.join(staging, 'files'))
     let count = 0
     for (const doc of payload.docs) {
-      if (!/^[0-9a-f]{32}$/.test(doc.docId)) continue
+      if (!isDocId(doc.docId)) continue
       store.importDoc(doc.docId, doc.files)
       count++
     }

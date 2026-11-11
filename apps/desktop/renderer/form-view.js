@@ -12,6 +12,7 @@ import { $, el, toast, openMenu, cleanError, ago } from './ui.js'
 import { state, cp, editorRole } from './state.js'
 import { toolButton, labeledButton, toolbarGroups, setToolbar } from './toolbar.js'
 import { countBy, badges } from './comment-marks.js'
+import { META } from '@commonplace/core/container'
 
 const PLUS = '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M8 3v10M3 8h10"/></svg>'
 
@@ -83,7 +84,7 @@ export function mountForm (o) {
       v.root.hidden = true
       const shown = el('div', { class: 'form-app' }, fillForm(ydoc, { answers: {}, disabled: true }))
       $('#desk').append(shown)
-      return { title: ydoc.getMap('meta').get('title') || '', close () { shown.remove(); ydoc.destroy(); v.root.hidden = false } }
+      return { title: ydoc.getMap(META).get('title') || '', close () { shown.remove(); ydoc.destroy(); v.root.hidden = false } }
     },
     async exportPayload () { return { payload: {} } },
     exportFormats: { csv: 'Answers (.csv)' },
@@ -113,7 +114,7 @@ function render (v) {
     const mine = [...v.ydoc.getMap('responses').keys()].filter((k) => k.startsWith(`${state.me.userId}.`)).length
     v.root.replaceChildren(el('div', { class: 'form-page' },
       el('div', { class: 'form-card form-head' },
-        el('h1', { class: 'form-title' }, v.ydoc.getMap('meta').get('title') || 'Untitled form'),
+        el('h1', { class: 'form-title' }, v.ydoc.getMap(META).get('title') || 'Untitled form'),
         el('p', { class: 'form-description' }, form.confirmation),
         el('p', { class: 'form-fine' }, sentNote(v)),
         mine > 1 ? el('p', { class: 'form-fine' }, `You’ve answered ${mine} times.`) : null,
@@ -170,7 +171,7 @@ function fillForm (ydoc, { answers, disabled = false, onSubmit = null }) {
   const questions = readQuestions(ydoc)
   return el('div', { class: 'form-page' },
     el('div', { class: 'form-card form-head' },
-      el('h1', { class: 'form-title' }, ydoc.getMap('meta').get('title') || 'Untitled form'),
+      el('h1', { class: 'form-title' }, ydoc.getMap(META).get('title') || 'Untitled form'),
       form.description ? el('p', { class: 'form-description' }, form.description) : null,
       questions.some((q) => q.required) ? el('p', { class: 'form-fine' }, el('span', { class: 'req' }, '*'), ' Required') : null),
     ...questions.map((q) => el('div', { class: 'form-card', 'data-q': q.id },

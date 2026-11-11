@@ -32,6 +32,7 @@ import { mountCalendar } from './calendar-view.js'
 import { mountWhiteboard } from './whiteboard-view.js'
 import { mountForm } from './form-view.js'
 import { mountFile } from './file-view.js'
+import { META, AUTHORS } from '@commonplace/core/container'
 
 const VIEWS = { markdown: mountDocs, paged: mountDocs, sheet: mountSheet, slides: mountSlides, tasks: mountTasks, calendar: mountCalendar, whiteboard: mountWhiteboard, form: mountForm, file: mountFile }
 
@@ -75,12 +76,12 @@ export async function openDocument (docId, { focusTitle = false, initialContent 
   // Record that this editing session belongs to me (for "written by"), but
   // only once I actually change something: opening a file is not an edit.
   // (Commenters never change the text, and may change nothing but comments.)
-  let authored = ydoc.getMap('authors').has(String(ydoc.clientID))
+  let authored = ydoc.getMap(AUTHORS).has(String(ydoc.clientID))
   const mayEdit = () => editorRole(state.files.find((x) => x.docId === docId)?.role)
   ydoc.on('update', (_u, origin) => {
     if (authored || origin === 'main' || !mayEdit()) return
     authored = true
-    queueMicrotask(() => { if (!ydoc.isDestroyed) ydoc.getMap('authors').set(String(ydoc.clientID), { userId: state.me.userId }) })
+    queueMicrotask(() => { if (!ydoc.isDestroyed) ydoc.getMap(AUTHORS).set(String(ydoc.clientID), { userId: state.me.userId }) })
   })
   awareness.setLocalStateField('user', { name: state.me.name, color: state.me.color, userId: state.me.userId })
 
@@ -95,7 +96,7 @@ export async function openDocument (docId, { focusTitle = false, initialContent 
   $('[data-action="history"]').hidden = Boolean(o.view.noHistory)
 
   // Title lives in the shared container metadata.
-  const meta = ydoc.getMap('meta')
+  const meta = ydoc.getMap(META)
   const title = $('#doc-title')
   const showTitle = () => { if (document.activeElement !== title && !o.closePreview) title.value = meta.get('title') || '' }
   meta.observe(showTitle)
@@ -130,7 +131,7 @@ export function showPreview (update) {
     o.closePreview = null
     shown.close()
     $('#doc-view').classList.remove('previewing')
-    $('#doc-title').value = o.ydoc.getMap('meta').get('title') || ''
+    $('#doc-title').value = o.ydoc.getMap(META).get('title') || ''
     renderDocMargin()
   }
   o.closePreview = close

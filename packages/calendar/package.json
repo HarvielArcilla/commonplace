@@ -8,7 +8,8 @@
     "./ics": "./src/ics.js"
   },
   "dependencies": {
-    "yjs": "^13.6.33"
+    "yjs": "^13.6.33",
+    "@commonplace/core": "0.1.0"
   },
   "license": "MIT"
 }

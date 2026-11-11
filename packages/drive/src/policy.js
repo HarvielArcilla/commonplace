@@ -7,6 +7,7 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
+import { isHex64 } from '@commonplace/core'
 
 const KB = 1024
 const MB = 1024 * KB
@@ -58,7 +59,6 @@ export function normalizePolicy (p = {}) {
 }
 
 const today = () => new Date().toISOString().slice(0, 10)
-const USER = /^[0-9a-f]{64}$/
 
 export class Policy {
   // overrides: values that replace the defaults (tests, or a packaged build).
@@ -69,7 +69,7 @@ export class Policy {
     this.fresh = !saved.values // nothing saved yet on this computer
     this.defaults = normalizePolicy({ ...DEFAULT_POLICY, ...overrides })
     this.values = normalizePolicy({ ...this.defaults, ...(saved.values || {}) })
-    this.blocked = Array.isArray(saved.blocked) ? saved.blocked.filter((b) => USER.test(b?.userId)) : []
+    this.blocked = Array.isArray(saved.blocked) ? saved.blocked.filter((b) => isHex64(b?.userId)) : []
     this.ledger = readJson(this.ledgerFile)
     this.listeners = new Set()
   }
@@ -96,7 +96,7 @@ export class Policy {
   isBlocked (userId) { return this.blocked.some((b) => b.userId === userId) }
 
   block ({ userId, name }) {
-    if (!USER.test(userId) || this.isBlocked(userId)) return
+    if (!isHex64(userId) || this.isBlocked(userId)) return
     this.blocked.push({ userId, name: String(name || 'Someone').slice(0, 80), at: Date.now() })
     this._save()
   }

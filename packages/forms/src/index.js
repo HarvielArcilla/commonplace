@@ -5,9 +5,9 @@
 import * as Y from 'yjs'
 import { initForm, preview, thumbnail, readQuestions, FORM, QUESTIONS, QUESTION_DATA } from './model.js'
 import { formTemplates } from './templates.js'
+import { chosenVersions } from '@commonplace/core/container'
 
-// Conflict units: each question (its whole definition), the description
-// and the title.
+// Conflict units: each question (its whole definition) and the description.
 function units (ydoc) {
   const out = new Map()
   for (const q of readQuestions(ydoc)) {
@@ -16,22 +16,17 @@ function units (ydoc) {
   }
   const description = ydoc.getMap(FORM).get('description')
   if (description) out.set('description', { kind: 'description', sig: description, text: description, prev: null })
-  const title = ydoc.getMap('meta').get('title')
-  if (title != null) out.set('title', { kind: 'title', sig: String(title), text: String(title), prev: null })
   return out
 }
 
 const describe = (q) => [q.title || 'Untitled question', ...(q.options || []).map((o) => `  ○ ${o}`)].join('\n')
 const snapshotUnit = (u) => (u?.props ? JSON.stringify(u.props) : null)
 
-// The owner's decision: one version of a question (or the description, or
-// the title). 'both' keeps the first version, followed by a copy of the
+// The owner's decision: one version of a question (or the description). 'both' keeps the first version, followed by a copy of the
 // second as its own question.
 function resolve (ydoc, rec, choice) {
   if (choice === 'current') return
-  const picked = choice === 'both' ? rec.versions : [rec.versions[Number(String(choice).slice(1))]].filter(Boolean)
-  const present = picked.filter((v) => v.exists)
-  if (rec.kind === 'title') { if (present.length) ydoc.getMap('meta').set('title', present.map((v) => v.text).join(' / ')); return }
+  const present = chosenVersions(rec, choice)
   if (rec.kind === 'description') { ydoc.getMap(FORM).set('description', present.map((v) => v.text).join('\n\n')); return }
   const id = rec.unit.slice(2)
   const data = ydoc.getMap(QUESTION_DATA)

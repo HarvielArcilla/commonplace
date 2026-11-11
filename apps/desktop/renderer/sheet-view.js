@@ -17,6 +17,7 @@ import { state } from './state.js'
 import { toolButton, toolbarGroups, setToolbar, press, swatchMenu, TEXT_COLORS, FILL_COLORS } from './toolbar.js'
 import { sortMenu, freezeMenu, filterDialog, hiddenRows, filterNote, formatRulesDialog, checksDialog, pickMenu, summaryDialog, tableRange, usedRange, selRange } from './sheet-tools.js'
 import { drawCharts, insertChart } from './sheet-charts.js'
+import { META } from '@commonplace/core/container'
 
 const CLIP_TYPE = 'application/x-commonplace-cells'
 const FORMATS = [['', 'Automatic'], ['number', 'Number'], ['percent', 'Percent'], ['currency', 'Currency'], ['date', 'Date'], ['text', 'Plain text']]
@@ -39,7 +40,7 @@ export function mountSheet (o) {
       const host = el('div', { class: 'sheet-preview-host' })
       $('#desk').append(host)
       const past = createGrid({ ydoc, host, readonly: true, sheetId: v.sheetId })
-      return { title: ydoc.getMap('meta').get('title') || '', close () { past.destroy(); host.remove(); ydoc.destroy(); v.root.hidden = false } }
+      return { title: ydoc.getMap(META).get('title') || '', close () { past.destroy(); host.remove(); ydoc.destroy(); v.root.hidden = false } }
     },
     comments: sheetComments(v),
     exportPayload: async () => ({ payload: { sheetId: v.sheetId } }),

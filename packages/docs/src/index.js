@@ -36,8 +36,9 @@ function preview (ydoc) {
 }
 
 // Conflict units: each top-level block of the content (paragraph, heading,
-// list, table, image...) plus the title. A block is identified by the CRDT
-// item that created it, so the same paragraph has the same key everywhere.
+// list, table, image...). A block is identified by the CRDT item that
+// created it, so the same paragraph has the same key everywhere. (The title
+// is the envelope's: see core container.js.)
 const plainText = (node) => {
   if (node instanceof Y.XmlText) return node.toDelta().map((d) => (typeof d.insert === 'string' ? d.insert : '')).join('')
   if (node instanceof Y.XmlElement && (node.nodeName === 'inlineMath' || node.nodeName === 'blockMath')) return `$${node.getAttribute('latex') || ''}$`
@@ -65,8 +66,6 @@ function units (ydoc) {
     out.set(key, { kind: 'block', name: el.nodeName, sig: el.toString(), text: plainText(el), prev, index, el })
     prev = key
   })
-  const title = ydoc.getMap('meta').get('title')
-  if (title != null) out.set('title', { kind: 'title', sig: String(title), text: String(title), prev: null })
   return out
 }
 
@@ -75,11 +74,6 @@ function units (ydoc) {
 function resolve (ydoc, rec, choice) {
   if (choice === 'current') return
   const picked = choice === 'both' ? rec.versions : [rec.versions[Number(String(choice).slice(1))]].filter(Boolean)
-  if (rec.kind === 'title') {
-    const v = picked.find((x) => x.exists)
-    if (v) ydoc.getMap('meta').set('title', choice === 'both' ? picked.filter((x) => x.exists).map((x) => x.text).join(' / ') : v.text)
-    return
-  }
   const frag = ydoc.getXmlFragment(CONTENT_FIELD)
   const arr = frag.toArray()
   let at = arr.findIndex((el) => blockKey(el) === rec.unit)
