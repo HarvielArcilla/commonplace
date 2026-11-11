@@ -11,7 +11,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { randomBytes } from 'node:crypto'
 import * as Y from 'yjs'
-import { FileStore, SyncEngine, SwarmTransport, LanTransport, RelayClient, formatRelayAddress, loadOrCreateIdentity, canEdit, newDocSecret, deriveDocKeys, encodeInvite, parseInvite, initContainer, readMeta, updatePerson, History, restoreContent, BlobStore, directory, META, PEOPLE, AUTHORS, isHex64 } from '@commonplace/core'
+import { FileStore, SyncEngine, SwarmTransport, LanTransport, RelayClient, formatRelayAddress, loadOrCreateIdentity, canEdit, newDocSecret, deriveDocKeys, encodeInvite, parseInvite, initContainer, readMeta, updatePerson, History, restoreContent, BlobStore, directory, META, PEOPLE, AUTHORS, isHex64, mixParts } from '@commonplace/core'
 import { Files, filesApp } from './files.js'
 import { Policy } from './policy.js'
 import { Guests } from './guests.js'
@@ -850,13 +850,7 @@ export class Drive extends EventEmitter {
 
 // The Drive's methods are grouped by subject in ./parts. Each part is a class
 // whose methods become the Drive's own, so callers see one object.
-for (const part of [Access, Computers, Conflicts, Folders, Limits, Relays, TeamDrives, VersionHistory]) {
-  for (const name of Object.getOwnPropertyNames(part.prototype)) {
-    if (name === 'constructor') continue
-    if (name in Drive.prototype) throw new Error(`Drive.${name} is defined twice`)
-    Object.defineProperty(Drive.prototype, name, Object.getOwnPropertyDescriptor(part.prototype, name))
-  }
-}
+mixParts(Drive, [Access, Computers, Conflicts, Folders, Limits, Relays, TeamDrives, VersionHistory])
 
 // A stable id for this computer, kept outside the identity so linking or
 // moving a Drive never copies it.

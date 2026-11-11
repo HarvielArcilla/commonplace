@@ -1,5 +1,7 @@
 # Servers and team drives
 
+> **Superseded** by [MODEL.md](MODEL.md): clouds (rosters) and shared drives replace team drives, which were never released. This note stays until the code it describes is removed (see [DEBT.md](DEBT.md)).
+
 How commonplace grows from people syncing with each other to an organization
 running its own always-on server, without accounts and without changing who
 owns what.

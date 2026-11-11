@@ -116,7 +116,7 @@ Use the same Drive on several computers: **Link another computer** in your profi
 
 The tradeoff, chosen on purpose: changes travel only while at least one other person (or computer) that has the file is online. If you'd rather not wait for that, run an always-on relay (below). It's optional and needs nothing but a computer you leave on.
 
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the design and roadmap.
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the design and roadmap, [docs/MODEL.md](docs/MODEL.md) for how clouds, shared drives and shared folders are being built, and [docs/DEBT.md](docs/DEBT.md) for what's known to need cleaning up.
 
 ## Install
 
@@ -206,7 +206,7 @@ npm run server                    # from a clone of this repo, or:
 node packages/server/bin/commonplace-server.js --dir ~/server-data --name "Acme server"
 ```
 
-The first time, it prints a link. Open it in commonplace (**Join with invite**) to become the server's admin, then make team drives from **Settings → Servers and team drives**. The design, and what's not done yet, is in [docs/TEAM-DRIVES.md](docs/TEAM-DRIVES.md).
+The first time, it prints a link. Open it in commonplace (**Join with invite**) to become the server's admin, then make team drives from **Settings → Servers and team drives**. Team drives are being replaced by clouds and shared drives ([docs/MODEL.md](docs/MODEL.md)).
 
 **Your own bootstrap node.** commonplace first finds the network through Hyperswarm's public bootstrap nodes, then remembers the computers it meets and starts from those. A group that would rather not depend on the public nodes can run its own (`npx hyperdht --bootstrap --host <its public IP> --port 49737`) and list it under Settings → Network.
 

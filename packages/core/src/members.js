@@ -51,9 +51,8 @@
 // someone who saved it some other way. That is the contract.
 
 import crypto from 'node:crypto'
-import { signatureStatus } from './devices.js'
+import { Chain } from './chain.js'
 import { sealTo } from './seal.js'
-import { canonical } from './canonical.js'
 import { isHex64 } from './ids.js'
 
 export const ROLES = ['viewer', 'commenter', 'respondent', 'editor', 'manager', 'owner']
@@ -74,15 +73,6 @@ export const AFTER = ['keep', 'hide']
 const cleanUntil = (v) => (Number.isFinite(v) && v > 0 ? Math.floor(v) : null)
 const cleanAfter = (v) => (AFTER.includes(v) ? v : 'keep')
 
-export { canonical }
-
-const unsigned = (entry) => { const { sig, ...rest } = entry; return rest }
-const hashOf = (entry) => crypto.createHash('sha256').update(canonical(entry)).digest('hex')
-const signWith = (identity, body) => identity.sign(`commonplace/members/v1|${canonical(body)}`).toString('base64')
-// 'ok', 'revoked' (signed by a computer since removed) or null.
-const statusOf = (userId, body, sig) => signatureStatus(userId, `commonplace/members/v1|${canonical(body)}`, Buffer.from(String(sig || ''), 'base64'))
-const verifyWith = (userId, body, sig) => statusOf(userId, body, sig) === 'ok'
-
 function emptyState (docId) {
   return {
     docId,
@@ -96,33 +86,6 @@ function emptyState (docId) {
     usedInvites: new Map(), // single-use invite id -> userId it admitted
     legacyLinks: true // pre-membership invite links (no signature) still work
   }
-}
-
-// Replays a log and returns the resulting state, or throws if any entry is
-// invalid. An entry signed by a computer that has since been removed (see
-// devices.js) stands only if an entry after it was signed by a computer
-// still in: someone honest built on it. What a lost computer signed last,
-// that nobody built on, is dropped (see Membership.revalidate).
-export function replay (docId, entries) {
-  const s = emptyState(docId)
-  let prevHash = null
-  let lastGood = -1
-  let lastRevoked = -1
-  entries.forEach((entry, i) => {
-    if (entry.seq !== i) throw new Error(`entry ${i}: wrong sequence number`)
-    if ((entry.prev || null) !== prevHash) throw new Error(`entry ${i}: does not follow the previous entry`)
-    if (entry.doc !== docId) throw new Error(`entry ${i}: belongs to another document`)
-    if (i === 0 ? entry.by !== entry.owner : !maySign(s, entry)) throw new Error(`entry ${i}: not signed by the owner or a manager`)
-    const status = statusOf(entry.by, unsigned(entry), entry.sig)
-    if (!status) throw new Error(`entry ${i}: bad signature`)
-    if (status === 'revoked') lastRevoked = i
-    else lastGood = i
-    apply(s, entry, i)
-    prevHash = hashOf(entry)
-  })
-  if (lastRevoked > lastGood) throw new Error(`entry ${lastRevoked}: signed by a removed computer`)
-  s.head = { seq: entries.length - 1, hash: prevHash }
-  return s
 }
 
 function maySign (s, e) {
@@ -227,19 +190,21 @@ function apply (s, e, i) {
   }
 }
 
-export class Membership {
+// A file's membership log, as a kind of chain (chain.js).
+const MEMBERS = {
+  prefix: 'commonplace/members/v1',
+  empty: emptyState,
+  maySign: (s, e, i) => (i === 0 ? e.type === 'create' && e.by === e.owner : maySign(s, e)),
+  apply
+}
+
+export class Membership extends Chain {
   constructor (docId, entries = []) {
-    this.docId = docId
-    this.entries = []
-    this.state = emptyState(docId)
-    this.state.head = { seq: -1, hash: null }
-    if (entries.length) this.merge(entries)
+    super(MEMBERS, docId, entries)
   }
 
-  get exists () { return this.entries.length > 0 }
   get owner () { return this.state.owner }
   get epoch () { return this.state.epoch }
-  get head () { return this.state.head }
   get acceptsLegacyLinks () { return this.state.legacyLinks }
   // { to, drive } while the owner's handover stands, else null.
   get handover () { return this.state.handover || null }
@@ -250,35 +215,8 @@ export class Membership {
   // everyone who was already working on it.
   static create (identity, docId, { members = [] } = {}) {
     const m = new Membership(docId)
-    const body = { seq: 0, prev: null, doc: docId, type: 'create', by: identity.userId, owner: identity.userId, ownerEnc: identity.encPublic, at: Date.now(), members, legacy: false }
-    m.entries = [{ ...body, sig: signWith(identity, body) }]
-    m.state = replay(docId, m.entries)
+    m.start(identity, { type: 'create', owner: identity.userId, ownerEnc: identity.encPublic, members, legacy: false })
     return m
-  }
-
-  // Adopts another copy of the log if it is valid and newer. Returns true if
-  // anything changed. Only the owner writes, so copies normally just extend
-  // each other. If the owner signed two different entries at the same
-  // position (from two of their computers at once), every peer keeps the
-  // branch with the smaller hash; the entries this copy loses are left in
-  // `dropped` so the owner's computer can make those changes again.
-  merge (entries) {
-    this.dropped = []
-    if (!Array.isArray(entries) || !entries.length) return false
-    let next
-    try { next = replay(this.docId, entries) } catch { return false }
-    const mine = this.entries
-    let i = 0
-    while (i < mine.length && i < entries.length && hashOf(mine[i]) === hashOf(entries[i])) i++
-    if (i === entries.length) return false // nothing new
-    if (i < mine.length) {
-      // A fork: keep the branch whose first differing entry hashes lower.
-      if (hashOf(entries[i]) > hashOf(mine[i])) return false
-      this.dropped = mine.slice(i)
-    }
-    this.entries = entries.map((e) => ({ ...e }))
-    this.state = next
-    return true
   }
 
   // Whether this person may change who has access (owner or manager).
@@ -286,36 +224,10 @@ export class Membership {
     return canManage(this.member(userId)?.role) && !this.hasEnded(userId)
   }
 
-  // After learning that a computer was removed: drop what it signed at the
-  // end of the log that nobody built on. True if anything was dropped.
-  revalidate () {
-    try { this.state = replay(this.docId, this.entries); return false } catch {}
-    for (let n = this.entries.length - 1; n > 0; n--) {
-      try {
-        const state = replay(this.docId, this.entries.slice(0, n))
-        this.entries = this.entries.slice(0, n)
-        this.state = state
-        return true
-      } catch {}
-    }
-    return false
-  }
-
-  // People whose changes this log carries, so their lists of computers can
-  // travel with it.
-  signers () {
-    return [...new Set(this.entries.map((e) => e.by))]
-  }
-
   // Appends an entry signed by the owner or a manager.
   append (identity, body) {
     if (!this.mayManage(identity.userId)) throw new Error('Only the owner and people who can share can change who has access.')
-    const full = { ...body, seq: this.entries.length, prev: this.state.head.hash, doc: this.docId, by: identity.userId, at: Date.now() }
-    const entry = { ...full, sig: signWith(identity, full) }
-    const next = replay(this.docId, [...this.entries, entry])
-    this.entries.push(entry)
-    this.state = next
-    return entry
+    return super.append(identity, body)
   }
 
   member (userId) {
@@ -377,7 +289,7 @@ export class Membership {
     const { sig, ...body } = token
     if (body.d !== this.docId || !GIVEN_ROLES.includes(body.r)) return 'invalid'
     const signer = this.state.owners.has(body.by) || (this.member(body.by)?.role === 'manager' && body.r !== 'manager')
-    if (!signer || !verifyWith(body.by, body, sig)) return 'invalid'
+    if (!signer || !this.verify(body.by, body, sig)) return 'invalid'
     if (!(body.q >= this.state.invitesValidFrom)) return 'revoked'
     if (body.x != null && !(now < body.x)) return 'expired'
     if (body.u != null && !(now < body.u)) return 'expired' // the access it gives has ended
@@ -417,7 +329,7 @@ export class Membership {
       a: (until || guest) && after === 'hide' ? 'hide' : undefined,
       g: guest ? 1 : undefined
     }
-    return { ...body, sig: signWith(identity, body) }
+    return { ...body, sig: this.sign(identity, body) }
   }
 
   // ---- owner actions (each returns the entries appended) -----------------

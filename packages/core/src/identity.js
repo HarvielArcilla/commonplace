@@ -33,7 +33,8 @@ function publicKeyHex (keyObject) {
   return keyObject.export({ type: 'spki', format: 'der' }).subarray(-32).toString('hex')
 }
 
-function newSigningKey () {
+// A new Ed25519 key: { id (public, hex), privateKey (PKCS#8, base64) }.
+export function newSigningKey () {
   const { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519')
   return { id: publicKeyHex(publicKey), privateKey: privateKey.export({ type: 'pkcs8', format: 'der' }).toString('base64') }
 }
@@ -46,6 +47,10 @@ export function newDeviceKeys () {
 }
 
 const signRaw = (privateKeyB64, data) => crypto.sign(null, Buffer.from(data), crypto.createPrivateKey({ key: Buffer.from(privateKeyB64, 'base64'), format: 'der', type: 'pkcs8' }))
+
+// Something that signs as a bare key (a cloud's key, see roster.js), shaped
+// like an identity for the chains: { userId, sign(data) }.
+export const keySigner = (key) => ({ userId: key.id, sign: (data) => signRaw(key.privateKey, data) })
 const indexSecretFrom = (secretB64, n = 0) => crypto.createHash('sha256').update(n ? `commonplace/v1/drive-index/${n}` : 'commonplace/v1/drive-index').update(Buffer.from(secretB64, 'base64')).digest()
 
 function newIdentityRecord () {
